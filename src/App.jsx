@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 
-// --- Helper Icon Components (for a clean look without image files) ---
+// --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
 const UserIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>);
 const BriefcaseIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>);
@@ -11,14 +11,108 @@ const LogOutIcon = ({ className }) => (<svg className={className} xmlns="http://
 const SendIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>);
 const CalendarIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>);
 const PlusIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>);
+const XIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>);
+
+// --- Reusable Modal Component ---
+const Modal = ({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 transition-opacity duration-300">
+            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg m-4 transform transition-all duration-300 scale-95 opacity-0 animate-fade-in-scale">
+                <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                    <h3 className="text-2xl font-semibold text-white">{title}</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+                        <XIcon className="h-7 w-7" />
+                    </button>
+                </div>
+                <div className="p-6">
+                    {children}
+                </div>
+            </div>
+            <style jsx>{`
+              @keyframes fadeInScale {
+                from { opacity: 0; transform: scale(0.95); }
+                to { opacity: 1; transform: scale(1); }
+              }
+              .animate-fade-in-scale { animation: fadeInScale 0.3s forwards cubic-bezier(0.16, 1, 0.3, 1); }
+            `}</style>
+        </div>
+    );
+};
+
+// --- Add New Staff Form Component ---
+const AddStaffForm = ({ db, onClose }) => {
+    const [fullName, setFullName] = useState('');
+    const [position, setPosition] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!fullName || !position || !startDate) {
+            setError('Please fill out all fields.');
+            return;
+        }
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffCollectionRef = collection(db, 'staff_profiles');
+            await addDoc(staffCollectionRef, {
+                fullName,
+                position,
+                startDate,
+                createdAt: serverTimestamp(),
+            });
+            onClose(); // Close the modal on success
+        } catch (err) {
+            console.error("Error adding document: ", err);
+            setError('Failed to save staff member. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+                <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
+                <input type="text" id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <div>
+                <label htmlFor="position" className="block text-sm font-medium text-gray-300 mb-1">Position</label>
+                <input type="text" id="position" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <div>
+                <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
+                <input type="date" id="startDate" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+            <div className="flex justify-end pt-4 space-x-4">
+                <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
+                <button type="submit" disabled={isSaving} className="px-6 py-2 rounded-lg text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:bg-amber-800 disabled:cursor-not-allowed">
+                    {isSaving ? 'Saving...' : 'Save'}
+                </button>
+            </div>
+        </form>
+    );
+};
+
 
 // --- Staff Management Page Component ---
-const StaffManagementPage = ({ staffList }) => {
+const StaffManagementPage = ({ db, staffList }) => {
+    const [isModalOpen, setIsModalOpen] = useState(false);
+
     return (
         <div>
+            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add New Staff Member">
+                <AddStaffForm db={db} onClose={() => setIsModalOpen(false)} />
+            </Modal>
+
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-3xl font-bold text-white">Staff Management</h2>
-                <button className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                <button onClick={() => setIsModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                     <PlusIcon className="h-5 w-5 mr-2" />
                     Add New Staff
                 </button>
@@ -64,7 +158,6 @@ const StaffManagementPage = ({ staffList }) => {
 
 // --- Main Application Component ---
 export default function App() {
-    // --- State Management ---
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
     const [user, setUser] = useState(null);
@@ -76,30 +169,20 @@ export default function App() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
 
-    // --- Step 1: Initialize Firebase ---
     useEffect(() => {
         try {
-            // ** UPDATED: Read config from Vercel Environment Variables **
             const firebaseConfig = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG);
-            
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             const dbInstance = getFirestore(app);
-            
             setAuth(authInstance);
             setDb(dbInstance);
 
             const unsubscribe = onAuthStateChanged(authInstance, async (currentUser) => {
-                setIsLoading(true);
                 if (currentUser) {
                     const userDocRef = doc(dbInstance, 'users', currentUser.uid);
                     const userDocSnap = await getDoc(userDocRef);
-                    if (userDocSnap.exists()) {
-                        setUserRole(userDocSnap.data().role);
-                    } else {
-                        console.error("User document not found in Firestore for UID:", currentUser.uid);
-                        setUserRole(null); 
-                    }
+                    setUserRole(userDocSnap.exists() ? userDocSnap.data().role : null);
                     setUser(currentUser);
                 } else {
                     setUser(null);
@@ -107,7 +190,6 @@ export default function App() {
                 }
                 setIsLoading(false);
             });
-
             return () => unsubscribe();
         } catch (error) {
             console.error("Firebase Initialization Error:", error);
@@ -115,28 +197,19 @@ export default function App() {
         }
     }, []);
 
-    // --- Step 2: Fetch Staff List for Manager ---
     useEffect(() => {
         if (userRole === 'manager' && db) {
             const staffCollectionRef = collection(db, 'staff_profiles');
-            
             const unsubscribe = onSnapshot(staffCollectionRef, (querySnapshot) => {
-                const list = [];
-                querySnapshot.forEach((doc) => {
-                    list.push({ id: doc.id, ...doc.data() });
-                });
+                const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 setStaffList(list);
-            }, (error) => {
-                console.error("Error fetching staff list:", error);
-            });
-
+            }, (error) => console.error("Error fetching staff list:", error));
             return () => unsubscribe();
         } else {
             setStaffList([]);
         }
     }, [userRole, db]);
 
-    // --- Login and Logout Functions ---
     const handleLogin = async (e) => {
         e.preventDefault();
         setLoginError('');
@@ -144,7 +217,6 @@ export default function App() {
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (error) {
-            console.error("Login Failed:", error.message);
             setLoginError('Invalid email or password. Please try again.');
         }
     };
@@ -155,13 +227,8 @@ export default function App() {
         setCurrentPage('dashboard');
     };
     
-    // --- Conditional Rendering Logic ---
     if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
-                <div className="text-xl">Loading Da Moreno HR Portal...</div>
-            </div>
-        );
+        return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>;
     }
 
     if (!user) {
@@ -194,19 +261,13 @@ export default function App() {
         );
     }
     
-    // --- If user IS logged in, show the Dashboard ---
     const renderPageContent = () => {
         switch(currentPage) {
-            case 'dashboard':
-                return <h2 className="text-3xl font-bold text-white">Welcome, {user.displayName || user.email}!</h2>;
-            case 'staff':
-                return <StaffManagementPage staffList={staffList} />;
-            case 'planning':
-                 return <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>;
-            case 'leave':
-                return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
-            default:
-                return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
+            case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
+            case 'staff': return <StaffManagementPage db={db} staffList={staffList} />;
+            case 'planning': return <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>;
+            case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
+            default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
     }
 
