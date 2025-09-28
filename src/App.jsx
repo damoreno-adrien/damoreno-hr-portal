@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 // --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
@@ -41,34 +41,55 @@ const Modal = ({ isOpen, onClose, title, children }) => {
     );
 };
 
-// --- Add New Staff Form Component ---
+// --- Add New Staff Form Component (UPGRADED) ---
 const AddStaffForm = ({ db, onClose }) => {
     const [fullName, setFullName] = useState('');
     const [position, setPosition] = useState('');
     const [startDate, setStartDate] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!fullName || !position || !startDate) {
+        if (!fullName || !position || !startDate || !email || !password) {
             setError('Please fill out all fields.');
+            return;
+        }
+        if (password.length < 6) {
+            setError('Password must be at least 6 characters long.');
             return;
         }
         setIsSaving(true);
         setError('');
+        setSuccess('');
+
         try {
-            const staffCollectionRef = collection(db, 'staff_profiles');
-            await addDoc(staffCollectionRef, {
-                fullName,
-                position,
-                startDate,
-                createdAt: serverTimestamp(),
-            });
-            onClose(); // Close the modal on success
+            // NOTE: In the next step, we will replace this with a call to our secure Cloud Function.
+            // For now, this placeholder shows the data we are collecting.
+            console.log("Preparing to create user with:", { fullName, position, startDate, email });
+            
+            // This is a temporary placeholder to simulate the process.
+            // In the final version, the Cloud Function will handle all of this.
+            alert("This is a placeholder. User creation via Cloud Function will be implemented next.");
+
+
+            // --- This is what our Cloud Function will do ---
+            // 1. Create user in Firebase Auth
+            // 2. Create user role in 'users' collection
+            // 3. Create staff profile in 'staff_profiles' collection
+            // --------------------------------------------------
+
+            setSuccess(`User for ${email} will be created in the next step!`);
+            
+            // We will call onClose() once the real function is built
+            // onClose(); 
+
         } catch (err) {
-            console.error("Error adding document: ", err);
-            setError('Failed to save staff member. Please try again.');
+            console.error("Error preparing user creation: ", err);
+            setError('An unexpected error occurred. See console for details.');
         } finally {
             setIsSaving(false);
         }
@@ -76,23 +97,39 @@ const AddStaffForm = ({ db, onClose }) => {
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-                <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
-                <input type="text" id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div>
+                    <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
+                    <input type="text" id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                </div>
+                 <div>
+                    <label htmlFor="position" className="block text-sm font-medium text-gray-300 mb-1">Position</label>
+                    <input type="text" id="position" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                </div>
             </div>
-            <div>
-                <label htmlFor="position" className="block text-sm font-medium text-gray-300 mb-1">Position</label>
-                <input type="text" id="position" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
-            </div>
-            <div>
+             <div>
                 <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                 <input type="date" id="startDate" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
             </div>
+            <div className="border-t border-gray-700 pt-6">
+                 <p className="text-sm text-gray-400 mb-4">Create Login Credentials for the Staff Member:</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+                        <input type="email" id="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                    </div>
+                    <div>
+                        <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">Temporary Password</label>
+                        <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                    </div>
+                 </div>
+            </div>
             {error && <p className="text-red-400 text-sm">{error}</p>}
+            {success && <p className="text-green-400 text-sm">{success}</p>}
             <div className="flex justify-end pt-4 space-x-4">
                 <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
                 <button type="submit" disabled={isSaving} className="px-6 py-2 rounded-lg text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:bg-amber-800 disabled:cursor-not-allowed">
-                    {isSaving ? 'Saving...' : 'Save'}
+                    {isSaving ? 'Creating...' : 'Create Staff'}
                 </button>
             </div>
         </form>
@@ -106,7 +143,7 @@ const StaffManagementPage = ({ db, staffList }) => {
 
     return (
         <div>
-            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add New Staff Member">
+            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Invite New Staff Member">
                 <AddStaffForm db={db} onClose={() => setIsModalOpen(false)} />
             </Modal>
 
@@ -114,7 +151,7 @@ const StaffManagementPage = ({ db, staffList }) => {
                 <h2 className="text-3xl font-bold text-white">Staff Management</h2>
                 <button onClick={() => setIsModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                     <PlusIcon className="h-5 w-5 mr-2" />
-                    Add New Staff
+                    Invite New Staff
                 </button>
             </div>
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
@@ -130,7 +167,7 @@ const StaffManagementPage = ({ db, staffList }) => {
                     <tbody className="divide-y divide-gray-700">
                         {staffList.length > 0 ? (
                             staffList.map(staff => (
-                                <tr key={staff.id} className="hover:bg-gray-700 transition-colors">
+                                <tr key={staff.id} className="hover:bg-gray-700 transition-colors cursor-pointer">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{staff.fullName}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.position}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.startDate}</td>
@@ -144,7 +181,7 @@ const StaffManagementPage = ({ db, staffList }) => {
                         ) : (
                             <tr>
                                 <td colSpan="4" className="text-center py-10 text-gray-400">
-                                    No staff members found. Click 'Add New Staff' to get started.
+                                    No staff members found. Click 'Invite New Staff' to get started.
                                 </td>
                             </tr>
                         )}
