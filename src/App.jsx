@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 // --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
@@ -41,8 +42,8 @@ const Modal = ({ isOpen, onClose, title, children }) => {
     );
 };
 
-// --- Add New Staff Form Component (UPGRADED) ---
-const AddStaffForm = ({ db, onClose }) => {
+// --- Add New Staff Form Component (FINAL VERSION) ---
+const AddStaffForm = ({ functions, onClose }) => {
     const [fullName, setFullName] = useState('');
     const [position, setPosition] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -67,29 +68,36 @@ const AddStaffForm = ({ db, onClose }) => {
         setSuccess('');
 
         try {
-            // NOTE: In the next step, we will replace this with a call to our secure Cloud Function.
-            // For now, this placeholder shows the data we are collecting.
-            console.log("Preparing to create user with:", { fullName, position, startDate, email });
+            // Get a reference to the createUser Cloud Function
+            const createUser = httpsCallable(functions, 'createUser');
             
-            // This is a temporary placeholder to simulate the process.
-            // In the final version, the Cloud Function will handle all of this.
-            alert("This is a placeholder. User creation via Cloud Function will be implemented next.");
+            // Send the data to the function
+            const result = await createUser({
+                email,
+                password,
+                fullName,
+                position,
+                startDate,
+            });
 
+            console.log(result.data.result);
+            setSuccess(`Successfully created user for ${email}! You can now close this window.`);
 
-            // --- This is what our Cloud Function will do ---
-            // 1. Create user in Firebase Auth
-            // 2. Create user role in 'users' collection
-            // 3. Create staff profile in 'staff_profiles' collection
-            // --------------------------------------------------
-
-            setSuccess(`User for ${email} will be created in the next step!`);
-            
-            // We will call onClose() once the real function is built
-            // onClose(); 
+            // Clear the form for the next entry after a short delay
+            setTimeout(() => {
+                setFullName('');
+                setPosition('');
+                setStartDate('');
+                setEmail('');
+                setPassword('');
+                setSuccess('');
+                onClose();
+            }, 2000);
 
         } catch (err) {
-            console.error("Error preparing user creation: ", err);
-            setError('An unexpected error occurred. See console for details.');
+            console.error("Error creating user:", err);
+            // Display a user-friendly error message from the function
+            setError(err.message || 'An unexpected error occurred.');
         } finally {
             setIsSaving(false);
         }
@@ -124,8 +132,8 @@ const AddStaffForm = ({ db, onClose }) => {
                     </div>
                  </div>
             </div>
-            {error && <p className="text-red-400 text-sm">{error}</p>}
-            {success && <p className="text-green-400 text-sm">{success}</p>}
+            {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
+            {success && <p className="text-green-400 text-sm text-center mt-2">{success}</p>}
             <div className="flex justify-end pt-4 space-x-4">
                 <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
                 <button type="submit" disabled={isSaving} className="px-6 py-2 rounded-lg text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:bg-amber-800 disabled:cursor-not-allowed">
@@ -138,13 +146,13 @@ const AddStaffForm = ({ db, onClose }) => {
 
 
 // --- Staff Management Page Component ---
-const StaffManagementPage = ({ db, staffList }) => {
+const StaffManagementPage = ({ functions, staffList }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Invite New Staff Member">
-                <AddStaffForm db={db} onClose={() => setIsModalOpen(false)} />
+                <AddStaffForm functions={functions} onClose={() => setIsModalOpen(false)} />
             </Modal>
 
             <div className="flex justify-between items-center mb-8">
@@ -197,6 +205,7 @@ const StaffManagementPage = ({ db, staffList }) => {
 export default function App() {
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
+    const [functions, setFunctions] = useState(null); // <-- Add state for functions
     const [user, setUser] = useState(null);
     const [userRole, setUserRole] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -212,8 +221,11 @@ export default function App() {
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             const dbInstance = getFirestore(app);
+            const functionsInstance = getFunctions(app); // <-- Initialize Functions
+
             setAuth(authInstance);
             setDb(dbInstance);
+            setFunctions(functionsInstance); // <-- Save Functions instance
 
             const unsubscribe = onAuthStateChanged(authInstance, async (currentUser) => {
                 if (currentUser) {
@@ -301,7 +313,7 @@ export default function App() {
     const renderPageContent = () => {
         switch(currentPage) {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
-            case 'staff': return <StaffManagementPage db={db} staffList={staffList} />;
+            case 'staff': return <StaffManagementPage functions={functions} staffList={staffList} />;
             case 'planning': return <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>;
             case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
