@@ -62,7 +62,6 @@ exports.createUser = functions.https.onRequest((req, res) => {
       };
 
       // Create the detailed profile with the new jobHistory array
-      // NOTE: We are using add() which creates a random document ID
       await db.collection("staff_profiles").add({
         uid: newUserId,
         fullName: fullName,
@@ -82,3 +81,4 @@ exports.createUser = functions.https.onRequest((req, res) => {
     }
   });
 });
+
