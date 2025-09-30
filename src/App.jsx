@@ -68,14 +68,8 @@ const AddStaffForm = ({ auth, onClose }) => {
         setSuccess('');
 
         try {
-            // **IMPORTANT**: PASTE YOUR CLOUD FUNCTION URL HERE
+            // Your Cloud Function URL is now set!
             const functionUrl = "https://createuser-3hzcubx72q-uc.a.run.app";
-
-            if (functionUrl === "https://createuser-3hzcubx72q-uc.a.run.app") {
-                setError("Configuration error: Cloud Function URL is not set.");
-                setIsSaving(false);
-                return;
-            }
 
             // Get the current user's authentication token to prove they are logged in
             const token = await auth.currentUser.getIdToken();
