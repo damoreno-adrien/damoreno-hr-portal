@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-// Note: We no longer need getFunctions or httpsCallable from the client
 
 // --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
@@ -13,6 +12,8 @@ const SendIcon = ({ className }) => (<svg className={className} xmlns="http://ww
 const CalendarIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>);
 const PlusIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>);
 const XIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>);
+const ChevronLeftIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>);
+const ChevronRightIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>);
 
 // --- Reusable Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -135,7 +136,7 @@ const AddStaffForm = ({ auth, onClose }) => {
     );
 };
 
-// --- NEW: Staff Profile View/Edit Component ---
+// --- Staff Profile View/Edit Component ---
 const StaffProfileModal = ({ staff, db, onClose }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [formData, setFormData] = useState({ ...staff });
@@ -167,7 +168,6 @@ const StaffProfileModal = ({ staff, db, onClose }) => {
         }
     };
     
-    // Simple component for displaying a piece of information
     const InfoRow = ({ label, value }) => (
         <div>
             <p className="text-sm text-gray-400">{label}</p>
@@ -178,7 +178,6 @@ const StaffProfileModal = ({ staff, db, onClose }) => {
     return (
         <div className="space-y-6">
             {isEditing ? (
-                // --- EDIT MODE ---
                 <div className="space-y-4">
                     <div>
                         <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
@@ -198,7 +197,6 @@ const StaffProfileModal = ({ staff, db, onClose }) => {
                     </div>
                 </div>
             ) : (
-                // --- VIEW MODE ---
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                    <InfoRow label="Full Name" value={staff.fullName} />
                    <InfoRow label="Position" value={staff.position} />
@@ -228,28 +226,20 @@ const StaffProfileModal = ({ staff, db, onClose }) => {
     );
 };
 
-
 // --- Staff Management Page Component ---
 const StaffManagementPage = ({ auth, db, staffList }) => {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [selectedStaff, setSelectedStaff] = useState(null); // To hold the staff member being viewed/edited
+    const [selectedStaff, setSelectedStaff] = useState(null);
 
-    const handleViewStaff = (staff) => {
-        setSelectedStaff(staff);
-    };
-
-    const closeProfileModal = () => {
-        setSelectedStaff(null);
-    };
+    const handleViewStaff = (staff) => setSelectedStaff(staff);
+    const closeProfileModal = () => setSelectedStaff(null);
 
     return (
         <div>
-            {/* Modal for Adding Staff */}
             <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
                 <AddStaffForm auth={auth} onClose={() => setIsAddModalOpen(false)} />
             </Modal>
             
-            {/* Modal for Viewing/Editing Staff */}
             {selectedStaff && (
                  <Modal isOpen={true} onClose={closeProfileModal} title="Staff Profile">
                     <StaffProfileModal staff={selectedStaff} db={db} onClose={closeProfileModal} />
@@ -290,7 +280,7 @@ const StaffManagementPage = ({ auth, db, staffList }) => {
                         ) : (
                             <tr>
                                 <td colSpan="4" className="text-center py-10 text-gray-400">
-                                    No staff members found. Click 'Invite New Staff' to get started.
+                                    No staff members found.
                                 </td>
                             </tr>
                         )}
@@ -301,6 +291,84 @@ const StaffManagementPage = ({ auth, db, staffList }) => {
     );
 };
 
+// --- Planning Page Component ---
+const PlanningPage = ({ staffList }) => {
+    const [currentDate, setCurrentDate] = useState(new Date());
+
+    const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    const changeMonth = (offset) => {
+        setCurrentDate(prevDate => {
+            const newDate = new Date(prevDate);
+            newDate.setMonth(newDate.getMonth() + offset);
+            return newDate;
+        });
+    };
+
+    const generateCalendarGrid = () => {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const firstDayOfMonth = new Date(year, month, 1);
+        const lastDayOfMonth = new Date(year, month + 1, 0);
+        const daysInMonth = lastDayOfMonth.getDate();
+        
+        let startDayIndex = firstDayOfMonth.getDay() - 1;
+        if (startDayIndex === -1) startDayIndex = 6;
+
+        const grid = [];
+
+        for (let i = 0; i < startDayIndex; i++) {
+            grid.push({ key: `empty-${i}`, empty: true });
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(year, month, day);
+            const isMonday = date.getDay() === 1;
+            const scheduledStaff = isMonday ? [] : staffList.map(s => s.fullName);
+            grid.push({ key: `day-${day}`, day, scheduledStaff });
+        }
+        return grid;
+    };
+
+    const calendarGrid = generateCalendarGrid();
+
+    return (
+        <div>
+            <div className="flex justify-between items-center mb-8">
+                <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>
+                <div className="flex items-center space-x-4">
+                    <button onClick={() => changeMonth(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors">
+                        <ChevronLeftIcon className="h-6 w-6" />
+                    </button>
+                    <h3 className="text-2xl font-semibold w-48 text-center">{monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}</h3>
+                    <button onClick={() => changeMonth(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors">
+                        <ChevronRightIcon className="h-6 w-6" />
+                    </button>
+                </div>
+            </div>
+            <div className="grid grid-cols-7 gap-px bg-gray-700 border border-gray-700 rounded-lg overflow-hidden">
+                {daysOfWeek.map(day => (
+                    <div key={day} className="text-center py-3 bg-gray-800 text-xs font-bold text-gray-400 uppercase">{day}</div>
+                ))}
+                {calendarGrid.map(cell => (
+                    cell.empty ? (<div key={cell.key} className="bg-gray-900"></div>) : (
+                        <div key={cell.key} className="relative bg-gray-800 p-2 min-h-[120px]">
+                            <div className="text-right text-sm font-bold text-white">{cell.day}</div>
+                            <div className="mt-1">
+                                {cell.scheduledStaff.map((name, index) => (
+                                    <div key={index} className="text-xs bg-amber-600 text-white rounded px-1 py-0.5 mb-1 truncate">
+                                        {name}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )
+                ))}
+            </div>
+        </div>
+    );
+};
 
 // --- Main Application Component ---
 export default function App() {
@@ -412,7 +480,7 @@ export default function App() {
         switch(currentPage) {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} />;
-            case 'planning': return <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>;
+            case 'planning': return <PlanningPage staffList={staffList} />;
             case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
