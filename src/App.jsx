@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 // Note: We no longer need getFunctions or httpsCallable from the client
 
 // --- Helper Icon Components ---
@@ -27,7 +27,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
                         <XIcon className="h-7 w-7" />
                     </button>
                 </div>
-                <div className="p-6">
+                <div className="p-6 overflow-y-auto max-h-[80vh]">
                     {children}
                 </div>
             </div>
@@ -42,7 +42,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
     );
 };
 
-// --- Add New Staff Form Component (FINAL VERSION) ---
+// --- Add New Staff Form Component ---
 const AddStaffForm = ({ auth, onClose }) => {
     const [fullName, setFullName] = useState('');
     const [position, setPosition] = useState('');
@@ -68,10 +68,7 @@ const AddStaffForm = ({ auth, onClose }) => {
         setSuccess('');
 
         try {
-            // Your Cloud Function URL is now set!
             const functionUrl = "https://createuser-3hzcubx72q-uc.a.run.app";
-
-            // Get the current user's authentication token to prove they are logged in
             const token = await auth.currentUser.getIdToken();
 
             const response = await fetch(functionUrl, {
@@ -80,27 +77,14 @@ const AddStaffForm = ({ auth, onClose }) => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({
-                    email,
-                    password,
-                    fullName,
-                    position,
-                    startDate,
-                }),
+                body: JSON.stringify({ email, password, fullName, position, startDate }),
             });
             
             const responseData = await response.json();
-
-            if (!response.ok) {
-                // If the server response is not successful, throw an error with the message
-                throw new Error(responseData.error || 'Something went wrong');
-            }
+            if (!response.ok) throw new Error(responseData.error || 'Something went wrong');
             
             setSuccess(`Successfully created user for ${email}!`);
-
-            setTimeout(() => {
-                onClose();
-            }, 2000);
+            setTimeout(() => onClose(), 2000);
 
         } catch (err) {
             console.error("Error creating user:", err);
@@ -112,7 +96,7 @@ const AddStaffForm = ({ auth, onClose }) => {
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <div>
                     <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
                     <input type="text" id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
@@ -151,20 +135,130 @@ const AddStaffForm = ({ auth, onClose }) => {
     );
 };
 
+// --- NEW: Staff Profile View/Edit Component ---
+const StaffProfileModal = ({ staff, db, onClose }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [formData, setFormData] = useState({ ...staff });
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleInputChange = (e) => {
+        const { id, value } = e.target;
+        setFormData(prev => ({ ...prev, [id]: value }));
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            await updateDoc(staffDocRef, {
+                fullName: formData.fullName,
+                position: formData.position,
+                startDate: formData.startDate,
+                email: formData.email,
+            });
+            setIsEditing(false);
+        } catch (err) {
+            console.error("Error updating document:", err);
+            setError("Failed to save changes. Please try again.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    // Simple component for displaying a piece of information
+    const InfoRow = ({ label, value }) => (
+        <div>
+            <p className="text-sm text-gray-400">{label}</p>
+            <p className="text-white text-lg">{value || '-'}</p>
+        </div>
+    );
+
+    return (
+        <div className="space-y-6">
+            {isEditing ? (
+                // --- EDIT MODE ---
+                <div className="space-y-4">
+                    <div>
+                        <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
+                        <input type="text" id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                    </div>
+                     <div>
+                        <label htmlFor="position" className="block text-sm font-medium text-gray-300 mb-1">Position</label>
+                        <input type="text" id="position" value={formData.position} onChange={handleInputChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                    </div>
+                     <div>
+                        <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">Email</label>
+                        <input type="email" id="email" value={formData.email} onChange={handleInputChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                    </div>
+                     <div>
+                        <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
+                        <input type="date" id="startDate" value={formData.startDate} onChange={handleInputChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                    </div>
+                </div>
+            ) : (
+                // --- VIEW MODE ---
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <InfoRow label="Full Name" value={staff.fullName} />
+                   <InfoRow label="Position" value={staff.position} />
+                   <InfoRow label="Email Address" value={staff.email} />
+                   <InfoRow label="Start Date" value={staff.startDate} />
+                </div>
+            )}
+            
+            {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
+
+            <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
+                {isEditing ? (
+                    <>
+                        <button onClick={() => setIsEditing(false)} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500 transition-colors">Cancel</button>
+                        <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:bg-amber-800">
+                            {isSaving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <button onClick={onClose} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500 transition-colors">Close</button>
+                        <button onClick={() => setIsEditing(true)} className="px-6 py-2 rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-colors">Edit</button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 
 // --- Staff Management Page Component ---
-const StaffManagementPage = ({ auth, staffList }) => {
-    const [isModalOpen, setIsModalOpen] = useState(false);
+const StaffManagementPage = ({ auth, db, staffList }) => {
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [selectedStaff, setSelectedStaff] = useState(null); // To hold the staff member being viewed/edited
+
+    const handleViewStaff = (staff) => {
+        setSelectedStaff(staff);
+    };
+
+    const closeProfileModal = () => {
+        setSelectedStaff(null);
+    };
 
     return (
         <div>
-            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Invite New Staff Member">
-                <AddStaffForm auth={auth} onClose={() => setIsModalOpen(false)} />
+            {/* Modal for Adding Staff */}
+            <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
+                <AddStaffForm auth={auth} onClose={() => setIsAddModalOpen(false)} />
             </Modal>
+            
+            {/* Modal for Viewing/Editing Staff */}
+            {selectedStaff && (
+                 <Modal isOpen={true} onClose={closeProfileModal} title="Staff Profile">
+                    <StaffProfileModal staff={selectedStaff} db={db} onClose={closeProfileModal} />
+                </Modal>
+            )}
 
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-3xl font-bold text-white">Staff Management</h2>
-                <button onClick={() => setIsModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                <button onClick={() => setIsAddModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                     <PlusIcon className="h-5 w-5 mr-2" />
                     Invite New Staff
                 </button>
@@ -182,7 +276,7 @@ const StaffManagementPage = ({ auth, staffList }) => {
                     <tbody className="divide-y divide-gray-700">
                         {staffList.length > 0 ? (
                             staffList.map(staff => (
-                                <tr key={staff.id} className="hover:bg-gray-700 transition-colors cursor-pointer">
+                                <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 transition-colors cursor-pointer">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{staff.fullName}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.position}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.startDate}</td>
@@ -317,7 +411,7 @@ export default function App() {
     const renderPageContent = () => {
         switch(currentPage) {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
-            case 'staff': return <StaffManagementPage auth={auth} staffList={staffList} />;
+            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} />;
             case 'planning': return <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>;
             case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
@@ -343,7 +437,7 @@ export default function App() {
                         <>
                            <NavLink page="dashboard" label="Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
                            <NavLink page="staff" label="Manage Staff" icon={<BriefcaseIcon className="h-5 w-5"/>} />
-                           <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-f"/>} />
+                           <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5"/>} />
                            <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} />
                         </>
                     )}
