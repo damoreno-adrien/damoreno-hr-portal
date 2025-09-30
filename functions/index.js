@@ -7,12 +7,10 @@ admin.initializeApp();
 exports.createUser = functions.https.onRequest((req, res) => {
   // Use the cors middleware to handle the preflight request and set headers.
   cors(req, res, async () => {
-    // We only allow POST requests for this function.
     if (req.method !== "POST") {
-      return res.status(405).send("Method Not Allowed");
+      return res.status(405).send({ error: "Method Not Allowed" });
     }
 
-    // 1. Authentication Check: Get the token from the request header.
     const idToken = req.headers.authorization?.split("Bearer ")[1];
     if (!idToken) {
       return res.status(401).send({ error: "Unauthorized" });
@@ -30,7 +28,6 @@ exports.createUser = functions.https.onRequest((req, res) => {
     const db = admin.firestore();
     const userDocRef = db.collection("users").doc(callerUid);
 
-    // 2. Role Check: Ensure the user is a manager.
     try {
       const userDoc = await userDocRef.get();
       if (!userDoc.exists || userDoc.data().role !== "manager") {
@@ -41,13 +38,11 @@ exports.createUser = functions.https.onRequest((req, res) => {
       return res.status(500).send({ error: "Internal server error." });
     }
 
-    // 3. Data Validation
-    const { email, password, fullName, position, startDate } = req.body;
-    if (!email || !password || !fullName || !position || !startDate) {
+    const { email, password, fullName, position, department, startDate } = req.body;
+    if (!email || !password || !fullName || !position || !department || !startDate) {
         return res.status(400).send({ error: "Missing required user data." });
     }
 
-    // 4. Create the User and Profiles
     try {
       const userRecord = await admin.auth().createUser({
         email,
@@ -59,12 +54,21 @@ exports.createUser = functions.https.onRequest((req, res) => {
 
       await db.collection("users").doc(newUserId).set({ role: "staff" });
 
+      // Create the first entry in the job history
+      const initialJob = {
+          position: position,
+          department: department,
+          startDate: startDate,
+      };
+
+      // Create the detailed profile with the new jobHistory array
+      // NOTE: We are using add() which creates a random document ID
       await db.collection("staff_profiles").add({
         uid: newUserId,
-        fullName,
-        position,
-        startDate,
-        email,
+        fullName: fullName,
+        email: email,
+        startDate: startDate, // Keep top-level start date for quick access
+        jobHistory: [initialJob], // Save the job history as an array
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 

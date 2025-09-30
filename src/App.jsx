@@ -59,8 +59,43 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        // NOTE: This feature is temporarily paused until the Cloud Function is updated.
-        alert("This form is being upgraded. Please wait for the next update to the Cloud Function.");
+        if (!fullName || !position || !department || !startDate || !email || !password) {
+            setError('Please fill out all fields.');
+            return;
+        }
+        if (password.length < 6) {
+            setError('Password must be at least 6 characters long.');
+            return;
+        }
+        setIsSaving(true);
+        setError('');
+        setSuccess('');
+
+        try {
+            const functionUrl = "https://createuser-3hzcubx72q-uc.a.run.app";
+            const token = await auth.currentUser.getIdToken();
+
+            const response = await fetch(functionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ email, password, fullName, position, department, startDate }),
+            });
+            
+            const responseData = await response.json();
+            if (!response.ok) throw new Error(responseData.error || 'Something went wrong');
+            
+            setSuccess(`Successfully created user for ${email}!`);
+            setTimeout(() => onClose(), 2000);
+
+        } catch (err) {
+            console.error("Error creating user:", err);
+            setError(err.message);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     return (
@@ -208,16 +243,84 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
     );
 };
 
-// --- Planning Page Component (Placeholder) ---
-const PlanningPage = () => (
-     <div>
-        <h2 className="text-3xl font-bold text-white mb-8">Planning & Schedule</h2>
-        <div className="bg-gray-800 rounded-lg shadow-lg p-6">
-            <h3 className="text-xl font-semibold text-white">Schedule Calendar</h3>
-            <p className="text-gray-400 mt-4">This feature is under construction.</p>
+// --- Planning Page Component ---
+const PlanningPage = ({ staffList }) => {
+    const [currentDate, setCurrentDate] = useState(new Date());
+
+    const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    const changeMonth = (offset) => {
+        setCurrentDate(prevDate => {
+            const newDate = new Date(prevDate);
+            newDate.setMonth(newDate.getMonth() + offset);
+            return newDate;
+        });
+    };
+
+    const generateCalendarGrid = () => {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const firstDayOfMonth = new Date(year, month, 1);
+        const lastDayOfMonth = new Date(year, month + 1, 0);
+        const daysInMonth = lastDayOfMonth.getDate();
+        
+        let startDayIndex = firstDayOfMonth.getDay() - 1;
+        if (startDayIndex === -1) startDayIndex = 6;
+
+        const grid = [];
+
+        for (let i = 0; i < startDayIndex; i++) {
+            grid.push({ key: `empty-${i}`, empty: true });
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(year, month, day);
+            const isMonday = date.getDay() === 1;
+            const scheduledStaff = isMonday ? [] : staffList.map(s => s.fullName);
+            grid.push({ key: `day-${day}`, day, scheduledStaff });
+        }
+        return grid;
+    };
+
+    const calendarGrid = generateCalendarGrid();
+
+    return (
+        <div>
+            <div className="flex justify-between items-center mb-8">
+                <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>
+                <div className="flex items-center space-x-4">
+                    <button onClick={() => changeMonth(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors">
+                        <ChevronLeftIcon className="h-6 w-6" />
+                    </button>
+                    <h3 className="text-2xl font-semibold w-48 text-center">{monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}</h3>
+                    <button onClick={() => changeMonth(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors">
+                        <ChevronRightIcon className="h-6 w-6" />
+                    </button>
+                </div>
+            </div>
+            <div className="grid grid-cols-7 gap-px bg-gray-700 border border-gray-700 rounded-lg overflow-hidden">
+                {daysOfWeek.map(day => (
+                    <div key={day} className="text-center py-3 bg-gray-800 text-xs font-bold text-gray-400 uppercase">{day}</div>
+                ))}
+                {calendarGrid.map(cell => (
+                    cell.empty ? (<div key={cell.key} className="bg-gray-900"></div>) : (
+                        <div key={cell.key} className="relative bg-gray-800 p-2 min-h-[120px]">
+                            <div className="text-right text-sm font-bold text-white">{cell.day}</div>
+                            <div className="mt-1">
+                                {cell.scheduledStaff.map((name, index) => (
+                                    <div key={index} className="text-xs bg-amber-600 text-white rounded px-1 py-0.5 mb-1 truncate">
+                                        {name}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )
+                ))}
+            </div>
         </div>
-    </div>
-);
+    );
+};
 
 
 // --- Settings Page Component (Placeholder) ---
