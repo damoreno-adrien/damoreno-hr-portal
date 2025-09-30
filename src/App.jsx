@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from "firebase/functions";
+// Note: We no longer need getFunctions or httpsCallable from the client
 
 // --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
@@ -43,7 +43,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 };
 
 // --- Add New Staff Form Component (FINAL VERSION) ---
-const AddStaffForm = ({ functions, onClose }) => {
+const AddStaffForm = ({ auth, onClose }) => {
     const [fullName, setFullName] = useState('');
     const [position, setPosition] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -68,36 +68,49 @@ const AddStaffForm = ({ functions, onClose }) => {
         setSuccess('');
 
         try {
-            // Get a reference to the createUser Cloud Function
-            const createUser = httpsCallable(functions, 'createUser');
-            
-            // Send the data to the function
-            const result = await createUser({
-                email,
-                password,
-                fullName,
-                position,
-                startDate,
+            // **IMPORTANT**: PASTE YOUR CLOUD FUNCTION URL HERE
+            const functionUrl = "https://createuser-3hzcubx72q-uc.a.run.app";
+
+            if (functionUrl === "https://createuser-3hzcubx72q-uc.a.run.app") {
+                setError("Configuration error: Cloud Function URL is not set.");
+                setIsSaving(false);
+                return;
+            }
+
+            // Get the current user's authentication token to prove they are logged in
+            const token = await auth.currentUser.getIdToken();
+
+            const response = await fetch(functionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    email,
+                    password,
+                    fullName,
+                    position,
+                    startDate,
+                }),
             });
+            
+            const responseData = await response.json();
 
-            console.log(result.data.result);
-            setSuccess(`Successfully created user for ${email}! You can now close this window.`);
+            if (!response.ok) {
+                // If the server response is not successful, throw an error with the message
+                throw new Error(responseData.error || 'Something went wrong');
+            }
+            
+            setSuccess(`Successfully created user for ${email}!`);
 
-            // Clear the form for the next entry after a short delay
             setTimeout(() => {
-                setFullName('');
-                setPosition('');
-                setStartDate('');
-                setEmail('');
-                setPassword('');
-                setSuccess('');
                 onClose();
             }, 2000);
 
         } catch (err) {
             console.error("Error creating user:", err);
-            // Display a user-friendly error message from the function
-            setError(err.message || 'An unexpected error occurred.');
+            setError(err.message);
         } finally {
             setIsSaving(false);
         }
@@ -146,13 +159,13 @@ const AddStaffForm = ({ functions, onClose }) => {
 
 
 // --- Staff Management Page Component ---
-const StaffManagementPage = ({ functions, staffList }) => {
+const StaffManagementPage = ({ auth, staffList }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Invite New Staff Member">
-                <AddStaffForm functions={functions} onClose={() => setIsModalOpen(false)} />
+                <AddStaffForm auth={auth} onClose={() => setIsModalOpen(false)} />
             </Modal>
 
             <div className="flex justify-between items-center mb-8">
@@ -205,7 +218,6 @@ const StaffManagementPage = ({ functions, staffList }) => {
 export default function App() {
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
-    const [functions, setFunctions] = useState(null); // <-- Add state for functions
     const [user, setUser] = useState(null);
     const [userRole, setUserRole] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -221,11 +233,9 @@ export default function App() {
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             const dbInstance = getFirestore(app);
-            const functionsInstance = getFunctions(app); // <-- Initialize Functions
-
+            
             setAuth(authInstance);
             setDb(dbInstance);
-            setFunctions(functionsInstance); // <-- Save Functions instance
 
             const unsubscribe = onAuthStateChanged(authInstance, async (currentUser) => {
                 if (currentUser) {
@@ -313,7 +323,7 @@ export default function App() {
     const renderPageContent = () => {
         switch(currentPage) {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
-            case 'staff': return <StaffManagementPage functions={functions} staffList={staffList} />;
+            case 'staff': return <StaffManagementPage auth={auth} staffList={staffList} />;
             case 'planning': return <h2 className="text-3xl font-bold text-white">Planning & Schedule</h2>;
             case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
