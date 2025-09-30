@@ -20,27 +20,15 @@ const TrashIcon = ({ className }) => (<svg className={className} xmlns="http://w
 // --- Reusable Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
     if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 transition-opacity duration-300">
-            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg m-4 transform transition-all duration-300 scale-95 opacity-0 animate-fade-in-scale">
-                <div className="flex justify-between items-center p-6 border-b border-gray-700">
-                    <h3 className="text-2xl font-semibold text-white">{title}</h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-                        <XIcon className="h-7 w-7" />
-                    </button>
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50">
+            <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl m-4">
+                <div className="flex justify-between items-center p-4 border-b border-gray-700">
+                    <h3 className="text-xl font-semibold text-white">{title}</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white"><XIcon className="h-6 w-6" /></button>
                 </div>
-                <div className="p-6 overflow-y-auto max-h-[80vh]">
-                    {children}
-                </div>
+                <div className="p-6 max-h-[80vh] overflow-y-auto">{children}</div>
             </div>
-            <style jsx>{`
-              @keyframes fadeInScale {
-                from { opacity: 0; transform: scale(0.95); }
-                to { opacity: 1; transform: scale(1); }
-              }
-              .animate-fade-in-scale { animation: fadeInScale 0.3s forwards cubic-bezier(0.16, 1, 0.3, 1); }
-            `}</style>
         </div>
     );
 };
@@ -77,10 +65,7 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
 
             const response = await fetch(functionUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ email, password, fullName, position, department, startDate }),
             });
             
@@ -102,36 +87,36 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
         <form onSubmit={handleSubmit} className="space-y-6">
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <div>
-                    <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
-                    <input type="text" id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
+                    <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
                 <div>
-                    <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
-                    <input type="email" id="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
             </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <label htmlFor="department" className="block text-sm font-medium text-gray-300 mb-1">Department</label>
-                    <select id="department" value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white">
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Department</label>
+                    <select value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white">
                         {departments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
                     </select>
                 </div>
                  <div>
-                    <label htmlFor="position" className="block text-sm font-medium text-gray-300 mb-1">Position</label>
-                    <input type="text" id="position" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Position</label>
+                    <input type="text" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
             </div>
              <div>
-                <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
-                <input type="date" id="startDate" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
             </div>
             <div className="border-t border-gray-700 pt-6">
                  <p className="text-sm text-gray-400 mb-4">Create Login Credentials:</p>
                   <div className="grid grid-cols-1">
                     <div>
-                        <label htmlFor="temp-password-label" className="block text-sm font-medium text-gray-300 mb-1">Temporary Password</label>
-                        <input type="password" id="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Temporary Password</label>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                     </div>
                  </div>
             </div>
@@ -149,37 +134,120 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
 
 // --- Staff Profile View/Edit Component ---
 const StaffProfileModal = ({ staff, db, onClose, departments }) => {
-    const currentJob = staff.jobHistory && staff.jobHistory.length > 0
-        ? staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]
-        : { position: 'N/A', department: 'N/A' };
+    const [isEditing, setIsEditing] = useState(false);
+    const [isAddingJob, setIsAddingJob] = useState(false);
+    const [formData, setFormData] = useState({ ...staff });
+    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0] });
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+    const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A' };
+
+    const handleInputChange = (e) => {
+        const { id, value } = e.target;
+        setFormData(prev => ({ ...prev, [id]: value }));
+    };
+
+    const handleNewJobChange = (e) => {
+        const { id, value } = e.target;
+        setNewJob(prev => ({ ...prev, [id]: value }));
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            await updateDoc(staffDocRef, { fullName: formData.fullName, email: formData.email });
+            setIsEditing(false);
+        } catch (err) {
+            setError("Failed to save changes.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    const handleAddNewJob = async () => {
+        if (!newJob.position || !newJob.department || !newJob.startDate) {
+            setError("Please fill all fields for the new job role.");
+            return;
+        }
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            await updateDoc(staffDocRef, {
+                jobHistory: arrayUnion(newJob)
+            });
+            setIsAddingJob(false);
+            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0] });
+        } catch (err) {
+            setError("Failed to add new job role.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const InfoRow = ({ label, value }) => (<div><p className="text-sm text-gray-400">{label}</p><p className="text-white text-lg">{value || '-'}</p></div>);
 
     return (
-        <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div>
-                    <p className="text-sm text-gray-400">Full Name</p>
-                    <p className="text-white text-lg">{staff.fullName}</p>
-                </div>
-                 <div>
-                    <p className="text-sm text-gray-400">Email Address</p>
-                    <p className="text-white text-lg">{staff.email}</p>
-                </div>
-                 <div>
-                    <p className="text-sm text-gray-400">Current Department</p>
-                    <p className="text-white text-lg">{currentJob.department}</p>
-                </div>
-                 <div>
-                    <p className="text-sm text-gray-400">Current Position</p>
-                    <p className="text-white text-lg">{currentJob.position}</p>
-                </div>
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-gray-700">
+                {isEditing ? (
+                    <>
+                        <div><label className="text-sm text-gray-400">Full Name</label><input id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                        <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                    </>
+                ) : (
+                    <>
+                        <InfoRow label="Full Name" value={staff.fullName} />
+                        <InfoRow label="Email Address" value={staff.email} />
+                    </>
+                )}
+                <InfoRow label="Current Department" value={currentJob.department} />
+                <InfoRow label="Current Position" value={currentJob.position} />
             </div>
-            <p className="text-center text-gray-400 italic">Full job history and editing coming next!</p>
+
+            <h4 className="text-lg font-semibold text-white">Job History</h4>
+            {isAddingJob ? (
+                <div className="bg-gray-700 p-4 rounded-lg space-y-4">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="text-sm">Department</label><select id="department" value={newJob.department} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+                        <div><label className="text-sm">Position</label><input id="position" value={newJob.position} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                    </div>
+                    <div><label className="text-sm">Start Date</label><input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                    <div className="flex justify-end space-x-2"><button onClick={() => setIsAddingJob(false)} className="px-4 py-1 rounded-md bg-gray-500">Cancel</button><button onClick={handleAddNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600">{isSaving ? 'Saving...' : 'Save Job'}</button></div>
+                </div>
+            ) : (
+                 <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600"><PlusIcon className="h-5 w-5 mr-2"/>Add New Job Role</button>
+            )}
+
+            <div className="space-y-2">
+                {sortedJobHistory.map((job, index) => (
+                    <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center">
+                        <div>
+                            <p className="font-bold">{job.position}</p>
+                            <p className="text-sm text-gray-400">{job.department}</p>
+                        </div>
+                        <p className="text-sm text-gray-300">{job.startDate}</p>
+                    </div>
+                ))}
+            </div>
+            
+            {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
+
             <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
-                <button onClick={onClose} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500">Close</button>
+                {isEditing ? (
+                    <><button onClick={() => setIsEditing(false)} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button><button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button></>
+                ) : (
+                    <><button onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Close</button><button onClick={() => setIsEditing(true)} className="px-6 py-2 rounded-lg bg-blue-600">Edit Basic Info</button></>
+                )}
             </div>
         </div>
     );
 };
+
 
 // --- Staff Management Page Component ---
 const StaffManagementPage = ({ auth, db, staffList, departments }) => {
@@ -245,12 +313,20 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
 
 // --- Planning Page Component ---
 const PlanningPage = ({ staffList }) => {
-    // ... code omitted for brevity
-    return <div>Planning Page Under Construction</div>
+    // This is a placeholder for now
+    return (
+         <div>
+            <h2 className="text-3xl font-bold text-white mb-8">Planning & Schedule</h2>
+            <div className="bg-gray-800 rounded-lg shadow-lg p-6">
+                <h3 className="text-xl font-semibold text-white">Schedule Calendar</h3>
+                <p className="text-gray-400 mt-4">This feature is under construction.</p>
+            </div>
+        </div>
+    );
 };
 
 
-// --- Functional Settings Page Component ---
+// --- Settings Page Component ---
 const SettingsPage = ({ db, departments }) => {
     const [newDepartment, setNewDepartment] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -269,21 +345,19 @@ const SettingsPage = ({ db, departments }) => {
             });
             setNewDepartment('');
         } catch (err) {
-            console.error("Error adding department:", err);
-            setError("Failed to add department. Please try again.");
+            setError("Failed to add department.");
         } finally {
             setIsSaving(false);
         }
     };
     
     const handleDeleteDepartment = async (departmentToDelete) => {
-        if (window.confirm(`Are you sure you want to delete the "${departmentToDelete}" department?`)) {
+        if (window.confirm(`Are you sure you want to delete "${departmentToDelete}"? This cannot be undone.`)) {
             try {
                 await updateDoc(configDocRef, {
                     departments: arrayRemove(departmentToDelete)
                 });
             } catch (err) {
-                console.error("Error deleting department:", err);
                 alert("Failed to delete department.");
             }
         }
@@ -294,7 +368,7 @@ const SettingsPage = ({ db, departments }) => {
             <h2 className="text-3xl font-bold text-white mb-8">Settings</h2>
             <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                 <h3 className="text-xl font-semibold text-white">Manage Departments</h3>
-                <p className="text-gray-400 mt-2">Add or remove departments for your restaurant. These will be available when inviting new staff.</p>
+                <p className="text-gray-400 mt-2">Add or remove departments for your restaurant.</p>
 
                 <form onSubmit={handleAddDepartment} className="mt-6 flex items-center space-x-4">
                     <input 
@@ -302,9 +376,9 @@ const SettingsPage = ({ db, departments }) => {
                         value={newDepartment}
                         onChange={(e) => setNewDepartment(e.target.value)}
                         placeholder="New department name"
-                        className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
                     />
-                    <button type="submit" disabled={isSaving} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-amber-800">
+                    <button type="submit" disabled={isSaving} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
                         <PlusIcon className="h-5 w-5 mr-2" />
                         {isSaving ? 'Adding...' : 'Add'}
                     </button>
@@ -372,7 +446,6 @@ export default function App() {
 
     useEffect(() => {
         if (!db) return;
-
         const configDocRef = doc(db, 'settings', 'company_config');
         const unsubscribeSettings = onSnapshot(configDocRef, (docSnap) => {
             if (docSnap.exists()) {
