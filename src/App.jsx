@@ -142,7 +142,7 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
 const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
-    const [formData, setFormData] = useState({ ...staff });
+    const [formData, setFormData] = useState({ fullName: staff.fullName, email: staff.email });
     const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -150,13 +150,8 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
     const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', baseSalary: 'N/A' };
 
-    const handleInputChange = (e) => {
-        setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
-    };
-
-    const handleNewJobChange = (e) => {
-        setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
-    };
+    const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
+    const handleNewJobChange = (e) => setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
 
     const handleSave = async () => {
         setIsSaving(true);
@@ -211,8 +206,7 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
                 )}
                 <InfoRow label="Current Department" value={currentJob.department} />
                 <InfoRow label="Current Position" value={currentJob.position} />
-                <InfoRow label="Current Base Salary" value={currentJob.baseSalary?.toLocaleString()} />
-
+                <InfoRow label="Current Base Salary (THB)" value={currentJob.baseSalary?.toLocaleString()} />
             </div>
 
             <h4 className="text-lg font-semibold text-white">Job & Salary History</h4>
@@ -227,6 +221,7 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
                         <div><label className="text-sm">Base Salary (THB)</label><input id="baseSalary" type="number" value={newJob.baseSalary} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
                     </div>
                     <div className="flex justify-end space-x-2"><button onClick={() => setIsAddingJob(false)} className="px-4 py-1 rounded-md bg-gray-500">Cancel</button><button onClick={handleAddNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600">{isSaving ? 'Saving...' : 'Save Job'}</button></div>
+                    {error && <p className="text-red-400 text-sm text-right mt-2">{error}</p>}
                 </div>
             ) : (
                  <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600"><PlusIcon className="h-5 w-5 mr-2"/>Add New Job Role</button>
@@ -244,8 +239,6 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
                 ))}
             </div>
             
-            {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
-
             <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
                 {isEditing ? (
                     <><button onClick={() => setIsEditing(false)} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button><button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button></>
@@ -270,7 +263,7 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
         if (staff.jobHistory && staff.jobHistory.length > 0) {
             return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0].position;
         }
-        return staff.position || 'N/A';
+        return 'N/A';
     };
 
     return (
@@ -322,6 +315,7 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
 
 // --- Planning Page Component ---
 const PlanningPage = ({ staffList }) => {
+    // This is a placeholder for now
     return (
          <div>
             <h2 className="text-3xl font-bold text-white mb-8">Planning & Schedule</h2>
