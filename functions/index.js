@@ -5,7 +5,6 @@ const cors = require("cors")({ origin: true });
 admin.initializeApp();
 
 exports.createUser = functions.https.onRequest((req, res) => {
-  // Use the cors middleware to handle the preflight request and set headers.
   cors(req, res, async () => {
     if (req.method !== "POST") {
       return res.status(405).send({ error: "Method Not Allowed" });
@@ -38,9 +37,9 @@ exports.createUser = functions.https.onRequest((req, res) => {
       return res.status(500).send({ error: "Internal server error." });
     }
 
-    const { email, password, fullName, position, department, startDate } = req.body;
-    if (!email || !password || !fullName || !position || !department || !startDate) {
-        return res.status(400).send({ error: "Missing required user data." });
+    const { email, password, fullName, position, department, startDate, baseSalary } = req.body;
+    if (!email || !password || !fullName || !position || !department || !startDate || !baseSalary) {
+        return res.status(400).send({ error: "Missing required user data, including base salary." });
     }
 
     try {
@@ -54,20 +53,19 @@ exports.createUser = functions.https.onRequest((req, res) => {
 
       await db.collection("users").doc(newUserId).set({ role: "staff" });
 
-      // Create the first entry in the job history
       const initialJob = {
           position: position,
           department: department,
           startDate: startDate,
+          baseSalary: Number(baseSalary), // <-- ADDED: Save salary as a number
       };
 
-      // Create the detailed profile with the new jobHistory array
       await db.collection("staff_profiles").add({
         uid: newUserId,
         fullName: fullName,
         email: email,
-        startDate: startDate, // Keep top-level start date for quick access
-        jobHistory: [initialJob], // Save the job history as an array
+        startDate: startDate,
+        jobHistory: [initialJob],
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 

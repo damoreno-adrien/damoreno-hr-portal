@@ -41,13 +41,14 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [baseSalary, setBaseSalary] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!fullName || !position || !department || !startDate || !email || !password) {
+        if (!fullName || !position || !department || !startDate || !email || !password || !baseSalary) {
             setError('Please fill out all fields.');
             return;
         }
@@ -66,7 +67,7 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
             const response = await fetch(functionUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ email, password, fullName, position, department, startDate }),
+                body: JSON.stringify({ email, password, fullName, position, department, startDate, baseSalary }),
             });
             
             const responseData = await response.json();
@@ -76,7 +77,6 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
             setTimeout(() => onClose(), 2000);
 
         } catch (err) {
-            console.error("Error creating user:", err);
             setError(err.message);
         } finally {
             setIsSaving(false);
@@ -107,9 +107,15 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
                     <input type="text" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
             </div>
-             <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
-                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
+                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Base Salary (THB)</label>
+                    <input type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                </div>
             </div>
             <div className="border-t border-gray-700 pt-6">
                  <p className="text-sm text-gray-400 mb-4">Create Login Credentials:</p>
@@ -137,21 +143,19 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
     const [formData, setFormData] = useState({ ...staff });
-    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0] });
+    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
     const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
-    const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A' };
+    const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', baseSalary: 'N/A' };
 
     const handleInputChange = (e) => {
-        const { id, value } = e.target;
-        setFormData(prev => ({ ...prev, [id]: value }));
+        setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
     };
 
     const handleNewJobChange = (e) => {
-        const { id, value } = e.target;
-        setNewJob(prev => ({ ...prev, [id]: value }));
+        setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
     };
 
     const handleSave = async () => {
@@ -169,7 +173,7 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     };
     
     const handleAddNewJob = async () => {
-        if (!newJob.position || !newJob.department || !newJob.startDate) {
+        if (!newJob.position || !newJob.department || !newJob.startDate || !newJob.baseSalary) {
             setError("Please fill all fields for the new job role.");
             return;
         }
@@ -178,10 +182,10 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, {
-                jobHistory: arrayUnion(newJob)
+                jobHistory: arrayUnion({ ...newJob, baseSalary: Number(newJob.baseSalary) })
             });
             setIsAddingJob(false);
-            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0] });
+            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
         } catch (err) {
             setError("Failed to add new job role.");
         } finally {
@@ -207,16 +211,21 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
                 )}
                 <InfoRow label="Current Department" value={currentJob.department} />
                 <InfoRow label="Current Position" value={currentJob.position} />
+                <InfoRow label="Current Base Salary" value={currentJob.baseSalary?.toLocaleString()} />
+
             </div>
 
-            <h4 className="text-lg font-semibold text-white">Job History</h4>
+            <h4 className="text-lg font-semibold text-white">Job & Salary History</h4>
             {isAddingJob ? (
                 <div className="bg-gray-700 p-4 rounded-lg space-y-4">
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div><label className="text-sm">Department</label><select id="department" value={newJob.department} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
                         <div><label className="text-sm">Position</label><input id="position" value={newJob.position} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
                     </div>
-                    <div><label className="text-sm">Start Date</label><input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="text-sm">Start Date</label><input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                        <div><label className="text-sm">Base Salary (THB)</label><input id="baseSalary" type="number" value={newJob.baseSalary} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                    </div>
                     <div className="flex justify-end space-x-2"><button onClick={() => setIsAddingJob(false)} className="px-4 py-1 rounded-md bg-gray-500">Cancel</button><button onClick={handleAddNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600">{isSaving ? 'Saving...' : 'Save Job'}</button></div>
                 </div>
             ) : (
@@ -227,8 +236,8 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
                 {sortedJobHistory.map((job, index) => (
                     <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center">
                         <div>
-                            <p className="font-bold">{job.position}</p>
-                            <p className="text-sm text-gray-400">{job.department}</p>
+                            <p className="font-bold">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p>
+                            <p className="text-sm text-amber-400">{job.baseSalary?.toLocaleString()} THB</p>
                         </div>
                         <p className="text-sm text-gray-300">{job.startDate}</p>
                     </div>
@@ -313,7 +322,6 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
 
 // --- Planning Page Component ---
 const PlanningPage = ({ staffList }) => {
-    // This is a placeholder for now
     return (
          <div>
             <h2 className="text-3xl font-bold text-white mb-8">Planning & Schedule</h2>
@@ -340,9 +348,7 @@ const SettingsPage = ({ db, departments }) => {
         setIsSaving(true);
         setError('');
         try {
-            await updateDoc(configDocRef, {
-                departments: arrayUnion(newDepartment.trim())
-            });
+            await updateDoc(configDocRef, { departments: arrayUnion(newDepartment.trim()) });
             setNewDepartment('');
         } catch (err) {
             setError("Failed to add department.");
@@ -352,11 +358,9 @@ const SettingsPage = ({ db, departments }) => {
     };
     
     const handleDeleteDepartment = async (departmentToDelete) => {
-        if (window.confirm(`Are you sure you want to delete "${departmentToDelete}"? This cannot be undone.`)) {
+        if (window.confirm(`Are you sure you want to delete "${departmentToDelete}"?`)) {
             try {
-                await updateDoc(configDocRef, {
-                    departments: arrayRemove(departmentToDelete)
-                });
+                await updateDoc(configDocRef, { departments: arrayRemove(departmentToDelete) });
             } catch (err) {
                 alert("Failed to delete department.");
             }
@@ -371,13 +375,7 @@ const SettingsPage = ({ db, departments }) => {
                 <p className="text-gray-400 mt-2">Add or remove departments for your restaurant.</p>
 
                 <form onSubmit={handleAddDepartment} className="mt-6 flex items-center space-x-4">
-                    <input 
-                        type="text" 
-                        value={newDepartment}
-                        onChange={(e) => setNewDepartment(e.target.value)}
-                        placeholder="New department name"
-                        className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
-                    />
+                    <input type="text" value={newDepartment} onChange={(e) => setNewDepartment(e.target.value)} placeholder="New department name" className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                     <button type="submit" disabled={isSaving} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
                         <PlusIcon className="h-5 w-5 mr-2" />
                         {isSaving ? 'Adding...' : 'Add'}
