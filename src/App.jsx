@@ -19,7 +19,30 @@ const SettingsIcon = ({ className }) => (<svg className={className} xmlns="http:
 
 // --- Reusable Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
-    // ... (code omitted for brevity)
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 transition-opacity duration-300">
+            <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg m-4 transform transition-all duration-300 scale-95 opacity-0 animate-fade-in-scale">
+                <div className="flex justify-between items-center p-6 border-b border-gray-700">
+                    <h3 className="text-2xl font-semibold text-white">{title}</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+                        <XIcon className="h-7 w-7" />
+                    </button>
+                </div>
+                <div className="p-6 overflow-y-auto max-h-[80vh]">
+                    {children}
+                </div>
+            </div>
+            <style jsx>{`
+              @keyframes fadeInScale {
+                from { opacity: 0; transform: scale(0.95); }
+                to { opacity: 1; transform: scale(1); }
+              }
+              .animate-fade-in-scale { animation: fadeInScale 0.3s forwards cubic-bezier(0.16, 1, 0.3, 1); }
+            `}</style>
+        </div>
+    );
 };
 
 // --- Add New Staff Form Component (UPGRADED for Departments) ---
@@ -36,15 +59,8 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        // ... (omitted for brevity - logic is similar, but will be adapted in the Cloud Function)
-        
-        // --- This is what our Cloud Function will do ---
-        // 1. Create user in Firebase Auth
-        // 2. Create user role in 'users' collection
-        // 3. Create staff profile in 'staff_profiles' collection, now with a 'jobHistory' array
-        
-        // Placeholder for now
-        alert("This form is updated. The Cloud Function needs to be updated next to save the job history.");
+        // NOTE: This feature is temporarily paused until the Cloud Function is updated.
+        alert("This form is being upgraded. Please wait for the next update to the Cloud Function.");
     };
 
     return (
@@ -98,8 +114,6 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
 
 // --- Staff Profile View/Edit Component (UPGRADED for Job History) ---
 const StaffProfileModal = ({ staff, db, onClose, departments }) => {
-    // ... (code omitted for brevity, will be fully implemented in next step)
-    // For now, it will display the current position and department
     const currentJob = staff.jobHistory && staff.jobHistory.length > 0
         ? staff.jobHistory[staff.jobHistory.length - 1]
         : { position: 'N/A', department: 'N/A' };
@@ -194,10 +208,17 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
     );
 };
 
-// --- Planning Page Component ---
-const PlanningPage = ({ staffList }) => {
-    // ... (code omitted for brevity)
-};
+// --- Planning Page Component (Placeholder) ---
+const PlanningPage = () => (
+     <div>
+        <h2 className="text-3xl font-bold text-white mb-8">Planning & Schedule</h2>
+        <div className="bg-gray-800 rounded-lg shadow-lg p-6">
+            <h3 className="text-xl font-semibold text-white">Schedule Calendar</h3>
+            <p className="text-gray-400 mt-4">This feature is under construction.</p>
+        </div>
+    </div>
+);
+
 
 // --- Settings Page Component (Placeholder) ---
 const SettingsPage = () => (
@@ -214,22 +235,112 @@ const SettingsPage = () => (
 
 // --- Main Application Component ---
 export default function App() {
-    // ... (state variables - no changes)
+    const [auth, setAuth] = useState(null);
+    const [db, setDb] = useState(null);
+    const [user, setUser] = useState(null);
+    const [userRole, setUserRole] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loginError, setLoginError] = useState('');
+    const [currentPage, setCurrentPage] = useState('dashboard');
+    const [staffList, setStaffList] = useState([]);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [departments, setDepartments] = useState([
-        "Management", "Service", "Kitchen", "Pizza Department" // Hard-coded for now
+        "Management", "Service", "Kitchen", "Pizza Department"
     ]);
 
     useEffect(() => {
-        // ... (Firebase initialization - no changes)
+        try {
+            const firebaseConfig = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG);
+            const app = initializeApp(firebaseConfig);
+            const authInstance = getAuth(app);
+            const dbInstance = getFirestore(app);
+            
+            setAuth(authInstance);
+            setDb(dbInstance);
+
+            const unsubscribe = onAuthStateChanged(authInstance, async (currentUser) => {
+                if (currentUser) {
+                    const userDocRef = doc(dbInstance, 'users', currentUser.uid);
+                    const userDocSnap = await getDoc(userDocRef);
+                    setUser(currentUser); // Set user first
+                    setUserRole(userDocSnap.exists() ? userDocSnap.data().role : null); // Then set role
+                } else {
+                    setUser(null);
+                    setUserRole(null);
+                }
+                setIsLoading(false);
+            });
+            return () => unsubscribe();
+        } catch (error) {
+            console.error("Firebase Initialization Error:", error);
+            setIsLoading(false);
+        }
     }, []);
 
     useEffect(() => {
-        // ... (Staff list fetching - no changes)
+        if (userRole === 'manager' && db) {
+            const staffCollectionRef = collection(db, 'staff_profiles');
+            const unsubscribe = onSnapshot(staffCollectionRef, (querySnapshot) => {
+                const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setStaffList(list);
+            }, (error) => console.error("Error fetching staff list:", error));
+            return () => unsubscribe();
+        } else {
+            setStaffList([]);
+        }
     }, [userRole, db]);
-
-    // ... (login/logout handlers - no changes)
     
-    // ... (loading/login screens - no changes)
+    const handleLogin = async (e) => {
+        e.preventDefault();
+        setLoginError('');
+        if (!auth) return;
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            setLoginError('Invalid email or password. Please try again.');
+        }
+    };
+
+    const handleLogout = async () => {
+        if (!auth) return;
+        await signOut(auth);
+        setCurrentPage('dashboard');
+    };
+    
+    if (isLoading) {
+        return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>;
+    }
+
+    if (!user) {
+        return (
+             <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
+                <div className="w-full max-w-md p-8 space-y-8 bg-white rounded-2xl shadow-lg dark:bg-gray-800">
+                    <div className="text-center">
+                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Da Moreno At Town</h1>
+                        <p className="mt-2 text-gray-600 dark:text-gray-300">HR Management Portal</p>
+                    </div>
+                    <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+                         <div className="rounded-md shadow-sm -space-y-px">
+                            <div>
+                                <input id="email-address" name="email" type="email" autoComplete="email" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} />
+                            </div>
+                            <div>
+                                <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                            </div>
+                        </div>
+                        {loginError && (<p className="mt-2 text-center text-sm text-red-600 dark:text-red-400">{loginError}</p>)}
+                        <div>
+                            <button type="submit" className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500">
+                                <span className="absolute left-0 inset-y-0 flex items-center pl-3"><LogInIcon className="h-5 w-5 text-amber-500 group-hover:text-amber-400" /></span>
+                                Sign in
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        );
+    }
     
     const renderPageContent = () => {
         switch(currentPage) {
@@ -240,7 +351,7 @@ export default function App() {
             case 'settings': return <SettingsPage />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
-    }
+    };
 
     const NavLink = ({ icon, label, page }) => (
         <button onClick={() => setCurrentPage(page)} className={`flex items-center w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === page ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}>
@@ -252,7 +363,10 @@ export default function App() {
     return (
         <div className="flex h-screen bg-gray-900 text-white font-sans">
             <aside className="w-64 bg-gray-800 flex flex-col p-4">
-                {/* ... (header) */}
+                 <div className="text-center py-4 mb-5 border-b border-gray-700">
+                    <h1 className="text-2xl font-bold text-white">Da Moreno HR</h1>
+                    <p className="text-sm text-amber-400 capitalize">{userRole} Portal</p>
+                </div>
                 <nav className="flex-1 space-y-2">
                     {userRole === 'manager' && (
                         <>
@@ -272,7 +386,13 @@ export default function App() {
                     )}
                 </nav>
                 <div className="mt-auto">
-                     {/* ... (user email & logout) */}
+                     <div className="py-4 border-t border-gray-700 text-center">
+                        <p className="text-sm text-gray-400 truncate">{user.email}</p>
+                    </div>
+                    <button onClick={handleLogout} className="flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700">
+                        <LogOutIcon className="h-5 w-5"/>
+                        <span className="ml-3 font-medium">Logout</span>
+                    </button>
                 </div>
             </aside>
             <main className="flex-1 p-10 overflow-auto">
