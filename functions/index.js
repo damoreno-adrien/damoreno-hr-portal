@@ -82,4 +82,3 @@ exports.createUser = functions.https.onRequest((req, res) => {
     }
   });
 });
-

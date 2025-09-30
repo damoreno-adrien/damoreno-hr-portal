@@ -88,7 +88,9 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
             if (!response.ok) throw new Error(responseData.error || 'Something went wrong');
             
             setSuccess(`Successfully created user for ${email}!`);
-            setTimeout(() => onClose(), 2000);
+            setTimeout(() => {
+                onClose();
+            }, 2000);
 
         } catch (err) {
             console.error("Error creating user:", err);
