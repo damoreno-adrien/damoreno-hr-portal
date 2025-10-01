@@ -16,6 +16,8 @@ const ChevronLeftIcon = ({ className }) => (<svg className={className} xmlns="ht
 const ChevronRightIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>);
 const SettingsIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>);
 const TrashIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>);
+const EditIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>);
+
 
 // --- Reusable Modal Component ---
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -147,6 +149,10 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
+    useEffect(() => {
+        setFormData({ fullName: staff.fullName, email: staff.email });
+    }, [staff]);
+
     const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
     const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', baseSalary: 'N/A' };
 
@@ -185,6 +191,19 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
             setError("Failed to add new job role.");
         } finally {
             setIsSaving(false);
+        }
+    };
+    
+    const handleDeleteJob = async (jobToDelete) => {
+        if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}"?`)) {
+            try {
+                const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                await updateDoc(staffDocRef, {
+                    jobHistory: arrayRemove(jobToDelete)
+                });
+            } catch (err) {
+                alert("Failed to delete job history entry.");
+            }
         }
     };
 
@@ -229,19 +248,24 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
 
             <div className="space-y-2">
                 {sortedJobHistory.map((job, index) => (
-                    <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center">
+                    <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group">
                         <div>
                             <p className="font-bold">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p>
                             <p className="text-sm text-amber-400">{job.baseSalary?.toLocaleString()} THB</p>
                         </div>
-                        <p className="text-sm text-gray-300">{job.startDate}</p>
+                        <div className="flex items-center space-x-3">
+                             <p className="text-sm text-gray-300">{job.startDate}</p>
+                             <button onClick={() => handleDeleteJob(job)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <TrashIcon className="h-5 w-5"/>
+                             </button>
+                        </div>
                     </div>
                 ))}
             </div>
             
             <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
                 {isEditing ? (
-                    <><button onClick={() => setIsEditing(false)} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button><button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button></>
+                    <><button onClick={() => { setIsEditing(false); setError(''); }} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button><button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button></>
                 ) : (
                     <><button onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Close</button><button onClick={() => setIsEditing(true)} className="px-6 py-2 rounded-lg bg-blue-600">Edit Basic Info</button></>
                 )}
@@ -315,7 +339,6 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
 
 // --- Planning Page Component ---
 const PlanningPage = ({ staffList }) => {
-    // This is a placeholder for now
     return (
          <div>
             <h2 className="text-3xl font-bold text-white mb-8">Planning & Schedule</h2>
