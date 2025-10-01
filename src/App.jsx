@@ -138,7 +138,7 @@ const AddStaffForm = ({ auth, onClose, departments }) => {
     );
 };
 
-// --- Staff Profile View/Edit Component ---
+// --- Staff Profile View/Edit Component (FIXED) ---
 const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
@@ -147,6 +147,8 @@ const StaffProfileModal = ({ staff, db, onClose, departments }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
+    // **THIS IS THE FIX**: This useEffect hook listens for changes to the 'staff' prop.
+    // When the staff data updates in the main list, this forces the modal's state to update too.
     useEffect(() => {
         setFormData({ fullName: staff.fullName, email: staff.email });
     }, [staff]);
@@ -287,6 +289,16 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
         }
         return 'N/A';
     };
+
+    // FIX: Find the full staff object from the list when an update happens
+    useEffect(() => {
+        if (selectedStaff) {
+            const updatedStaff = staffList.find(staff => staff.id === selectedStaff.id);
+            if (updatedStaff) {
+                setSelectedStaff(updatedStaff);
+            }
+        }
+    }, [staffList, selectedStaff]);
 
     return (
         <div>
