@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc, updateDoc, arrayUnion, arrayRemove, where, query, writeBatch, getDocs } from 'firebase/firestore';
 
 // --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
@@ -287,7 +287,7 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
         }
         return 'N/A';
     };
-
+    
     useEffect(() => {
         if (selectedStaff) {
             const updatedStaff = staffList.find(staff => staff.id === selectedStaff.id);
@@ -295,7 +295,7 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
                 setSelectedStaff(updatedStaff);
             }
         }
-    }, [staffList]);
+    }, [staffList, selectedStaff?.id]);
 
     return (
         <div>
@@ -345,7 +345,7 @@ const StaffManagementPage = ({ auth, db, staffList, departments }) => {
 };
 
 // --- Planning Page Component ---
-const PlanningPage = ({ staffList }) => {
+const PlanningPage = ({ db, staffList }) => {
     const getStartOfWeek = (date) => {
         const d = new Date(date);
         const day = d.getDay();
@@ -354,6 +354,32 @@ const PlanningPage = ({ staffList }) => {
     };
 
     const [startOfWeek, setStartOfWeek] = useState(getStartOfWeek(new Date()));
+    const [schedules, setSchedules] = useState({});
+    const [selectedShift, setSelectedShift] = useState(null);
+
+    useEffect(() => {
+        if (!db) return;
+        
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(endOfWeek.getDate() + 6);
+        
+        const startStr = startOfWeek.toISOString().split('T')[0];
+        const endStr = endOfWeek.toISOString().split('T')[0];
+        
+        const q = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const newSchedules = {};
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const key = `${data.staffId}_${data.date}`;
+                newSchedules[key] = { id: doc.id, ...data };
+            });
+            setSchedules(newSchedules);
+        });
+
+        return () => unsubscribe();
+    }, [db, startOfWeek]);
 
     const changeWeek = (offset) => {
         setStartOfWeek(prevDate => {
@@ -385,6 +411,18 @@ const PlanningPage = ({ staffList }) => {
 
     return (
         <div>
+            {selectedShift && (
+                <Modal isOpen={true} onClose={() => setSelectedShift(null)} title={selectedShift.existingShift ? "Edit Shift" : "Add Shift"}>
+                    <ShiftModal 
+                        db={db}
+                        staffMember={selectedShift.staff}
+                        date={selectedShift.date}
+                        existingShift={selectedShift.existingShift}
+                        onClose={() => setSelectedShift(null)}
+                    />
+                </Modal>
+            )}
+
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-3xl font-bold text-white">Weekly Planner</h2>
                 <div className="flex items-center space-x-4">
@@ -393,19 +431,35 @@ const PlanningPage = ({ staffList }) => {
                     <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronRightIcon className="h-6 w-6" /></button>
                 </div>
             </div>
+
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <div className="min-w-[1200px]">
                     <div className="grid grid-cols-[200px_repeat(7,1fr)]">
                         <div className="px-4 py-3 font-medium text-white border-b-2 border-r border-gray-700 flex items-center">STAFF</div>
                         {days.map(day => (<div key={day.toISOString()}>{formatDate(day)}</div>))}
+                        
                         {staffList.map(staff => (
                             <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
                                 <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{staff.fullName}</div>
-                                {days.map(day => (
-                                    <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center">
-                                        <button className="text-gray-500 hover:text-white"><PlusIcon className="h-6 w-6"/></button>
-                                    </div>
-                                ))}
+                                {days.map(day => {
+                                    const dayStr = day.toISOString().split('T')[0];
+                                    const shiftKey = `${staff.id}_${dayStr}`;
+                                    const shift = schedules[shiftKey];
+                                    return (
+                                        <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
+                                            <button onClick={() => setSelectedShift({ staff, date: day, existingShift: shift })} className="w-full h-full rounded-md flex items-center justify-center text-xs transition-colors hover:bg-gray-700">
+                                                {shift ? (
+                                                    <div className="bg-amber-600 text-white font-bold p-2 rounded-md w-full h-full flex flex-col justify-center text-center">
+                                                        <span>{shift.startTime}</span>
+                                                        <span>{shift.endTime}</span>
+                                                    </div>
+                                                ) : (
+                                                     <PlusIcon className="h-6 w-6 text-gray-500"/>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )
+                                })}
                             </div>
                         ))}
                     </div>
@@ -609,7 +663,7 @@ export default function App() {
         switch(currentPage) {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
-            case 'planning': return <PlanningPage staffList={staffList} />;
+            case 'planning': return <PlanningPage db={db} staffList={staffList} />;
             case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
