@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc, updateDoc, arrayUnion, arrayRemove, where, query, writeBatch, getDocs, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, addDoc, serverTimestamp, setDoc, updateDoc, arrayUnion, arrayRemove, where, query, deleteDoc } from 'firebase/firestore';
 
 // --- Helper Icon Components ---
 const LogInIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>);
@@ -437,9 +437,9 @@ const PlanningPage = ({ db, staffList }) => {
         endOfWeek.setDate(endOfWeek.getDate() + 6);
         
         const startStr = startOfWeek.toISOString().split('T')[0];
-        const endStr = endOfWeek.toISOString().split('T')[0];
-        
-        const q = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
+        const endStr = new Date(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate() + 1).toISOString().split('T')[0];
+
+        const q = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<", endStr));
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const newSchedules = {};
@@ -737,7 +737,7 @@ export default function App() {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
             case 'planning': return <PlanningPage db={db} staffList={staffList} />;
-            case 'leave': return <h2 className="text-3xl font-bold text-white">Leave Management</h2>;
+            case 'leave': return <LeaveManagementPage db={db} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
