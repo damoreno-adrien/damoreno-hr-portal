@@ -706,6 +706,7 @@ const LeaveManagementPage = ({ db, user, userRole }) => {
     );
 };
 
+
 // --- Main Application Component ---
 export default function App() {
     const [auth, setAuth] = useState(null);
