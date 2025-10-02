@@ -1,0 +1,137 @@
+import React, { useState, useEffect } from 'react';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { PlusIcon, TrashIcon } from './Icons';
+
+export default function StaffProfileModal({ staff, db, onClose, departments }) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [isAddingJob, setIsAddingJob] = useState(false);
+    const [formData, setFormData] = useState({ fullName: staff.fullName, email: staff.email });
+    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        setFormData({ fullName: staff.fullName, email: staff.email });
+    }, [staff]);
+
+    const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+    const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', baseSalary: 'N/A' };
+
+    const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
+    const handleNewJobChange = (e) => setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            await updateDoc(staffDocRef, { fullName: formData.fullName, email: formData.email });
+            setIsEditing(false);
+        } catch (err) {
+            setError("Failed to save changes.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    const handleAddNewJob = async () => {
+        if (!newJob.position || !newJob.department || !newJob.startDate || !newJob.baseSalary) {
+            setError("Please fill all fields for the new job role.");
+            return;
+        }
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            await updateDoc(staffDocRef, {
+                jobHistory: arrayUnion({ ...newJob, baseSalary: Number(newJob.baseSalary) })
+            });
+            setIsAddingJob(false);
+            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
+        } catch (err) {
+            setError("Failed to add new job role.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    const handleDeleteJob = async (jobToDelete) => {
+        if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}"?`)) {
+            try {
+                const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                await updateDoc(staffDocRef, {
+                    jobHistory: arrayRemove(jobToDelete)
+                });
+            } catch (err) {
+                alert("Failed to delete job history entry.");
+            }
+        }
+    };
+
+    const InfoRow = ({ label, value }) => (<div><p className="text-sm text-gray-400">{label}</p><p className="text-white text-lg">{value || '-'}</p></div>);
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-gray-700">
+                {isEditing ? (
+                    <>
+                        <div><label className="text-sm text-gray-400">Full Name</label><input id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                        <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                    </>
+                ) : (
+                    <>
+                        <InfoRow label="Full Name" value={staff.fullName} />
+                        <InfoRow label="Email Address" value={staff.email} />
+                    </>
+                )}
+                <InfoRow label="Current Department" value={currentJob.department} />
+                <InfoRow label="Current Position" value={currentJob.position} />
+                <InfoRow label="Current Base Salary (THB)" value={currentJob.baseSalary?.toLocaleString()} />
+            </div>
+
+            <h4 className="text-lg font-semibold text-white">Job & Salary History</h4>
+            {isAddingJob ? (
+                <div className="bg-gray-700 p-4 rounded-lg space-y-4">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="text-sm">Department</label><select id="department" value={newJob.department} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+                        <div><label className="text-sm">Position</label><input id="position" value={newJob.position} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                    </div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className="text-sm">Start Date</label><input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                        <div><label className="text-sm">Base Salary (THB)</label><input id="baseSalary" type="number" value={newJob.baseSalary} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                    </div>
+                    <div className="flex justify-end space-x-2"><button onClick={() => setIsAddingJob(false)} className="px-4 py-1 rounded-md bg-gray-500">Cancel</button><button onClick={handleAddNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600">{isSaving ? 'Saving...' : 'Save Job'}</button></div>
+                    {error && <p className="text-red-400 text-sm text-right mt-2">{error}</p>}
+                </div>
+            ) : (
+                 <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600"><PlusIcon className="h-5 w-5 mr-2"/>Add New Job Role</button>
+            )}
+
+            <div className="space-y-2">
+                {sortedJobHistory.map((job, index) => (
+                    <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group">
+                        <div>
+                            <p className="font-bold">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p>
+                            <p className="text-sm text-amber-400">{job.baseSalary?.toLocaleString()} THB</p>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                             <p className="text-sm text-gray-300">{job.startDate}</p>
+                             <button onClick={() => handleDeleteJob(job)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <TrashIcon className="h-5 w-5"/>
+                             </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            
+            <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
+                {isEditing ? (
+                    <><button onClick={() => { setIsEditing(false); setError(''); }} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button><button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button></>
+                ) : (
+                    <><button onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Close</button><button onClick={() => setIsEditing(true)} className="px-6 py-2 rounded-lg bg-blue-600">Edit Basic Info</button></>
+                )}
+            </div>
+        </div>
+    );
+};
+
