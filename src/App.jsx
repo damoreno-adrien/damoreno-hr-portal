@@ -8,6 +8,7 @@ import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
 import LeaveManagementPage from './pages/LeaveManagementPage';
 import SettingsPage from './pages/SettingsPage';
+import AttendancePage from './pages/AttendancePage';
 
 // Import Icons
 import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon } from './components/Icons';
@@ -144,7 +145,7 @@ export default function App() {
     
     const renderPageContent = () => {
         switch(currentPage) {
-            case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
+            case 'dashboard': return <AttendancePage db={db} staffList={staffList} />;
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
             case 'planning': return <PlanningPage db={db} staffList={staffList} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} />;
