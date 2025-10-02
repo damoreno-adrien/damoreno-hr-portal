@@ -607,27 +607,37 @@ const SettingsPage = ({ db, departments }) => {
     );
 };
 
-// --- Leave Management Page Component ---
-const LeaveManagementPage = ({ db }) => {
+// --- Leave Management Page ---
+const LeaveManagementPage = ({ db, user, userRole }) => {
     const [leaveRequests, setLeaveRequests] = useState([]);
-    const [filter, setFilter] = useState('pending'); // 'pending', 'approved', 'rejected'
+    const [filter, setFilter] = useState('pending');
+    const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
 
     useEffect(() => {
-        if (!db) return;
-        const q = query(collection(db, "leave_requests"), where("status", "==", filter));
+        if (!db || !user) return;
+        
+        let q;
+        if (userRole === 'manager') {
+            q = query(collection(db, "leave_requests"), where("status", "==", filter));
+        } else {
+            q = query(collection(db, "leave_requests"), where("staffId", "==", user.uid));
+        }
+
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            if(userRole === 'staff') {
+                requests.sort((a,b) => b.requestedAt.seconds - a.requestedAt.seconds);
+            }
             setLeaveRequests(requests);
         });
         return () => unsubscribe();
-    }, [db, filter]);
+    }, [db, filter, userRole, user.uid]);
 
     const handleUpdateRequest = async (id, newStatus) => {
         const requestDocRef = doc(db, "leave_requests", id);
         try {
             await updateDoc(requestDocRef, { status: newStatus });
         } catch (error) {
-            console.error("Error updating leave request:", error);
             alert("Failed to update request.");
         }
     };
@@ -639,52 +649,62 @@ const LeaveManagementPage = ({ db }) => {
         return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
     };
 
-    return (
-        <div>
-            <div className="flex justify-between items-center mb-8">
-                <h2 className="text-3xl font-bold text-white">Leave Management</h2>
-                <div className="flex space-x-2 p-1 bg-gray-700 rounded-lg">
-                    <button onClick={() => setFilter('pending')} className={`px-4 py-2 text-sm rounded-md ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Pending</button>
-                    <button onClick={() => setFilter('approved')} className={`px-4 py-2 text-sm rounded-md ${filter === 'approved' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Approved</button>
-                    <button onClick={() => setFilter('rejected')} className={`px-4 py-2 text-sm rounded-md ${filter === 'rejected' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Rejected</button>
+    if (userRole === 'manager') {
+        return (
+            <div>
+                <div className="flex justify-between items-center mb-8">
+                    <h2 className="text-3xl font-bold text-white">Leave Management</h2>
+                    <div className="flex space-x-2 p-1 bg-gray-700 rounded-lg">
+                        <button onClick={() => setFilter('pending')} className={`px-4 py-2 text-sm rounded-md ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Pending</button>
+                        <button onClick={() => setFilter('approved')} className={`px-4 py-2 text-sm rounded-md ${filter === 'approved' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Approved</button>
+                        <button onClick={() => setFilter('rejected')} className={`px-4 py-2 text-sm rounded-md ${filter === 'rejected' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Rejected</button>
+                    </div>
                 </div>
-            </div>
-
-            <div className="bg-gray-800 rounded-lg shadow-lg">
-                <div className="divide-y divide-gray-700">
+                <div className="bg-gray-800 rounded-lg shadow-lg"><div className="divide-y divide-gray-700">
                     {leaveRequests.length > 0 ? leaveRequests.map(req => (
-                        <div key={req.id} className="p-4 flex flex-wrap justify-between items-center">
-                            <div>
-                                <p className="font-bold text-white">{req.staffName}</p>
-                                <p className="text-sm text-gray-400">{req.leaveType} | Requested on: {new Date(req.requestedAt.seconds * 1000).toLocaleDateString('en-GB')}</p>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-sm text-gray-300">Dates:</p>
-                                <p className="font-medium text-white">{req.startDate} to {req.endDate}</p>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-sm text-gray-300">Total Days:</p>
-                                <p className="font-medium text-white">{req.totalDays}</p>
-                            </div>
+                        <div key={req.id} className="p-4 flex flex-wrap justify-between items-center gap-4">
+                            <div><p className="font-bold text-white">{req.staffName}</p><p className="text-sm text-gray-400">{req.leaveType} | Requested: {new Date(req.requestedAt.seconds * 1000).toLocaleDateString('en-GB')}</p></div>
+                            <div className="text-center"><p className="text-sm text-gray-300">Dates:</p><p className="font-medium text-white">{req.startDate} to {req.endDate}</p></div>
+                            <div className="text-center"><p className="text-sm text-gray-300">Total Days:</p><p className="font-medium text-white">{req.totalDays}</p></div>
                             <div className="flex items-center space-x-4">
                                <StatusBadge status={req.status} />
                                {req.status === 'pending' && (
-                                   <>
-                                    <button onClick={() => handleUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700">Reject</button>
-                                    <button onClick={() => handleUpdateRequest(req.id, 'approved')} className="px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700">Approve</button>
-                                   </>
+                                   <><button onClick={() => handleUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700">Reject</button><button onClick={() => handleUpdateRequest(req.id, 'approved')} className="px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700">Approve</button></>
                                )}
                             </div>
                         </div>
-                    )) : (
-                        <p className="text-center py-10 text-gray-400">No {filter} requests found.</p>
-                    )}
-                </div>
+                    )) : (<p className="text-center py-10 text-gray-400">No {filter} requests found.</p>)}
+                </div></div>
             </div>
+        );
+    }
+
+    return (
+        <div>
+            <Modal isOpen={isRequestModalOpen} onClose={() => setIsRequestModalOpen(false)} title="Request Time Off">
+                <LeaveRequestForm db={db} user={user} onClose={() => setIsRequestModalOpen(false)} />
+            </Modal>
+            <div className="flex justify-between items-center mb-8">
+                <h2 className="text-3xl font-bold text-white">My Leave Requests</h2>
+                <button onClick={() => setIsRequestModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Request New Leave</button>
+            </div>
+            <div className="bg-gray-800 rounded-lg shadow-lg"><div className="divide-y divide-gray-700">
+                {leaveRequests.length > 0 ? leaveRequests.map(req => (
+                    <div key={req.id} className="p-4 flex justify-between items-center">
+                        <div>
+                            <p className="font-bold text-white">{req.leaveType}</p>
+                            <p className="text-sm text-gray-400">Requested on: {new Date(req.requestedAt.seconds * 1000).toLocaleDateString('en-GB')}</p>
+                        </div>
+                        <div>
+                            <p className="font-medium text-white">{req.startDate} to {req.endDate} ({req.totalDays} days)</p>
+                        </div>
+                        <StatusBadge status={req.status} />
+                    </div>
+                )) : (<p className="text-center py-10 text-gray-400">You have not made any leave requests.</p>)}
+            </div></div>
         </div>
     );
 };
-
 
 // --- Main Application Component ---
 export default function App() {
@@ -815,7 +835,7 @@ export default function App() {
             case 'dashboard': return <h2 className="text-3xl font-bold text-white">Welcome, {user.email}!</h2>;
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
             case 'planning': return <PlanningPage db={db} staffList={staffList} />;
-            case 'leave': return <LeaveManagementPage db={db} />;
+            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
