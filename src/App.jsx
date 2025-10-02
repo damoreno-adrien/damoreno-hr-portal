@@ -9,6 +9,7 @@ import PlanningPage from './pages/PlanningPage';
 import LeaveManagementPage from './pages/LeaveManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import AttendancePage from './pages/AttendancePage';
+import DashboardPage from './pages/DashboardPage'; // 1. IMPORT THE NEW DASHBOARD
 
 // Import Icons
 import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon } from './components/Icons';
@@ -144,8 +145,17 @@ export default function App() {
     }
     
     const renderPageContent = () => {
+        // 2. UPDATE THE PAGE RENDERING LOGIC
+        if (currentPage === 'dashboard') {
+            if (userRole === 'manager') {
+                return <AttendancePage db={db} staffList={staffList} />;
+            }
+            if (userRole === 'staff') {
+                return <DashboardPage db={db} user={user} />;
+            }
+        }
+        
         switch(currentPage) {
-            case 'dashboard': return <AttendancePage db={db} staffList={staffList} />;
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
             case 'planning': return <PlanningPage db={db} staffList={staffList} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} />;
@@ -202,4 +212,3 @@ export default function App() {
         </div>
     );
 }
-
