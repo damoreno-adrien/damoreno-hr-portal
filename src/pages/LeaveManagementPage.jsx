@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon, BriefcaseIcon, TrashIcon } from '../components/Icons';
@@ -29,6 +29,23 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         return () => unsubscribe();
     }, [db, userRole, user?.uid]);
 
+    // --- NEW: Effect to mark notifications as "read" for staff ---
+    useEffect(() => {
+        if (userRole === 'staff' && allLeaveRequests.length > 0) {
+            const batch = writeBatch(db);
+            const unreadRequests = allLeaveRequests.filter(req => req.isReadByStaff === false);
+
+            if (unreadRequests.length > 0) {
+                unreadRequests.forEach(req => {
+                    const docRef = doc(db, 'leave_requests', req.id);
+                    batch.update(docRef, { isReadByStaff: true });
+                });
+                batch.commit();
+            }
+        }
+    }, [allLeaveRequests, userRole, db]);
+
+
     useEffect(() => {
         if (userRole === 'manager') {
             const filtered = allLeaveRequests.filter(req => req.status === filter);
@@ -41,7 +58,10 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
 
     const handleUpdateRequest = async (id, newStatus) => {
         const requestDocRef = doc(db, "leave_requests", id);
-        try { await updateDoc(requestDocRef, { status: newStatus }); } 
+        try { 
+            // When manager updates, set the notification flag for the staff member
+            await updateDoc(requestDocRef, { status: newStatus, isReadByStaff: false }); 
+        } 
         catch (error) { alert("Failed to update request."); }
     };
 
@@ -52,7 +72,8 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
             catch (error) { alert("Failed to delete request."); }
         }
     };
-
+    
+    // ... (modal handling and StatusBadge functions remain the same) ...
     const openEditModal = (request) => {
         setRequestToEdit(request);
         setIsModalOpen(true);
@@ -72,6 +93,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         if (status === 'rejected') return <span className={`${baseClasses} bg-red-600 text-red-100`}>Rejected</span>;
         return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
     };
+
 
     if (userRole === 'manager') {
         return (
@@ -133,8 +155,13 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
                 <div className="divide-y divide-gray-700">
                     {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
                         <div key={req.id} className="p-4 flex justify-between items-center">
-                            <div><p className="font-bold text-white">{req.leaveType}</p><p className="text-sm text-gray-400">Requested on: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p></div>
-                            <div><p className="font-medium text-white">{req.startDate} to {req.endDate} ({req.totalDays} days)</p></div>
+                            <div>
+                                <p className="font-bold text-white">{req.leaveType}</p>
+                                <p className="text-sm text-gray-400">Requested on: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p>
+                            </div>
+                            <div>
+                                <p className="font-medium text-white">{req.startDate} to {req.endDate} ({req.totalDays} days)</p>
+                            </div>
                             <StatusBadge status={req.status} />
                         </div>
                     )) : (<p className="text-center py-10 text-gray-400">You have not made any leave requests.</p>)}

@@ -1,21 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where } from 'firebase/firestore';
 import { getFunctions } from "firebase/functions";
 
-// Import Pages
+// ... (Imports for Pages and Icons remain the same) ...
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
 import LeaveManagementPage from './pages/LeaveManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import AttendancePage from './pages/AttendancePage';
 import DashboardPage from './pages/DashboardPage';
-
-// Import Icons
 import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon } from './components/Icons';
 
+
 export default function App() {
+    // ... (Most state variables remain the same) ...
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
     const [user, setUser] = useState(null);
@@ -28,7 +28,11 @@ export default function App() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [departments, setDepartments] = useState([]);
+    const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+    // --- NEW: State for staff notifications ---
+    const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
 
+    // ... (useEffect for Firebase Initialization remains the same) ...
     useEffect(() => {
         try {
             const firebaseConfigString = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_FIREBASE_CONFIG : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
@@ -79,6 +83,42 @@ export default function App() {
         }
     }, []);
 
+    // ... (useEffect for manager notifications remains the same) ...
+    useEffect(() => {
+        if (userRole === 'manager' && db) {
+            const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
+            
+            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                setPendingRequestsCount(querySnapshot.size);
+            });
+
+            return () => unsubscribe();
+        } else {
+            setPendingRequestsCount(0);
+        }
+    }, [userRole, db]);
+
+    // --- NEW: Effect to listen for unread leave updates for staff ---
+    useEffect(() => {
+        if (userRole === 'staff' && db && user) {
+            const q = query(
+                collection(db, 'leave_requests'),
+                where('staffId', '==', user.uid),
+                where('isReadByStaff', '==', false)
+            );
+
+            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                setUnreadLeaveUpdatesCount(querySnapshot.size);
+            });
+
+            return () => unsubscribe();
+        } else {
+            setUnreadLeaveUpdatesCount(0);
+        }
+    }, [userRole, user, db]);
+
+
+    // ... (other useEffects and functions remain the same) ...
     useEffect(() => {
         if (!db) return;
         const configDocRef = doc(db, 'settings', 'company_config');
@@ -170,17 +210,23 @@ export default function App() {
             case 'planning':
                 const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []);
                 return <PlanningPage db={db} staffList={list} userRole={userRole} />;
-            // I've added staffList={staffList} to the line below to complete the fix
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
     };
-
-    const NavLink = ({ icon, label, page }) => (
-        <button onClick={() => setCurrentPage(page)} className={`flex items-center w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === page ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}>
-            {icon}
-            <span className="ml-3">{label}</span>
+    
+    const NavLink = ({ icon, label, page, badgeCount }) => (
+        <button onClick={() => setCurrentPage(page)} className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === page ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}>
+            <div className="flex items-center">
+                {icon}
+                <span className="ml-3">{label}</span>
+            </div>
+            {badgeCount > 0 && (
+                <span className="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                    {badgeCount}
+                </span>
+            )}
         </button>
     );
 
@@ -197,7 +243,7 @@ export default function App() {
                            <NavLink page="dashboard" label="Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
                            <NavLink page="staff" label="Manage Staff" icon={<BriefcaseIcon className="h-5 w-5"/>} />
                            <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5"/>} />
-                           <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} />
+                           <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingRequestsCount} />
                            <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
                         </>
                     )}
@@ -205,7 +251,8 @@ export default function App() {
                         <>
                            <NavLink page="dashboard" label="My Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
                            <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5"/>} />
-                           <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} />
+                           {/* --- UPDATED: Pass the staff's badge count here --- */}
+                           <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadLeaveUpdatesCount} />
                         </>
                     )}
                 </nav>
