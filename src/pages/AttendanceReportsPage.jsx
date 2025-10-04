@@ -32,44 +32,99 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setReportData([]);
 
         try {
-            // 1. Fetch attendance data for the selected date range
+            // --- NEW LOGIC ---
+            // 1. Fetch all schedules within the date range
+            const schedulesQuery = query(
+                collection(db, "schedules"),
+                where("date", ">=", startDate),
+                where("date", "<=", endDate)
+            );
+            const schedulesSnapshot = await getDocs(schedulesQuery);
+            const schedulesData = schedulesSnapshot.docs.map(doc => doc.data());
+
+            // 2. Fetch all attendance records for the same range
             const attendanceQuery = query(
                 collection(db, "attendance"),
                 where("date", ">=", startDate),
-                where("date", "<=", endDate),
-                orderBy("date", "asc")
+                where("date", "<=", endDate)
             );
             const attendanceSnapshot = await getDocs(attendanceQuery);
-            const attendanceData = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            // Put attendance data into a Map for easy lookup
+            const attendanceMap = new Map();
+            attendanceSnapshot.docs.forEach(doc => {
+                const data = doc.data();
+                const key = `${data.staffId}_${data.date}`;
+                attendanceMap.set(key, data);
+            });
 
-            // For simplicity, this version calculates hours directly from attendance data.
-            // A future enhancement could cross-reference with the 'schedules' collection to find absences.
-            const processedData = attendanceData.map(att => {
-                const staffMember = staffList.find(s => s.id === att.staffId);
-                const totalHours = calculateHours(att.checkInTime, att.checkOutTime);
-                // Note: This simple version doesn't account for breaks. This can be added later.
+            // 3. Process and merge the data
+            const processedData = schedulesData.map(schedule => {
+                const key = `${schedule.staffId}_${schedule.date}`;
+                const attendance = attendanceMap.get(key);
+                const staffMember = staffList.find(s => s.id === schedule.staffId);
+
+                if (!attendance) {
+                    // Staff was scheduled but has no attendance record
+                    return {
+                        id: key, date: schedule.date, staffName: staffMember?.fullName || 'Unknown',
+                        checkInTime: '-', checkOutTime: '-', breakHours: 0, totalHours: 0, status: 'Absent'
+                    };
+                }
+
+                // Staff has an attendance record, calculate details
+                const breakHours = calculateHours(attendance.breakStart, attendance.breakEnd);
+                const grossHours = calculateHours(attendance.checkInTime, attendance.checkOutTime);
+                const netHours = grossHours - breakHours;
+
+                // Check for lateness (with a 5-minute grace period)
+                const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
+                scheduledStart.setMinutes(scheduledStart.getMinutes() + 5); // Add grace period
+                const actualCheckIn = attendance.checkInTime.toDate();
+                const status = actualCheckIn > scheduledStart ? 'Late' : 'Completed';
+                
                 return {
-                    ...att,
-                    staffName: staffMember ? staffMember.fullName : 'Unknown Staff',
-                    totalHours: totalHours.toFixed(2), // Format to 2 decimal places
+                    id: key, date: schedule.date, staffName: staffMember?.fullName || 'Unknown',
+                    checkInTime: attendance.checkInTime,
+                    checkOutTime: attendance.checkOutTime,
+                    breakHours: breakHours.toFixed(2),
+                    totalHours: netHours.toFixed(2),
+                    status: attendance.checkOutTime ? status : 'On Shift',
                 };
             });
-            
+
+            // Sort data by date, then by name
+            processedData.sort((a, b) => {
+                if (a.date < b.date) return -1;
+                if (a.date > b.date) return 1;
+                if (a.staffName < b.staffName) return -1;
+                if (a.staffName > b.staffName) return 1;
+                return 0;
+            });
+
             setReportData(processedData);
 
         } catch (err) {
-            setError('Failed to generate report. You may need to create a database index. Please check the browser console for a link.');
+            setError('Failed to generate report. A database index may be required. Please check the browser console (F12) for a link to create it.');
             console.error(err);
         } finally {
             setIsLoading(false);
         }
+    };
+    
+    const StatusBadge = ({ status }) => {
+        let color = 'bg-gray-500';
+        if (status === 'Completed') color = 'bg-green-600';
+        if (status === 'Late') color = 'bg-yellow-500';
+        if (status === 'Absent') color = 'bg-red-600';
+        if (status === 'On Shift') color = 'bg-blue-500';
+        return <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${color} text-white`}>{status}</span>;
     };
 
     return (
         <div>
             <h2 className="text-3xl font-bold text-white mb-8">Attendance Reports</h2>
             <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex items-end gap-4">
-                <div>
+                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
@@ -92,7 +147,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Check-In</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Check-Out</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Hours</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Break (Hrs)</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Hours Worked</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
@@ -102,11 +159,13 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.staffName}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatTime(item.checkInTime)}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatTime(item.checkOutTime)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{item.totalHours}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.breakHours > 0 ? item.breakHours : '-'}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{item.totalHours > 0 ? item.totalHours : '-'}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={item.status} /></td>
                             </tr>
                         )) : (
                             <tr>
-                                <td colSpan="5" className="px-6 py-10 text-center text-gray-500">
+                                <td colSpan="7" className="px-6 py-10 text-center text-gray-500">
                                     {isLoading ? 'Loading data...' : 'No data to display. Please generate a report.'}
                                 </td>
                             </tr>
