@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 
-// Pass in existing requests to check for overlaps, and an optional request to edit
-export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null }) {
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [] }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [reason, setReason] = useState('');
+    const [selectedStaffId, setSelectedStaffId] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
-    // If we are editing an existing request, pre-fill the form fields
+    const isManagerCreating = userRole === 'manager' && !existingRequest;
+
     useEffect(() => {
         if (existingRequest) {
             setLeaveType(existingRequest.leaveType);
             setStartDate(existingRequest.startDate);
             setEndDate(existingRequest.endDate);
             setReason(existingRequest.reason || '');
+            setSelectedStaffId(existingRequest.staffId);
         }
     }, [existingRequest]);
 
@@ -30,55 +32,50 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!leaveType || !startDate || !endDate) {
-            setError('Please fill in all date and type fields.');
+        if (!leaveType || !startDate || !endDate || (isManagerCreating && !selectedStaffId)) {
+            setError('Please fill in all required fields, including selecting a staff member.');
             return;
         }
 
-        // --- NEW: Overlap Validation Logic ---
         const newStart = new Date(startDate);
         const newEnd = new Date(endDate);
+        const checkStaffId = isManagerCreating ? selectedStaffId : user.uid;
+        
         const overlaps = existingRequests.some(req => {
-            // If we are editing, don't compare the request against itself
-            if (existingRequest && req.id === existingRequest.id) {
-                return false;
-            }
+            if (req.staffId !== checkStaffId) return false;
+            if (existingRequest && req.id === existingRequest.id) return false;
+            
             const existingStart = new Date(req.startDate);
             const existingEnd = new Date(req.endDate);
-            // Check for overlap: (StartA <= EndB) and (EndA >= StartB)
             return newStart <= existingEnd && newEnd >= existingStart;
         });
 
         if (overlaps) {
-            setError('The selected dates overlap with an existing leave request.');
+            setError('The selected dates overlap with an existing leave request for this staff member.');
             return;
         }
-        // --- END of Validation ---
 
         setIsSaving(true);
         setError('');
 
+        const selectedStaff = staffList.find(s => s.id === selectedStaffId);
+
         const requestData = {
-            staffId: existingRequest ? existingRequest.staffId : user.uid,
-            staffName: existingRequest ? existingRequest.staffName : (user.displayName || user.email),
-            leaveType,
-            startDate,
-            endDate,
-            totalDays,
-            reason,
+            staffId: isManagerCreating ? selectedStaffId : (existingRequest ? existingRequest.staffId : user.uid),
+            staffName: isManagerCreating ? selectedStaff.fullName : (existingRequest ? existingRequest.staffName : (user.displayName || user.email)),
+            leaveType, startDate, endDate, totalDays, reason,
             status: existingRequest ? existingRequest.status : 'pending',
         };
 
         try {
             if (existingRequest) {
-                // If editing, update the existing document
                 const docRef = doc(db, 'leave_requests', existingRequest.id);
                 await updateDoc(docRef, requestData);
             } else {
-                // If creating, add a new document
                 await addDoc(collection(db, 'leave_requests'), {
                     ...requestData,
-                    requestedAt: serverTimestamp()
+                    requestedAt: serverTimestamp(),
+                    status: 'approved' // Manager-created requests are auto-approved
                 });
             }
             onClose();
@@ -91,12 +88,19 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
+            {isManagerCreating && (
+                <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Select Staff Member</label>
+                    <select value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md">
+                        <option value="">-- Choose an employee --</option>
+                        {staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.fullName}</option>)}
+                    </select>
+                </div>
+            )}
             <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">Leave Type</label>
                 <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md">
-                    <option>Annual Leave</option>
-                    <option>Sick Leave</option>
-                    <option>Personal Leave</option>
+                    <option>Annual Leave</option><option>Sick Leave</option><option>Personal Leave</option>
                 </select>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -109,9 +113,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
             </div>
-             <div>
-                <p className="text-sm text-gray-400">Total days: <span className="font-bold text-white">{totalDays > 0 ? totalDays : ''}</span></p>
-            </div>
+             <div><p className="text-sm text-gray-400">Total days: <span className="font-bold text-white">{totalDays > 0 ? totalDays : ''}</span></p></div>
             <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">Reason (Optional)</label>
                 <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows="3" className="w-full p-2 bg-gray-700 rounded-md"></textarea>
