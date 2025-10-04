@@ -9,7 +9,7 @@ import PlanningPage from './pages/PlanningPage';
 import LeaveManagementPage from './pages/LeaveManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import AttendancePage from './pages/AttendancePage';
-import DashboardPage from './pages/DashboardPage'; // 1. IMPORT THE NEW DASHBOARD
+import DashboardPage from './pages/DashboardPage';
 
 // Import Icons
 import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon } from './components/Icons';
@@ -23,6 +23,7 @@ export default function App() {
     const [loginError, setLoginError] = useState('');
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffList, setStaffList] = useState([]);
+    const [staffProfile, setStaffProfile] = useState(null); // State for single staff profile
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [departments, setDepartments] = useState([]);
@@ -49,11 +50,24 @@ export default function App() {
                 if (currentUser) {
                     const userDocRef = doc(dbInstance, 'users', currentUser.uid);
                     const userDocSnap = await getDoc(userDocRef);
+                    const role = userDocSnap.exists() ? userDocSnap.data().role : null;
+                    
                     setUser(currentUser);
-                    setUserRole(userDocSnap.exists() ? userDocSnap.data().role : null);
+                    setUserRole(role);
+
+                    // If user is staff, fetch their specific profile
+                    if (role === 'staff') {
+                        const staffProfileRef = doc(dbInstance, 'staff_profiles', currentUser.uid);
+                        const staffProfileSnap = await getDoc(staffProfileRef);
+                         if (staffProfileSnap.exists()) {
+                            setStaffProfile({ id: staffProfileSnap.id, ...staffProfileSnap.data() });
+                        }
+                    }
+
                 } else {
                     setUser(null);
                     setUserRole(null);
+                    setStaffProfile(null);
                 }
                 setIsLoading(false);
             });
@@ -145,19 +159,16 @@ export default function App() {
     }
     
     const renderPageContent = () => {
-        // 2. UPDATE THE PAGE RENDERING LOGIC
         if (currentPage === 'dashboard') {
-            if (userRole === 'manager') {
-                return <AttendancePage db={db} staffList={staffList} />;
-            }
-            if (userRole === 'staff') {
-                return <DashboardPage db={db} user={user} />;
-            }
+            if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
+            if (userRole === 'staff') return <DashboardPage db={db} user={user} />;
         }
         
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
-            case 'planning': return <PlanningPage db={db} staffList={staffList} />;
+            case 'planning':
+                const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []);
+                return <PlanningPage db={db} staffList={list} userRole={userRole} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;

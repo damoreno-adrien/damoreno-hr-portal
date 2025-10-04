@@ -1,13 +1,21 @@
 import React, { useState } from 'react';
 import { doc, updateDoc, addDoc, collection, deleteDoc } from 'firebase/firestore';
 
+// Helper function to format date consistently regardless of timezone
+const formatDateToYYYYMMDD = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 export default function ShiftModal({ db, staffMember, date, existingShift, onClose }) {
     const [startTime, setStartTime] = useState(existingShift ? existingShift.startTime : '14:00');
     const [endTime, setEndTime] = useState(existingShift ? existingShift.endTime : '23:00');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
-    const formattedDate = date.toISOString().split('T')[0];
+    const formattedDate = formatDateToYYYYMMDD(date);
 
     const handleSave = async () => {
         if (!startTime || !endTime) {
@@ -72,4 +80,3 @@ export default function ShiftModal({ db, staffMember, date, existingShift, onClo
         </div>
     );
 };
-
