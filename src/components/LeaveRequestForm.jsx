@@ -22,8 +22,16 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     }, [existingRequest]);
 
+    // --- NEW: Effect to clear end date if it's before the start date ---
+    useEffect(() => {
+        if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+            setEndDate('');
+        }
+    }, [startDate, endDate]);
+
+
     const calculateDays = (start, end) => {
-        if (!start || !end) return 0;
+        if (!start || !end || new Date(end) < new Date(start)) return 0; // Prevent calculation for invalid dates
         const diffTime = Math.abs(new Date(end) - new Date(start));
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     };
@@ -32,8 +40,16 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setError(''); // Clear previous errors
+
         if (!leaveType || !startDate || !endDate || (isManagerCreating && !selectedStaffId)) {
             setError('Please fill in all required fields, including selecting a staff member.');
+            return;
+        }
+        
+        // --- NEW: Submission validation for date range ---
+        if (new Date(endDate) < new Date(startDate)) {
+            setError('The end date cannot be before the start date.');
             return;
         }
 
@@ -56,7 +72,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
 
         setIsSaving(true);
-        setError('');
 
         const selectedStaff = staffList.find(s => s.id === selectedStaffId);
 
@@ -75,7 +90,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 await addDoc(collection(db, 'leave_requests'), {
                     ...requestData,
                     requestedAt: serverTimestamp(),
-                    status: 'approved' // Manager-created requests are auto-approved
+                    status: isManagerCreating ? 'approved' : 'pending'
                 });
             }
             onClose();
@@ -110,7 +125,8 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
-                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md" />
+                    {/* --- NEW: Add min attribute to End Date input --- */}
+                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
             </div>
              <div><p className="text-sm text-gray-400">Total days: <span className="font-bold text-white">{totalDays > 0 ? totalDays : ''}</span></p></div>
