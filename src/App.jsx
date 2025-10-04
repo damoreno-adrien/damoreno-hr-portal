@@ -4,18 +4,20 @@ import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from
 import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where } from 'firebase/firestore';
 import { getFunctions } from "firebase/functions";
 
-// ... (Imports for Pages and Icons remain the same) ...
+// Import Pages
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
 import LeaveManagementPage from './pages/LeaveManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import AttendancePage from './pages/AttendancePage';
 import DashboardPage from './pages/DashboardPage';
-import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon } from './components/Icons';
+import AttendanceReportsPage from './pages/AttendanceReportsPage'; // 1. Import the new page
 
+// Import Icons
+import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon } from './components/Icons'; // 2. Import the new icon
 
 export default function App() {
-    // ... (Most state variables remain the same) ...
+    // ... (All state and useEffect hooks remain the same) ...
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
     const [user, setUser] = useState(null);
@@ -29,10 +31,8 @@ export default function App() {
     const [password, setPassword] = useState('');
     const [departments, setDepartments] = useState([]);
     const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
-    // --- NEW: State for staff notifications ---
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
 
-    // ... (useEffect for Firebase Initialization remains the same) ...
     useEffect(() => {
         try {
             const firebaseConfigString = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_FIREBASE_CONFIG : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
@@ -83,7 +83,6 @@ export default function App() {
         }
     }, []);
 
-    // ... (useEffect for manager notifications remains the same) ...
     useEffect(() => {
         if (userRole === 'manager' && db) {
             const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
@@ -98,7 +97,6 @@ export default function App() {
         }
     }, [userRole, db]);
 
-    // --- NEW: Effect to listen for unread leave updates for staff ---
     useEffect(() => {
         if (userRole === 'staff' && db && user) {
             const q = query(
@@ -118,7 +116,6 @@ export default function App() {
     }, [userRole, user, db]);
 
 
-    // ... (other useEffects and functions remain the same) ...
     useEffect(() => {
         if (!db) return;
         const configDocRef = doc(db, 'settings', 'company_config');
@@ -211,6 +208,7 @@ export default function App() {
                 const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []);
                 return <PlanningPage db={db} staffList={list} userRole={userRole} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
+            case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />; // 3. Render the new page
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
@@ -244,6 +242,7 @@ export default function App() {
                            <NavLink page="staff" label="Manage Staff" icon={<BriefcaseIcon className="h-5 w-5"/>} />
                            <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5"/>} />
                            <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingRequestsCount} />
+                           <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5"/>} /> {/* 4. Add the new NavLink */}
                            <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
                         </>
                     )}
@@ -251,7 +250,6 @@ export default function App() {
                         <>
                            <NavLink page="dashboard" label="My Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
                            <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5"/>} />
-                           {/* --- UPDATED: Pass the staff's badge count here --- */}
                            <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadLeaveUpdatesCount} />
                         </>
                     )}
