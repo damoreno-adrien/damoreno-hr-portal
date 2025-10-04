@@ -1,13 +1,24 @@
-import React, { useState } from 'react';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 
-export default function LeaveRequestForm({ db, user, onClose }) {
+// Pass in existing requests to check for overlaps, and an optional request to edit
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [reason, setReason] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
+
+    // If we are editing an existing request, pre-fill the form fields
+    useEffect(() => {
+        if (existingRequest) {
+            setLeaveType(existingRequest.leaveType);
+            setStartDate(existingRequest.startDate);
+            setEndDate(existingRequest.endDate);
+            setReason(existingRequest.reason || '');
+        }
+    }, [existingRequest]);
 
     const calculateDays = (start, end) => {
         if (!start || !end) return 0;
@@ -23,21 +34,53 @@ export default function LeaveRequestForm({ db, user, onClose }) {
             setError('Please fill in all date and type fields.');
             return;
         }
+
+        // --- NEW: Overlap Validation Logic ---
+        const newStart = new Date(startDate);
+        const newEnd = new Date(endDate);
+        const overlaps = existingRequests.some(req => {
+            // If we are editing, don't compare the request against itself
+            if (existingRequest && req.id === existingRequest.id) {
+                return false;
+            }
+            const existingStart = new Date(req.startDate);
+            const existingEnd = new Date(req.endDate);
+            // Check for overlap: (StartA <= EndB) and (EndA >= StartB)
+            return newStart <= existingEnd && newEnd >= existingStart;
+        });
+
+        if (overlaps) {
+            setError('The selected dates overlap with an existing leave request.');
+            return;
+        }
+        // --- END of Validation ---
+
         setIsSaving(true);
         setError('');
 
+        const requestData = {
+            staffId: existingRequest ? existingRequest.staffId : user.uid,
+            staffName: existingRequest ? existingRequest.staffName : (user.displayName || user.email),
+            leaveType,
+            startDate,
+            endDate,
+            totalDays,
+            reason,
+            status: existingRequest ? existingRequest.status : 'pending',
+        };
+
         try {
-            await addDoc(collection(db, 'leave_requests'), {
-                staffId: user.uid,
-                staffName: user.displayName || user.email,
-                leaveType,
-                startDate,
-                endDate,
-                totalDays,
-                reason,
-                status: 'pending',
-                requestedAt: serverTimestamp()
-            });
+            if (existingRequest) {
+                // If editing, update the existing document
+                const docRef = doc(db, 'leave_requests', existingRequest.id);
+                await updateDoc(docRef, requestData);
+            } else {
+                // If creating, add a new document
+                await addDoc(collection(db, 'leave_requests'), {
+                    ...requestData,
+                    requestedAt: serverTimestamp()
+                });
+            }
             onClose();
         } catch (err) {
             setError('Failed to submit request. Please try again.');
@@ -81,4 +124,3 @@ export default function LeaveRequestForm({ db, user, onClose }) {
         </form>
     );
 };
-
