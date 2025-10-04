@@ -51,21 +51,24 @@ exports.createUser = functions.https.onRequest((req, res) => {
       // 5. Create the 'users' document with the 'staff' role
       await db.collection("users").doc(newUserId).set({ role: "staff" });
 
-      // 6. ***FIX***: Create the initial job object for the job history
+      // 6. ***CORRECTED FIX***: Create the initial job object for the job history
       const initialJob = {
           position: position,
           department: department,
-          startDate: startDate,
+          startDate: startDate, // This should be the job's start date, not user's general start date if different
           baseSalary: Number(baseSalary), // Ensure salary is a number
+          // Add an endDate if it's an old job, but for the first job, it's ongoing.
       };
 
-      // 7. ***FIX***: Create the staff_profiles document with the job history included
+      // 7. ***CORRECTED FIX***: Create the staff_profiles document with ALL relevant fields
       await db.collection("staff_profiles").doc(newUserId).set({
-        // Using .doc(newUserId).set() is better than .add()
         fullName: fullName,
         email: email,
-        startDate: startDate,
-        jobHistory: [initialJob], // Save the initial job in the history array
+        // The general 'startDate' for the staff member can be derived from the first job entry
+        // For now, we'll keep it as you had it, but it might be redundant with jobHistory[0].startDate
+        startDate: startDate, 
+        uid: newUserId, // Store the UID as a field in the profile for easier reference
+        jobHistory: [initialJob], // ***This is the crucial change***
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
