@@ -11,6 +11,7 @@ import SettingsPage from './pages/SettingsPage';
 import AttendancePage from './pages/AttendancePage';
 import DashboardPage from './pages/DashboardPage';
 import AttendanceReportsPage from './pages/AttendanceReportsPage';
+import MySchedulePage from './pages/MySchedulePage';
 import { UserIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
@@ -123,7 +124,14 @@ export default function App() {
         }
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} userRole={userRole} />;
-            case 'planning': const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []); return <PlanningPage db={db} staffList={list} userRole={userRole} />;
+            case 'planning':
+                if (userRole === 'manager') {
+                    return <PlanningPage db={db} staffList={staffList} userRole={userRole} />;
+                }
+                if (userRole === 'staff') {
+                    return <MySchedulePage db={db} user={user} />;
+                }
+                return null;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
