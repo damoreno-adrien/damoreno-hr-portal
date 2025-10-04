@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc } from 'firebase/firestore';
-import { getFunctions } from "firebase/functions"; // Import getFunctions
+import { getFunctions } from "firebase/functions";
 
 // Import Pages
 import StaffManagementPage from './pages/StaffManagementPage';
@@ -43,7 +43,7 @@ export default function App() {
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             const dbInstance = getFirestore(app);
-            getFunctions(app); // Initialize Firebase Functions
+            getFunctions(app);
             
             setAuth(authInstance);
             setDb(dbInstance);
@@ -166,12 +166,12 @@ export default function App() {
         }
         
         switch(currentPage) {
-            // I've added userRole={userRole} to the line below to complete the fix
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} userRole={userRole} />;
             case 'planning':
                 const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []);
                 return <PlanningPage db={db} staffList={list} userRole={userRole} />;
-            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} />;
+            // I've added staffList={staffList} to the line below to complete the fix
+            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
