@@ -4,7 +4,6 @@ import Modal from '../components/Modal';
 import ShiftModal from '../components/ShiftModal';
 import { PlusIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/Icons';
 
-// Helper function to format date consistently regardless of timezone
 const formatDateToYYYYMMDD = (date) => {
     const d = new Date(date);
     const year = d.getFullYear();
@@ -36,7 +35,6 @@ export default function PlanningPage({ db, staffList, userRole }) {
         const startStr = formatDateToYYYYMMDD(startOfWeek);
         const endStr = formatDateToYYYYMMDD(endOfWeek);
 
-        // Query for shifts
         const shiftsQuery = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
             const newSchedules = {};
@@ -48,7 +46,6 @@ export default function PlanningPage({ db, staffList, userRole }) {
             setSchedules(newSchedules);
         });
 
-        // Query for approved leave requests
         const leaveQuery = query(
             collection(db, "leave_requests"),
             where("status", "==", "approved"),
@@ -121,11 +118,11 @@ export default function PlanningPage({ db, staffList, userRole }) {
                 </Modal>
             )}
 
-            <div className="flex justify-between items-center mb-8">
-                <h2 className="text-3xl font-bold text-white">{isManager ? "Weekly Planner" : "My Schedule"}</h2>
-                <div className="flex items-center space-x-4">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 space-y-4 sm:space-y-0">
+                <h2 className="text-2xl md:text-3xl font-bold text-white">{isManager ? "Weekly Planner" : "My Schedule"}</h2>
+                <div className="flex items-center space-x-2 sm:space-x-4">
                     <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronLeftIcon className="h-6 w-6" /></button>
-                    <h3 className="text-xl font-semibold w-64 text-center">{weekRangeString}</h3>
+                    <h3 className="text-lg sm:text-xl font-semibold w-48 sm:w-64 text-center">{weekRangeString}</h3>
                     <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronRightIcon className="h-6 w-6" /></button>
                 </div>
             </div>

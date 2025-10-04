@@ -111,17 +111,18 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
     return (
         <div>
-            <h2 className="text-3xl font-bold text-white mb-8">Attendance Reports</h2>
-            <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex items-end gap-4">
-                 <div>
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Attendance Reports</h2>
+            
+            <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col space-y-4 md:space-y-0 md:flex-row md:items-end md:space-x-4">
+                 <div className="flex-grow">
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
-                <div>
+                <div className="flex-grow">
                     <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
-                <button onClick={handleGenerateReport} disabled={isLoading} className="px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600">
+                <button onClick={handleGenerateReport} disabled={isLoading} className="w-full md:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">
                     {isLoading ? 'Generating...' : 'Generate Report'}
                 </button>
             </div>

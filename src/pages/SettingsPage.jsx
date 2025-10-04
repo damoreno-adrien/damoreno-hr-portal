@@ -36,16 +36,16 @@ export default function SettingsPage({ db, departments }) {
 
     return (
         <div>
-            <h2 className="text-3xl font-bold text-white mb-8">Settings</h2>
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Settings</h2>
             <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                 <h3 className="text-xl font-semibold text-white">Manage Departments</h3>
                 <p className="text-gray-400 mt-2">Add or remove departments for your restaurant.</p>
 
-                <form onSubmit={handleAddDepartment} className="mt-6 flex items-center space-x-4">
+                <form onSubmit={handleAddDepartment} className="mt-6 flex flex-col sm:flex-row items-stretch sm:space-x-4 space-y-2 sm:space-y-0">
                     <input type="text" value={newDepartment} onChange={(e) => setNewDepartment(e.target.value)} placeholder="New department name" className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
-                    <button type="submit" disabled={isSaving} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
+                    <button type="submit" disabled={isSaving} className="flex-shrink-0 flex items-center justify-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
                         <PlusIcon className="h-5 w-5 mr-2" />
-                        {isSaving ? 'Adding...' : 'Add'}
+                        <span>Add</span>
                     </button>
                 </form>
                 {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
@@ -64,4 +64,3 @@ export default function SettingsPage({ db, departments }) {
         </div>
     );
 };
-

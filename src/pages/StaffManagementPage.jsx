@@ -40,8 +40,8 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             )}
 
             <div className="flex justify-between items-center mb-8">
-                <h2 className="text-3xl font-bold text-white">Staff Management</h2>
-                <button onClick={() => setIsAddModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
+                <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
+                <button onClick={() => setIsAddModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0">
                     <PlusIcon className="h-5 w-5 mr-2" />
                     Invite New Staff
                 </button>

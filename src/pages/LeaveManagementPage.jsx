@@ -29,7 +29,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         return () => unsubscribe();
     }, [db, userRole, user?.uid]);
 
-    // --- NEW: Effect to mark notifications as "read" for staff ---
     useEffect(() => {
         if (userRole === 'staff' && allLeaveRequests.length > 0) {
             const batch = writeBatch(db);
@@ -59,7 +58,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
     const handleUpdateRequest = async (id, newStatus) => {
         const requestDocRef = doc(db, "leave_requests", id);
         try { 
-            // When manager updates, set the notification flag for the staff member
             await updateDoc(requestDocRef, { status: newStatus, isReadByStaff: false }); 
         } 
         catch (error) { alert("Failed to update request."); }
@@ -73,19 +71,9 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         }
     };
     
-    // ... (modal handling and StatusBadge functions remain the same) ...
-    const openEditModal = (request) => {
-        setRequestToEdit(request);
-        setIsModalOpen(true);
-    };
-    const openNewRequestModal = () => {
-        setRequestToEdit(null);
-        setIsModalOpen(true);
-    };
-    const closeModal = () => {
-        setIsModalOpen(false);
-        setRequestToEdit(null);
-    };
+    const openEditModal = (request) => { setRequestToEdit(request); setIsModalOpen(true); };
+    const openNewRequestModal = () => { setRequestToEdit(null); setIsModalOpen(true); };
+    const closeModal = () => { setIsModalOpen(false); setRequestToEdit(null); };
     
     const StatusBadge = ({ status }) => {
         const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
@@ -94,22 +82,21 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
     };
 
-
     if (userRole === 'manager') {
         return (
             <div>
                 <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
                     <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={staffList} existingRequests={allLeaveRequests} />
                 </Modal>
-                <div className="flex justify-between items-center mb-8">
-                    <h2 className="text-3xl font-bold text-white">Leave Management</h2>
-                    <div className="flex items-center space-x-4">
+                <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-8">
+                    <h2 className="text-2xl md:text-3xl font-bold text-white">Leave Management</h2>
+                    <div className="w-full md:w-auto flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
                         <div className="flex space-x-2 p-1 bg-gray-700 rounded-lg">
                             <button onClick={() => setFilter('pending')} className={`px-4 py-2 text-sm rounded-md ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Pending</button>
                             <button onClick={() => setFilter('approved')} className={`px-4 py-2 text-sm rounded-md ${filter === 'approved' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Approved</button>
                             <button onClick={() => setFilter('rejected')} className={`px-4 py-2 text-sm rounded-md ${filter === 'rejected' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Rejected</button>
                         </div>
-                        <button onClick={openNewRequestModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />New Request for Staff</button>
+                        <button onClick={openNewRequestModal} className="flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />New Request for Staff</button>
                     </div>
                 </div>
                 <div className="bg-gray-800 rounded-lg shadow-lg">
@@ -148,20 +135,15 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
                 <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} />
             </Modal>
             <div className="flex justify-between items-center mb-8">
-                <h2 className="text-3xl font-bold text-white">My Leave Requests</h2>
+                <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>
                 <button onClick={openNewRequestModal} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Request New Leave</button>
             </div>
             <div className="bg-gray-800 rounded-lg shadow-lg">
                 <div className="divide-y divide-gray-700">
                     {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
                         <div key={req.id} className="p-4 flex justify-between items-center">
-                            <div>
-                                <p className="font-bold text-white">{req.leaveType}</p>
-                                <p className="text-sm text-gray-400">Requested on: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p>
-                            </div>
-                            <div>
-                                <p className="font-medium text-white">{req.startDate} to {req.endDate} ({req.totalDays} days)</p>
-                            </div>
+                            <div><p className="font-bold text-white">{req.leaveType}</p><p className="text-sm text-gray-400">Requested on: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p></div>
+                            <div><p className="font-medium text-white">{req.startDate} to {req.endDate} ({req.totalDays} days)</p></div>
                             <StatusBadge status={req.status} />
                         </div>
                     )) : (<p className="text-center py-10 text-gray-400">You have not made any leave requests.</p>)}
