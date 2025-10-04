@@ -32,10 +32,8 @@ export default function App() {
     const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    // --- NEW: State for collapsible desktop sidebar ---
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     
-    // ... (All useEffect hooks and other functions remain the same) ...
     useEffect(() => {
         try {
             const firebaseConfigString = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_FIREBASE_CONFIG : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
@@ -119,7 +117,18 @@ export default function App() {
     if (!user) { return ( <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900"><div className="w-full max-w-md p-8 space-y-8 bg-white rounded-2xl shadow-lg dark:bg-gray-800"> <div className="text-center"> <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Da Moreno At Town</h1> <p className="mt-2 text-gray-600 dark:text-gray-300">HR Management Portal</p></div> <form className="mt-8 space-y-6" onSubmit={handleLogin}> <div className="rounded-md shadow-sm"> <div> <input id="email-address" name="email" type="email" autoComplete="email" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} /> </div> <div className="-mt-px"> <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} /> </div></div> {loginError && (<p className="mt-2 text-center text-sm text-red-600 dark:text-red-400">{loginError}</p>)} <div> <button type="submit" className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"> <span className="absolute left-0 inset-y-0 flex items-center pl-3"><LogInIcon className="h-5 w-5 text-amber-500 group-hover:text-amber-400" /></span> Sign in </button> </div> </form> </div></div> ); }
     
     const renderPageContent = () => {
-        // ... (renderPageContent remains the same)
+        if (currentPage === 'dashboard') {
+            if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
+            if (userRole === 'staff') return <DashboardPage db={db} user={user} />;
+        }
+        switch(currentPage) {
+            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} userRole={userRole} />;
+            case 'planning': const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []); return <PlanningPage db={db} staffList={list} userRole={userRole} />;
+            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
+            case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
+            case 'settings': return <SettingsPage db={db} departments={departments} />;
+            default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
+        }
     };
     
     const NavLink = ({ icon, label, page, badgeCount }) => (
@@ -129,12 +138,10 @@ export default function App() {
         >
             <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center w-full' : ''}`}>
                 {icon}
-                {/* --- UPDATED: Conditionally render the label --- */}
-                <span className={`ml-3 ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>{label}</span>
+                <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>{label}</span>
             </div>
-            {/* --- UPDATED: Conditionally render the badge --- */}
             {!isSidebarCollapsed && badgeCount > 0 && ( 
-                <span className="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
                     {badgeCount}
                 </span> 
             )}
@@ -145,11 +152,10 @@ export default function App() {
         <div className="relative min-h-screen md:flex bg-gray-900 text-white font-sans">
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
 
-            {/* --- UPDATED: Sidebar with conditional width and transition --- */}
-            <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'md:w-20' : 'md:w-64'}`}>
+            <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
                 <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4">
-                    <div className={`${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
-                        <h1 className="text-2xl font-bold text-white">Da Moreno HR</h1>
+                    <div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
+                        <h1 className="text-2xl font-bold text-white whitespace-nowrap">Da Moreno HR</h1>
                         <p className="text-sm text-amber-400 capitalize">{userRole} Portal</p>
                     </div>
                     <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white">
@@ -158,28 +164,43 @@ export default function App() {
                 </div>
                 
                 <nav className="flex-1 space-y-2 px-4">
-                    {/* ... (Navigation links remain the same) ... */}
+                    {userRole === 'manager' && (
+                        <>
+                           <NavLink page="dashboard" label="Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
+                           <NavLink page="staff" label="Manage Staff" icon={<BriefcaseIcon className="h-5 w-5"/>} />
+                           <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5"/>} />
+                           <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingRequestsCount} />
+                           <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5"/>} />
+                           <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
+                        </>
+                    )}
+                     {userRole === 'staff' && (
+                        <>
+                           <NavLink page="dashboard" label="My Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
+                           <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5"/>} />
+                           <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadLeaveUpdatesCount} />
+                        </>
+                    )}
                 </nav>
-                <div className="mt-auto px-4">
+                <div className="mt-auto p-4">
                     <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
                         <p className="text-sm text-gray-400 truncate">{user.email}</p>
                     </div>
+                    
+                    <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700`}>
+                        <LogOutIcon className="h-5 w-5"/>
+                        <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span>
+                    </button>
 
-                    {/* --- NEW: Desktop sidebar toggle button --- */}
-                    <div className="hidden md:block border-t border-gray-700 pt-4">
+                    <div className="hidden md:block border-t border-gray-700 mt-4 pt-4">
                         <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="flex items-center justify-center w-full py-2 text-gray-400 hover:bg-gray-700 rounded-lg">
                             {isSidebarCollapsed ? <ChevronRightIcon className="h-6 w-6" /> : <ChevronLeftIcon className="h-6 w-6" />}
                         </button>
                     </div>
-                    
-                    <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700 mt-4`}>
-                        <LogOutIcon className="h-5 w-5"/>
-                        <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span>
-                    </button>
                 </div>
             </aside>
             
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col overflow-hidden">
                 <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center">
                     <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white">
                         <HamburgerIcon className="h-6 w-6" />
