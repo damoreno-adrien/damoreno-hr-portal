@@ -2,10 +2,10 @@
 const {onRequest} = require("firebase-functions/v2/https"); 
 const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
+const {onCall} = require("firebase-functions/v2/https");
 
 admin.initializeApp();
 
-// Export the function using the v2 syntax
 exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
     if (req.method !== "POST") {
@@ -73,4 +73,53 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
       return res.status(500).send({ error: "An error occurred while creating the user." });
     }
   });
+});
+
+exports.deleteStaff = onCall({ region: "us-central1" }, async (request) => {
+    // 1. Check if the user making the call is authenticated and is a manager
+    if (!request.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "The function must be called while authenticated.");
+    }
+    const db = admin.firestore();
+    const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
+        throw new functions.https.HttpsError("permission-denied", "Only managers can delete staff members.");
+    }
+
+    // 2. Get the ID of the staff member to be deleted
+    const staffId = request.data.staffId;
+    if (!staffId) {
+        throw new functions.https.HttpsError("invalid-argument", "The function must be called with a 'staffId'.");
+    }
+
+    try {
+        // 3. Delete the user from Firebase Authentication
+        await admin.auth().deleteUser(staffId);
+
+        // 4. Create a batch to delete all associated Firestore documents
+        const batch = db.batch();
+
+        // Delete from 'users' collection
+        batch.delete(db.collection("users").doc(staffId));
+        // Delete from 'staff_profiles' collection
+        batch.delete(db.collection("staff_profiles").doc(staffId));
+
+        // Find and delete all documents in other collections
+        const collectionsToDeleteFrom = ["schedules", "leave_requests", "attendance"];
+        for (const collectionName of collectionsToDeleteFrom) {
+            const querySnapshot = await db.collection(collectionName).where("staffId", "==", staffId).get();
+            querySnapshot.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+        }
+        
+        // 5. Commit all the deletions at once
+        await batch.commit();
+
+        return { result: `Successfully deleted staff member ${staffId} and all their data.` };
+
+    } catch (error) {
+        console.error("Error deleting staff member:", error);
+        throw new functions.https.HttpsError("internal", "An error occurred while deleting the staff member.");
+    }
 });

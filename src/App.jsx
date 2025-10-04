@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc } from 'firebase/firestore';
+import { getFunctions } from "firebase/functions"; // Import getFunctions
 
 // Import Pages
 import StaffManagementPage from './pages/StaffManagementPage';
@@ -23,7 +24,7 @@ export default function App() {
     const [loginError, setLoginError] = useState('');
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffList, setStaffList] = useState([]);
-    const [staffProfile, setStaffProfile] = useState(null); // State for single staff profile
+    const [staffProfile, setStaffProfile] = useState(null); 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [departments, setDepartments] = useState([]);
@@ -42,6 +43,7 @@ export default function App() {
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             const dbInstance = getFirestore(app);
+            getFunctions(app); // Initialize Firebase Functions
             
             setAuth(authInstance);
             setDb(dbInstance);
@@ -55,7 +57,6 @@ export default function App() {
                     setUser(currentUser);
                     setUserRole(role);
 
-                    // If user is staff, fetch their specific profile
                     if (role === 'staff') {
                         const staffProfileRef = doc(dbInstance, 'staff_profiles', currentUser.uid);
                         const staffProfileSnap = await getDoc(staffProfileRef);
@@ -165,7 +166,8 @@ export default function App() {
         }
         
         switch(currentPage) {
-            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} />;
+            // I've added userRole={userRole} to the line below to complete the fix
+            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} userRole={userRole} />;
             case 'planning':
                 const list = userRole === 'manager' ? staffList : (staffProfile ? [staffProfile] : []);
                 return <PlanningPage db={db} staffList={list} userRole={userRole} />;

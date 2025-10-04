@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { PlusIcon, TrashIcon } from './Icons';
 
-export default function StaffProfileModal({ staff, db, onClose, departments }) {
+export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
     const [formData, setFormData] = useState({ fullName: staff.fullName, email: staff.email });
     const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
     const [isSaving, setIsSaving] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
@@ -27,11 +29,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments }) {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { fullName: formData.fullName, email: formData.email });
             setIsEditing(false);
-        } catch (err) {
-            setError("Failed to save changes.");
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (err) { setError("Failed to save changes."); } finally { setIsSaving(false); }
     };
     
     const handleAddNewJob = async () => {
@@ -43,27 +41,36 @@ export default function StaffProfileModal({ staff, db, onClose, departments }) {
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await updateDoc(staffDocRef, {
-                jobHistory: arrayUnion({ ...newJob, baseSalary: Number(newJob.baseSalary) })
-            });
+            await updateDoc(staffDocRef, { jobHistory: arrayUnion({ ...newJob, baseSalary: Number(newJob.baseSalary) }) });
             setIsAddingJob(false);
             setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
-        } catch (err) {
-            setError("Failed to add new job role.");
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (err) { setError("Failed to add new job role."); } finally { setIsSaving(false); }
     };
     
     const handleDeleteJob = async (jobToDelete) => {
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}"?`)) {
             try {
                 const staffDocRef = doc(db, 'staff_profiles', staff.id);
-                await updateDoc(staffDocRef, {
-                    jobHistory: arrayRemove(jobToDelete)
-                });
+                await updateDoc(staffDocRef, { jobHistory: arrayRemove(jobToDelete) });
+            } catch (err) { alert("Failed to delete job history entry."); }
+        }
+    };
+
+    const handleDeleteStaff = async () => {
+        if (window.confirm(`Are you sure you want to permanently delete ${staff.fullName}? This will remove their login, profile, shifts, and all associated data.`) &&
+            window.confirm("This action is permanent and cannot be undone. Please confirm one last time.")) {
+            
+            setIsDeleting(true);
+            try {
+                const functions = getFunctions();
+                const deleteStaff = httpsCallable(functions, 'deleteStaff');
+                await deleteStaff({ staffId: staff.id });
+                alert(`${staff.fullName} has been successfully deleted.`);
+                onClose();
             } catch (err) {
-                alert("Failed to delete job history entry.");
+                alert(`Error deleting staff: ${err.message}`);
+            } finally {
+                setIsDeleting(false);
             }
         }
     };
@@ -72,26 +79,36 @@ export default function StaffProfileModal({ staff, db, onClose, departments }) {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-gray-700">
-                {isEditing ? (
-                    <>
-                        <div><label className="text-sm text-gray-400">Full Name</label><input id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
-                        <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
-                    </>
-                ) : (
-                    <>
-                        <InfoRow label="Full Name" value={staff.fullName} />
-                        <InfoRow label="Email Address" value={staff.email} />
-                    </>
+            <div className="flex justify-between items-start pb-6 border-b border-gray-700">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-grow">
+                    {isEditing ? (
+                        <>
+                            <div><label className="text-sm text-gray-400">Full Name</label><input id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                            <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                        </>
+                    ) : (
+                        <>
+                            <InfoRow label="Full Name" value={staff.fullName} />
+                            <InfoRow label="Email Address" value={staff.email} />
+                        </>
+                    )}
+                    <InfoRow label="Current Department" value={currentJob.department} />
+                    <InfoRow label="Current Position" value={currentJob.position} />
+                    <InfoRow label="Current Base Salary (THB)" value={currentJob.baseSalary?.toLocaleString()} />
+                </div>
+                {userRole === 'manager' && !isEditing && (
+                    <div className="ml-6 flex-shrink-0">
+                         <button onClick={handleDeleteStaff} disabled={isDeleting} className="flex items-center text-sm text-red-400 hover:text-red-300 disabled:text-gray-500">
+                            <TrashIcon className="h-4 w-4 mr-1"/>
+                            {isDeleting ? 'Deleting...' : 'Delete Staff'}
+                        </button>
+                    </div>
                 )}
-                <InfoRow label="Current Department" value={currentJob.department} />
-                <InfoRow label="Current Position" value={currentJob.position} />
-                <InfoRow label="Current Base Salary (THB)" value={currentJob.baseSalary?.toLocaleString()} />
             </div>
 
             <h4 className="text-lg font-semibold text-white">Job & Salary History</h4>
             {isAddingJob ? (
-                <div className="bg-gray-700 p-4 rounded-lg space-y-4">
+                 <div className="bg-gray-700 p-4 rounded-lg space-y-4">
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div><label className="text-sm">Department</label><select id="department" value={newJob.department} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
                         <div><label className="text-sm">Position</label><input id="position" value={newJob.position} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
@@ -107,7 +124,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments }) {
                  <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600"><PlusIcon className="h-5 w-5 mr-2"/>Add New Job Role</button>
             )}
 
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-40 overflow-y-auto">
                 {sortedJobHistory.map((job, index) => (
                     <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group">
                         <div>
@@ -134,4 +151,3 @@ export default function StaffProfileModal({ staff, db, onClose, departments }) {
         </div>
     );
 };
-
