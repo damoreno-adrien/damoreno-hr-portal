@@ -4,7 +4,6 @@ import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
 import { PlusIcon } from '../components/Icons';
 
-// Pass userRole down to the StaffManagementPage component
 export default function StaffManagementPage({ auth, db, staffList, departments, userRole }) {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(null);
@@ -36,7 +35,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             
             {selectedStaff && (
                  <Modal isOpen={true} onClose={closeProfileModal} title="Staff Profile">
-                    {/* Pass the userRole prop down to the modal */}
                     <StaffProfileModal staff={selectedStaff} db={db} onClose={closeProfileModal} departments={departments} userRole={userRole} />
                 </Modal>
             )}
@@ -48,7 +46,8 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     Invite New Staff
                 </button>
             </div>
-            <div className="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            
+            <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>

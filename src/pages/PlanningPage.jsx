@@ -130,7 +130,7 @@ export default function PlanningPage({ db, staffList, userRole }) {
                 </div>
             </div>
 
-            <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
+            <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-lg">
                 <div className="min-w-[1200px]">
                     <div className="grid grid-cols-[200px_repeat(7,1fr)]">
                         <div className="px-4 py-3 font-medium text-white border-b-2 border-r border-gray-700 flex items-center">STAFF</div>

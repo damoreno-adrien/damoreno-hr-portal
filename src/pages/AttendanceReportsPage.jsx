@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 
-// Helper to format a Firestore timestamp to HH:mm, or return a placeholder
 const formatTime = (timestamp) => {
     if (!timestamp?.toDate) return '-';
     return timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 };
 
-// Helper to calculate the difference between two timestamps in hours
 const calculateHours = (start, end) => {
     if (!start?.toDate || !end?.toDate) return 0;
     const diffMillis = end.toDate() - start.toDate();
@@ -32,8 +30,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setReportData([]);
 
         try {
-            // --- NEW LOGIC ---
-            // 1. Fetch all schedules within the date range
             const schedulesQuery = query(
                 collection(db, "schedules"),
                 where("date", ">=", startDate),
@@ -42,14 +38,12 @@ export default function AttendanceReportsPage({ db, staffList }) {
             const schedulesSnapshot = await getDocs(schedulesQuery);
             const schedulesData = schedulesSnapshot.docs.map(doc => doc.data());
 
-            // 2. Fetch all attendance records for the same range
             const attendanceQuery = query(
                 collection(db, "attendance"),
                 where("date", ">=", startDate),
                 where("date", "<=", endDate)
             );
             const attendanceSnapshot = await getDocs(attendanceQuery);
-            // Put attendance data into a Map for easy lookup
             const attendanceMap = new Map();
             attendanceSnapshot.docs.forEach(doc => {
                 const data = doc.data();
@@ -57,28 +51,24 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 attendanceMap.set(key, data);
             });
 
-            // 3. Process and merge the data
             const processedData = schedulesData.map(schedule => {
                 const key = `${schedule.staffId}_${schedule.date}`;
                 const attendance = attendanceMap.get(key);
                 const staffMember = staffList.find(s => s.id === schedule.staffId);
 
                 if (!attendance) {
-                    // Staff was scheduled but has no attendance record
                     return {
                         id: key, date: schedule.date, staffName: staffMember?.fullName || 'Unknown',
                         checkInTime: '-', checkOutTime: '-', breakHours: 0, totalHours: 0, status: 'Absent'
                     };
                 }
 
-                // Staff has an attendance record, calculate details
                 const breakHours = calculateHours(attendance.breakStart, attendance.breakEnd);
                 const grossHours = calculateHours(attendance.checkInTime, attendance.checkOutTime);
                 const netHours = grossHours - breakHours;
 
-                // Check for lateness (with a 5-minute grace period)
                 const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
-                scheduledStart.setMinutes(scheduledStart.getMinutes() + 5); // Add grace period
+                scheduledStart.setMinutes(scheduledStart.getMinutes() + 5);
                 const actualCheckIn = attendance.checkInTime.toDate();
                 const status = actualCheckIn > scheduledStart ? 'Late' : 'Completed';
                 
@@ -92,7 +82,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 };
             });
 
-            // Sort data by date, then by name
             processedData.sort((a, b) => {
                 if (a.date < b.date) return -1;
                 if (a.date > b.date) return 1;
@@ -139,7 +128,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
             {error && <p className="text-red-400 text-center mb-4">{error}</p>}
             
-            <div className="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+            <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                  <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
