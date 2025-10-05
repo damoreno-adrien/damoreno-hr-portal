@@ -12,7 +12,17 @@ const formatDateToYYYYMMDD = (date) => {
     return `${year}-${month}-${day}`;
 };
 
-export default function PlanningPage({ db, staffList, userRole }) {
+const getCurrentJob = (staff) => {
+    if (!staff?.jobHistory || staff.jobHistory.length === 0) {
+        return null;
+    }
+    return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+};
+
+
+export default function PlanningPage({ db, staffList, userRole, departments }) {
+    const [departmentFilter, setDepartmentFilter] = useState('All Departments');
+
     const getStartOfWeek = (date) => {
         const d = new Date(date);
         d.setHours(0, 0, 0, 0);
@@ -104,6 +114,12 @@ export default function PlanningPage({ db, staffList, userRole }) {
     const weekRangeString = `${startOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${endOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
     const isManager = userRole === 'manager';
 
+    const filteredStaffList = staffList.filter(staff => {
+        if (departmentFilter === 'All Departments') return true;
+        const currentJob = getCurrentJob(staff);
+        return currentJob?.department === departmentFilter;
+    });
+
     return (
         <div>
             {selectedShift && (
@@ -119,7 +135,13 @@ export default function PlanningPage({ db, staffList, userRole }) {
             )}
 
             <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 space-y-4 sm:space-y-0">
-                <h2 className="text-2xl md:text-3xl font-bold text-white">{isManager ? "Weekly Planner" : "My Schedule"}</h2>
+                <div className="flex items-center space-x-4">
+                    <h2 className="text-2xl md:text-3xl font-bold text-white flex-shrink-0">Weekly Planner</h2>
+                    <select value={departmentFilter} onChange={e => setDepartmentFilter(e.target.value)} className="bg-gray-700 border border-gray-600 rounded-lg text-white p-2 text-sm">
+                        <option>All Departments</option>
+                        {departments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                    </select>
+                </div>
                 <div className="flex items-center space-x-2 sm:space-x-4">
                     <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronLeftIcon className="h-6 w-6" /></button>
                     <h3 className="text-lg sm:text-xl font-semibold w-48 sm:w-64 text-center">{weekRangeString}</h3>
@@ -133,7 +155,7 @@ export default function PlanningPage({ db, staffList, userRole }) {
                         <div className="px-4 py-3 font-medium text-white border-b-2 border-r border-gray-700 flex items-center">STAFF</div>
                         {days.map(day => (<div key={day.toISOString()}>{formatDateHeader(day)}</div>))}
                         
-                        {staffList.map(staff => (
+                        {filteredStaffList.map(staff => (
                             <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
                                 <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{staff.fullName}</div>
                                 {days.map(day => {

@@ -125,10 +125,10 @@ export default function App() {
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} userRole={userRole} />;
             case 'planning':
-                if (userRole === 'manager') return <PlanningPage db={db} staffList={staffList} userRole={userRole} />;
+                if (userRole === 'manager') return <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={departments} />;
                 if (userRole === 'staff') return <MySchedulePage db={db} user={user} />;
                 return null;
-            case 'team-schedule': return <TeamSchedulePage db={db} />;
+            case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'settings': return <SettingsPage db={db} departments={departments} />;
