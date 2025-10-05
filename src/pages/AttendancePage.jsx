@@ -6,82 +6,77 @@ const getTodayString = () => new Date().toISOString().split('T')[0];
 export default function AttendancePage({ db, staffList }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
+    const [todaysLeave, setTodaysLeave] = useState([]);
 
     useEffect(() => {
         if (!db) return;
-
         const todayStr = getTodayString();
         
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
-            const shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setTodaysShifts(shifts);
+            setTodaysShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
         const checkInQuery = query(collection(db, "attendance"), where("date", "==", todayStr));
         const unsubscribeCheckIns = onSnapshot(checkInQuery, (snapshot) => {
             const checkInMap = {};
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                checkInMap[data.staffId] = data;
-            });
+            snapshot.forEach(doc => { checkInMap[doc.data().staffId] = doc.data(); });
             setCheckIns(checkInMap);
         });
 
-        return () => {
-            unsubscribeShifts();
-            unsubscribeCheckIns();
-        };
+        const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("startDate", "<=", todayStr), where("endDate", ">=", todayStr));
+        const unsubscribeLeave = onSnapshot(leaveQuery, (snapshot) => {
+            setTodaysLeave(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+
+        return () => { unsubscribeShifts(); unsubscribeCheckIns(); unsubscribeLeave(); };
     }, [db]);
 
-    // --- Refined Filtering Logic ---
-    const scheduledStaffIds = todaysShifts.map(s => s.staffId);
-    const scheduledStaff = staffList.filter(s => scheduledStaffIds.includes(s.id));
-    const offTodayStaff = staffList.filter(s => !scheduledStaffIds.includes(s.id));
-
-    const onShift = scheduledStaff.filter(staff => {
+    const staffWithStatus = staffList.map(staff => {
         const checkIn = checkIns[staff.id];
-        return checkIn && !checkIn.checkOutTime && !(checkIn.breakStart && !checkIn.breakEnd);
-    });
-    
-    const onBreak = scheduledStaff.filter(staff => {
-        const checkIn = checkIns[staff.id];
-        return checkIn && checkIn.breakStart && !checkIn.breakEnd;
-    });
+        const shift = todaysShifts.find(s => s.staffId === staff.id);
+        const leave = todaysLeave.find(l => l.staffId === staff.id);
+        
+        if (checkIn && !checkIn.checkOutTime && !(checkIn.breakStart && !checkIn.breakEnd)) return { ...staff, category: 'on-shift' };
+        if (checkIn && checkIn.breakStart && !checkIn.breakEnd) return { ...staff, category: 'on-break' };
+        if (checkIn && checkIn.checkOutTime) return { ...staff, category: 'completed' };
+        
+        // "Not Present" logic
+        if (leave) return { ...staff, category: 'not-present', reason: leave.leaveType };
+        if (shift && !checkIn) return { ...staff, category: 'not-present', reason: 'Absent' };
+        if (!shift) return { ...staff, category: 'not-present', reason: 'Off Today' };
 
-    const absent = scheduledStaff.filter(staff => !checkIns[staff.id]);
-
-    const completed = scheduledStaff.filter(staff => {
-        const checkIn = checkIns[staff.id];
-        return checkIn && checkIn.checkOutTime;
+        return { ...staff, category: 'unknown' };
     });
 
-    // --- Helper & Sub-components ---
+    const onShift = staffWithStatus.filter(s => s.category === 'on-shift');
+    const onBreak = staffWithStatus.filter(s => s.category === 'on-break');
+    const completed = staffWithStatus.filter(s => s.category === 'completed');
+    const notPresent = staffWithStatus.filter(s => s.category === 'not-present');
+
     const formatTime = (timestamp) => {
-        if (!timestamp) return '';
-        return timestamp.toDate().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        if (!timestamp?.toDate) return '';
+        return timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     };
 
-    const StaffCard = ({ staff, status, checkInData }) => {
-        let statusColor = 'bg-gray-500';
-        let statusText = '';
+    const StaffCard = ({ staff, checkInData }) => {
+        let statusColor, statusText;
 
-        if (status === 'on-shift') {
-            statusColor = 'bg-green-500';
-            statusText = `Checked In: ${formatTime(checkInData?.checkInTime)}`;
-        } else if (status === 'on-break') {
-            statusColor = 'bg-yellow-500';
-            statusText = `Break Started: ${formatTime(checkInData?.breakStart)}`;
-        } else if (status === 'absent') {
-            statusColor = 'bg-red-500';
-            const shift = todaysShifts.find(s => s.staffId === staff.id);
-            statusText = `Expected: ${shift?.startTime || 'N/A'}`;
-        } else if (status === 'completed') {
-            statusColor = 'bg-blue-500';
-            statusText = `Checked Out: ${formatTime(checkInData?.checkOutTime)}`;
-        } else if (status === 'off-today') {
-            statusColor = 'bg-gray-600';
-            statusText = 'Off Today';
+        switch (staff.category) {
+            case 'on-shift':
+                statusColor = 'bg-green-500'; statusText = `Checked In: ${formatTime(checkInData?.checkInTime)}`; break;
+            case 'on-break':
+                statusColor = 'bg-yellow-500'; statusText = `Break Started: ${formatTime(checkInData?.breakStart)}`; break;
+            case 'completed':
+                statusColor = 'bg-gray-500'; statusText = `Checked Out: ${formatTime(checkInData?.checkOutTime)}`; break;
+            case 'not-present':
+                statusText = staff.reason;
+                if (staff.reason === 'Absent') statusColor = 'bg-red-500';
+                else if (staff.reason === 'Off Today') statusColor = 'bg-gray-600';
+                else statusColor = 'bg-blue-500'; // For leave types
+                break;
+            default:
+                statusColor = 'bg-gray-900'; statusText = 'Unknown';
         }
 
         return (
@@ -95,11 +90,11 @@ export default function AttendancePage({ db, staffList }) {
         );
     };
 
-    const StatusColumn = ({ title, staff, status, checkIns }) => (
-        <div className="bg-gray-800 rounded-lg p-4 flex-1">
+    const StatusColumn = ({ title, staff }) => (
+        <div className="bg-gray-800 rounded-lg p-4 flex-1 min-w-[200px]">
             <h3 className="text-xl font-semibold text-white mb-4">{title} ({staff.length})</h3>
             <div className="space-y-3">
-                {staff.length > 0 ? staff.map(s => <StaffCard key={s.id} staff={s} status={status} checkInData={checkIns[s.id]} />)
+                {staff.length > 0 ? staff.map(s => <StaffCard key={s.id} staff={s} checkInData={checkIns[s.id]} />)
                 : <p className="text-sm text-gray-500">No staff in this category.</p>}
             </div>
         </div>
@@ -108,15 +103,14 @@ export default function AttendancePage({ db, staffList }) {
     return (
         <div>
             <div className="flex justify-between items-center mb-8">
-                <h2 className="text-3xl font-bold text-white">Live Attendance Dashboard</h2>
+                <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
                 <p className="text-lg text-gray-300">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
             <div className="flex flex-col md:flex-row space-y-6 md:space-y-0 md:space-x-6">
-                <StatusColumn title="On Shift" staff={onShift} status="on-shift" checkIns={checkIns} />
-                <StatusColumn title="On Break" staff={onBreak} status="on-break" checkIns={checkIns} />
-                <StatusColumn title="Absent" staff={absent} status="absent" checkIns={checkIns} />
-                <StatusColumn title="Completed Shift" staff={completed} status="completed" checkIns={checkIns} />
-                <StatusColumn title="Off Today" staff={offTodayStaff} status="off-today" checkIns={checkIns} />
+                <StatusColumn title="On Shift" staff={onShift} />
+                <StatusColumn title="On Break" staff={onBreak} />
+                <StatusColumn title="Not Present" staff={notPresent} />
+                <StatusColumn title="Completed Shift" staff={completed} />
             </div>
         </div>
     );

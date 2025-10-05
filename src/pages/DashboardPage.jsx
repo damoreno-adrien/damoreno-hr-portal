@@ -1,7 +1,6 @@
-import React,{ useState, useEffect } from 'react';
-import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 
-// --- CONFIGURATION: LEAVE BALANCE ---
 const ANNUAL_LEAVE_ENTITLEMENT = 15; // Days per year
 
 export default function DashboardPage({ db, user }) {
@@ -10,17 +9,14 @@ export default function DashboardPage({ db, user }) {
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
-    
-    // --- NEW: State for Dashboard Cards ---
     const [leaveTaken, setLeaveTaken] = useState(0);
+    const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
 
-    // Effect for the live clock
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
 
-    // Effect for fetching attendance data (existing)
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = new Date().toISOString().split('T')[0];
@@ -28,26 +24,39 @@ export default function DashboardPage({ db, user }) {
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                setAttendanceDoc(data);
                 if (data.checkOutTime) setStatus('checked-out-final');
                 else if (data.breakStart && !data.breakEnd) setStatus('on-break');
                 else if (data.checkInTime) setStatus('checked-in');
             } else {
-                setAttendanceDoc(null);
                 setStatus('checked-out');
             }
         });
         return () => unsubscribe();
     }, [db, user]);
-    
-    // --- NEW: Effect to calculate leave balance ---
+
     useEffect(() => {
         if (!db || !user) return;
+        const todayStr = new Date().toISOString().split('T')[0];
+        const q = query(
+            collection(db, 'leave_requests'),
+            where('staffId', '==', user.uid),
+            where('status', '==', 'approved'),
+            where('startDate', '<=', todayStr),
+            where('endDate', '>=', todayStr)
+        );
 
+        getDocs(q).then(snapshot => {
+            if (!snapshot.empty) {
+                setIsOnLeaveToday(true);
+            }
+        });
+    }, [db, user]);
+
+    useEffect(() => {
+        if (!db || !user) return;
         const currentYear = new Date().getFullYear();
         const startOfYear = `${currentYear}-01-01`;
         const endOfYear = `${currentYear}-12-31`;
-
         const q = query(
             collection(db, 'leave_requests'),
             where('staffId', '==', user.uid),
@@ -56,21 +65,15 @@ export default function DashboardPage({ db, user }) {
             where('startDate', '>=', startOfYear),
             where('startDate', '<=', endOfYear)
         );
-
         const unsubscribe = onSnapshot(q, (snapshot) => {
             let totalDaysTaken = 0;
-            snapshot.forEach(doc => {
-                totalDaysTaken += doc.data().totalDays;
-            });
+            snapshot.forEach(doc => { totalDaysTaken += doc.data().totalDays; });
             setLeaveTaken(totalDaysTaken);
         });
-
         return () => unsubscribe();
     }, [db, user]);
 
-    // Effect for checking geolocation (existing)
     useEffect(() => {
-        // ... (geolocation logic remains the same) ...
         const RESTAURANT_LAT = 7.883420882320325;
         const RESTAURANT_LON = 98.38736709999999;
         const GEOFENCE_RADIUS_METERS = 50;
@@ -92,12 +95,10 @@ export default function DashboardPage({ db, user }) {
             },
             (error) => {
                 switch (error.code) {
-                    case error.PERMISSION_DENIED:
-                        setLocationError("Location access was denied. Please enable it in your browser settings.");
-                        break;
-                    default:
-                        setLocationError("Could not get your location. Please check your device settings.");
-                        break;
+                    case error.PERMISSION_DENIED: setLocationError("Location access was denied. Please enable it in your browser settings."); break;
+                    case error.POSITION_UNAVAILABLE: setLocationError("Location information is unavailable."); break;
+                    case error.TIMEOUT: setLocationError("The request to get user location timed out."); break;
+                    default: setLocationError("An unknown error occurred while getting your location."); break;
                 }
             }
         );
@@ -112,13 +113,16 @@ export default function DashboardPage({ db, user }) {
         return R * c;
     };
     
-    // ... (Event handlers for clock-in/out remain the same) ...
     const getDocRef = () => { const todayStr = new Date().toISOString().split('T')[0]; return doc(db, 'attendance', `${user.uid}_${todayStr}`); };
     const handleCheckIn = async () => await setDoc(getDocRef(), { staffId: user.uid, staffName: user.displayName || user.email, date: new Date().toISOString().split('T')[0], checkInTime: serverTimestamp() });
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
     const handleCheckOut = async () => await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
 
     const renderButtons = () => {
+        if (isOnLeaveToday) {
+            return <p className="text-center text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
+        }
+
         const commonButtonClasses = "w-full py-4 text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
         switch (status) {
             case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
@@ -129,7 +133,6 @@ export default function DashboardPage({ db, user }) {
         }
     };
 
-    // --- NEW: Reusable Card Component ---
     const DashboardCard = ({ title, children }) => (
         <div className="bg-gray-800 rounded-lg shadow-lg p-6">
             <h3 className="text-lg font-semibold text-white mb-4">{title}</h3>
@@ -140,10 +143,7 @@ export default function DashboardPage({ db, user }) {
     return (
         <div>
             <h2 className="text-3xl font-bold text-white mb-8">My Dashboard</h2>
-            {/* --- NEW: Page layout updated to a grid --- */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                
-                {/* Time Clock Panel */}
                 <div className="lg:col-span-2">
                     <DashboardCard title="Time Clock">
                         <div className="text-center mb-6">
@@ -155,13 +155,11 @@ export default function DashboardPage({ db, user }) {
                         </div>
                         <div className="text-center mt-6 text-sm text-gray-500 h-5">
                             {locationError && <p className="text-red-400">{locationError}</p>}
-                            {!locationError && !isWithinGeofence && status !== 'checked-out-final' && <p>Checking location...</p>}
-                            {!locationError && isWithinGeofence && status !== 'checked-out-final' && <p className="text-green-400">✓ Location verified.</p>}
+                            {!locationError && !isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p>Checking location...</p>}
+                            {!locationError && isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p className="text-green-400">✓ Location verified.</p>}
                         </div>
                     </DashboardCard>
                 </div>
-
-                {/* At-a-Glance Cards */}
                 <div className="space-y-8">
                     <DashboardCard title="Leave Balance">
                         <div className="flex justify-between items-center">
@@ -170,7 +168,6 @@ export default function DashboardPage({ db, user }) {
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Based on {ANNUAL_LEAVE_ENTITLEMENT} days per year.</p>
                     </DashboardCard>
-
                     <DashboardCard title="Bonus Status">
                         <p className="text-gray-400 text-sm">The attendance bonus feature is coming soon. Your status will be shown here.</p>
                     </DashboardCard>
