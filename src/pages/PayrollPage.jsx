@@ -1,28 +1,14 @@
 import React, { useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 
-// --- UPDATED HELPER FUNCTION ---
-// This function is now backwards-compatible. It can handle old staff profiles
-// that use 'baseSalary' and new ones that use 'rate'.
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-        return { rate: 0, payType: 'Monthly' }; // Default for staff with no job history
+        return { rate: 0, payType: 'Monthly' };
     }
-    
-    // Get the most recent job entry
     const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
-
-    // If the latest job has the old 'baseSalary' field but not the new 'rate' field...
     if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) {
-        // ...create a compatible object in memory for the calculation to use.
-        return { 
-            ...latestJob, 
-            rate: latestJob.baseSalary, 
-            payType: 'Monthly' // Assume old data is Monthly
-        };
+        return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' };
     }
-    
-    // If the data is already in the new format, or if there's no salary info, return it as is.
     return latestJob;
 };
 
@@ -64,51 +50,47 @@ export default function PayrollPage({ db, staffList }) {
 
             const data = staffList.map(staff => {
                 const currentJob = getCurrentJob(staff);
-                let netPay = 0;
-                let deductions = 0;
+                let grossPay = 0;
+                let autoDeductions = 0;
 
                 if (currentJob.payType === 'Monthly') {
-                    const dailyRate = (currentJob.rate || 0) / daysInMonth;
+                    grossPay = currentJob.rate || 0;
+                    const dailyRate = grossPay / daysInMonth;
                     let unpaidDays = 0;
 
                     const unpaidLeave = leaveData.filter(l => l.staffId === staff.id && l.leaveType === 'Personal Leave');
-                    unpaidLeave.forEach(l => {
-                        unpaidDays += l.totalDays;
-                    });
+                    unpaidLeave.forEach(l => { unpaidDays += l.totalDays; });
 
                     const staffSchedules = scheduleData.filter(s => s.staffId === staff.id);
                     staffSchedules.forEach(schedule => {
                         const wasOnLeave = leaveData.some(l => l.staffId === staff.id && schedule.date >= l.startDate && schedule.date <= l.endDate);
                         const didAttend = attendanceData.some(a => a.staffId === staff.id && a.date === schedule.date);
-                        if (!didAttend && !wasOnLeave) {
-                            unpaidDays += 1;
-                        }
+                        if (!didAttend && !wasOnLeave) { unpaidDays += 1; }
                     });
-
-                    deductions = dailyRate * unpaidDays;
-                    netPay = (currentJob.rate || 0) - deductions;
+                    autoDeductions = dailyRate * unpaidDays;
 
                 } else if (currentJob.payType === 'Hourly') {
                     const staffAttendance = attendanceData.filter(a => a.staffId === staff.id);
                     let totalHours = 0;
                     staffAttendance.forEach(att => {
-                        const grossHours = calculateHours(att.checkInTime, att.checkOutTime);
+                        const workHours = calculateHours(att.checkInTime, att.checkOutTime);
                         const breakHours = calculateHours(att.breakStart, att.breakEnd);
-                        totalHours += (grossHours - breakHours);
+                        totalHours += (workHours - breakHours);
                     });
-                    netPay = totalHours * (currentJob.rate || 0);
+                    grossPay = totalHours * (currentJob.rate || 0);
                 }
 
                 return {
                     id: staff.id,
                     name: staff.fullName,
-                    baseSalary: currentJob.rate || 0,
                     payType: currentJob.payType,
-                    deductions: deductions.toFixed(2),
-                    netPay: netPay.toFixed(2),
+                    rate: currentJob.rate || 0,
+                    grossPay: grossPay,
+                    deductions: autoDeductions,
+                    adjustments: 0,
+                    notes: '',
                 };
             });
-
             setPayrollData(data);
         } catch (err) {
             setError('Failed to generate payroll. A database index may be required. Please check the browser console (F12).');
@@ -116,6 +98,17 @@ export default function PayrollPage({ db, staffList }) {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleAdjustmentChange = (staffId, field, value) => {
+        setPayrollData(currentData =>
+            currentData.map(item => {
+                if (item.id === staffId) {
+                    return { ...item, [field]: value };
+                }
+                return item;
+            })
+        );
     };
 
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -149,26 +142,29 @@ export default function PayrollPage({ db, staffList }) {
                     <thead className="bg-gray-700">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Pay Rate (THB)</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Gross Pay (THB)</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Deductions (THB)</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Adjustments (THB)</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Notes</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
-                        {payrollData.length > 0 ? payrollData.map(item => (
-                            <tr key={item.id}>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.name}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.baseSalary.toLocaleString()} <span className="text-xs text-gray-500">{item.payType === 'Monthly' ? '/mo' : '/hr'}</span></td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-red-400">{item.deductions > 0 ? parseFloat(item.deductions).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{parseFloat(item.netPay).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                                     <span className="px-3 py-1 inline-flex text-xs font-semibold rounded-full bg-gray-600 text-gray-100">Ready</span>
-                                </td>
-                            </tr>
-                        )) : (
+                        {payrollData.length > 0 ? payrollData.map(item => {
+                            const netPay = (item.grossPay || 0) - (parseFloat(item.deductions) || 0) + (parseFloat(item.adjustments) || 0);
+                            return (
+                                <tr key={item.id}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.name}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.grossPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="number" value={item.deductions} onChange={(e) => handleAdjustmentChange(item.id, 'deductions', e.target.value)} className="w-24 bg-gray-600 rounded-md p-1 text-white"/></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="number" value={item.adjustments} onChange={(e) => handleAdjustmentChange(item.id, 'adjustments', e.target.value)} className="w-24 bg-gray-600 rounded-md p-1 text-white"/></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="text" value={item.notes} onChange={(e) => handleAdjustmentChange(item.id, 'notes', e.target.value)} className="w-32 bg-gray-600 rounded-md p-1 text-white"/></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{netPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                </tr>
+                            )
+                        }) : (
                             <tr>
-                                <td colSpan="5" className="px-6 py-10 text-center text-gray-500">
+                                <td colSpan="6" className="px-6 py-10 text-center text-gray-500">
                                     {isLoading ? 'Calculating payroll...' : 'Select a pay period and generate the payroll.'}
                                 </td>
                             </tr>
