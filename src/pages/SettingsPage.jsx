@@ -12,7 +12,13 @@ export default function SettingsPage({ db, companyConfig }) {
         publicHolidays: [],
         publicHolidayCreditCap: 13,
         geofence: { latitude: 0, longitude: 0, radius: 100 },
-        attendanceBonus: { amount: 1000, allowedAbsences: 0, allowedLates: 1 } // New section
+        attendanceBonus: { 
+            month1: 400, 
+            month2: 800, 
+            month3: 1200, 
+            allowedAbsences: 0, 
+            allowedLates: 1 
+        }
     };
 
     const [config, setConfig] = useState(defaultConfig);
@@ -22,7 +28,6 @@ export default function SettingsPage({ db, companyConfig }) {
 
     useEffect(() => {
         if (companyConfig) {
-            // Merge fetched config with defaults to ensure all fields exist
             setConfig(prev => ({
                 ...prev,
                 ...companyConfig,
@@ -46,7 +51,6 @@ export default function SettingsPage({ db, companyConfig }) {
         setIsSaving(true);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
-            // Ensure all values are correctly typed as numbers before saving
             const configToSave = {
                 ...config,
                 paidSickDays: Number(config.paidSickDays),
@@ -59,7 +63,9 @@ export default function SettingsPage({ db, companyConfig }) {
                     radius: Number(config.geofence.radius),
                 },
                 attendanceBonus: {
-                    amount: Number(config.attendanceBonus.amount),
+                    month1: Number(config.attendanceBonus.month1),
+                    month2: Number(config.attendanceBonus.month2),
+                    month3: Number(config.attendanceBonus.month3),
                     allowedAbsences: Number(config.attendanceBonus.allowedAbsences),
                     allowedLates: Number(config.attendanceBonus.allowedLates),
                 }
@@ -110,16 +116,25 @@ export default function SettingsPage({ db, companyConfig }) {
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Advanced Settings</h2>
             
             <div className="space-y-8">
-                {/* --- ATTENDANCE BONUS CONFIGURATION --- */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white">Attendance Bonus</h3>
-                    <p className="text-gray-400 mt-2">Define the rules for the monthly attendance bonus.</p>
+                    <p className="text-gray-400 mt-2">Define the rules for the gradual monthly attendance bonus. A streak is reset if conditions are not met.</p>
                     <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div>
-                            <label htmlFor="amount" className="block text-sm font-medium text-gray-300 mb-1">Bonus Amount (THB)</label>
-                            <input type="number" id="amount" value={config.attendanceBonus?.amount || ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                            <label htmlFor="month1" className="block text-sm font-medium text-gray-300 mb-1">Month 1 Bonus (THB)</label>
+                            <input type="number" id="month1" value={config.attendanceBonus?.month1 || ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                         </div>
                         <div>
+                            <label htmlFor="month2" className="block text-sm font-medium text-gray-300 mb-1">Month 2 Bonus (THB)</label>
+                            <input type="number" id="month2" value={config.attendanceBonus?.month2 || ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="month3" className="block text-sm font-medium text-gray-300 mb-1">Month 3+ Bonus (THB)</label>
+                            <input type="number" id="month3" value={config.attendanceBonus?.month3 || ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                    </div>
+                    <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                         <div>
                             <label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences Allowed</label>
                             <input type="number" id="allowedAbsences" value={config.attendanceBonus?.allowedAbsences ?? ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                         </div>
