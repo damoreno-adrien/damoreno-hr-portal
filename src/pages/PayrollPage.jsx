@@ -1,12 +1,29 @@
 import React, { useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 
+// --- UPDATED HELPER FUNCTION ---
+// This function is now backwards-compatible. It can handle old staff profiles
+// that use 'baseSalary' and new ones that use 'rate'.
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-        // FIX: Return a complete default job object
-        return { rate: 0, payType: 'Monthly' };
+        return { rate: 0, payType: 'Monthly' }; // Default for staff with no job history
     }
-    return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+    
+    // Get the most recent job entry
+    const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+
+    // If the latest job has the old 'baseSalary' field but not the new 'rate' field...
+    if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) {
+        // ...create a compatible object in memory for the calculation to use.
+        return { 
+            ...latestJob, 
+            rate: latestJob.baseSalary, 
+            payType: 'Monthly' // Assume old data is Monthly
+        };
+    }
+    
+    // If the data is already in the new format, or if there's no salary info, return it as is.
+    return latestJob;
 };
 
 const calculateHours = (start, end) => {
@@ -30,7 +47,7 @@ export default function PayrollPage({ db, staffList }) {
         
         try {
             const year = payPeriod.year;
-            const month = payPeriod.month - 1; // JS months are 0-11
+            const month = payPeriod.month - 1;
             const startDate = new Date(year, month, 1).toISOString().split('T')[0];
             const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
             const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -51,7 +68,7 @@ export default function PayrollPage({ db, staffList }) {
                 let deductions = 0;
 
                 if (currentJob.payType === 'Monthly') {
-                    const dailyRate = currentJob.rate / daysInMonth;
+                    const dailyRate = (currentJob.rate || 0) / daysInMonth;
                     let unpaidDays = 0;
 
                     const unpaidLeave = leaveData.filter(l => l.staffId === staff.id && l.leaveType === 'Personal Leave');
@@ -69,7 +86,7 @@ export default function PayrollPage({ db, staffList }) {
                     });
 
                     deductions = dailyRate * unpaidDays;
-                    netPay = currentJob.rate - deductions;
+                    netPay = (currentJob.rate || 0) - deductions;
 
                 } else if (currentJob.payType === 'Hourly') {
                     const staffAttendance = attendanceData.filter(a => a.staffId === staff.id);
@@ -79,14 +96,13 @@ export default function PayrollPage({ db, staffList }) {
                         const breakHours = calculateHours(att.breakStart, att.breakEnd);
                         totalHours += (grossHours - breakHours);
                     });
-                    netPay = totalHours * currentJob.rate;
+                    netPay = totalHours * (currentJob.rate || 0);
                 }
 
                 return {
                     id: staff.id,
                     name: staff.fullName,
-                    // FIX: Use currentJob.rate instead of currentJob.baseSalary
-                    baseSalary: currentJob.rate,
+                    baseSalary: currentJob.rate || 0,
                     payType: currentJob.payType,
                     deductions: deductions.toFixed(2),
                     netPay: netPay.toFixed(2),
