@@ -63,6 +63,16 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         catch (error) { alert("Failed to update request."); }
     };
 
+    // --- NEW: Function to toggle MC status ---
+    const handleMcStatusChange = async (id, currentStatus) => {
+        const requestDocRef = doc(db, "leave_requests", id);
+        try {
+            await updateDoc(requestDocRef, { mcReceived: !currentStatus });
+        } catch (error) {
+            alert("Failed to update MC status.");
+        }
+    };
+
     const handleDeleteRequest = async (id) => {
         if (window.confirm("Are you sure you want to permanently delete this leave request?")) {
             const requestDocRef = doc(db, "leave_requests", id);
@@ -102,25 +112,42 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
                 <div className="bg-gray-800 rounded-lg shadow-lg">
                     <div className="divide-y divide-gray-700">
                         {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
-                            <div key={req.id} className="p-4 flex flex-wrap justify-between items-center gap-4">
-                                <div className="flex-grow min-w-[200px]">
-                                    <p className="font-bold text-white">{req.staffName}</p>
-                                    <p className="text-sm text-gray-400">{req.leaveType} | Requested: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p>
-                                    {req.reason && (<p className="mt-2 text-sm text-amber-300 bg-gray-700 p-2 rounded-md"><span className="font-semibold">Reason:</span> {req.reason}</p>)}
+                            <div key={req.id} className="p-4">
+                                <div className="flex flex-wrap justify-between items-center gap-4">
+                                    <div className="flex-grow min-w-[200px]">
+                                        <p className="font-bold text-white">{req.staffName}</p>
+                                        <p className="text-sm text-gray-400">{req.leaveType} | Requested: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p>
+                                    </div>
+                                    <div className="text-center"><p className="text-sm text-gray-300">Dates:</p><p className="font-medium text-white">{req.startDate} to {req.endDate}</p></div>
+                                    <div className="text-center"><p className="text-sm text-gray-300">Total Days:</p><p className="font-medium text-white">{req.totalDays}</p></div>
+                                    <div className="flex items-center space-x-2">
+                                        <StatusBadge status={req.status} />
+                                        <button onClick={() => openEditModal(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><BriefcaseIcon className="h-4 w-4"/></button>
+                                        <button onClick={() => handleDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-800 hover:bg-red-700" title="Delete Request"><TrashIcon className="h-4 w-4"/></button>
+                                        {req.status === 'pending' && (
+                                            <>
+                                                <button onClick={() => handleUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700">Reject</button>
+                                                <button onClick={() => handleUpdateRequest(req.id, 'approved')} className="px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700">Approve</button>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="text-center"><p className="text-sm text-gray-300">Dates:</p><p className="font-medium text-white">{req.startDate} to {req.endDate}</p></div>
-                                <div className="text-center"><p className="text-sm text-gray-300">Total Days:</p><p className="font-medium text-white">{req.totalDays}</p></div>
-                                <div className="flex items-center space-x-2">
-                                    <StatusBadge status={req.status} />
-                                    <button onClick={() => openEditModal(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><BriefcaseIcon className="h-4 w-4"/></button>
-                                    <button onClick={() => handleDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-800 hover:bg-red-700" title="Delete Request"><TrashIcon className="h-4 w-4"/></button>
-                                    {req.status === 'pending' && (
-                                        <>
-                                            <button onClick={() => handleUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700">Reject</button>
-                                            <button onClick={() => handleUpdateRequest(req.id, 'approved')} className="px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700">Approve</button>
-                                        </>
-                                    )}
-                                </div>
+                                {req.reason && (<p className="mt-2 text-sm text-amber-300 bg-gray-700 p-2 rounded-md"><span className="font-semibold">Reason:</span> {req.reason}</p>)}
+                                
+                                {/* --- NEW: MC Tracking Checkbox --- */}
+                                {req.leaveType === 'Sick Leave' && req.totalDays >= 3 && (
+                                    <div className="mt-3 pt-3 border-t border-gray-700">
+                                        <label className="flex items-center space-x-2 cursor-pointer">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={!!req.mcReceived} 
+                                                onChange={() => handleMcStatusChange(req.id, req.mcReceived)}
+                                                className="w-4 h-4 rounded bg-gray-600 border-gray-500 text-amber-500 focus:ring-amber-500"
+                                            />
+                                            <span className="text-sm text-gray-300">Medical Certificate Received</span>
+                                        </label>
+                                    </div>
+                                )}
                             </div>
                         )) : (<p className="text-center py-10 text-gray-400">No {filter} requests found.</p>)}
                     </div>
@@ -129,6 +156,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         );
     }
 
+    // Staff view remains unchanged
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
