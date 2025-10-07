@@ -1,15 +1,9 @@
-// Use the v2 library and import all necessary modules
 const {onRequest, onCall, HttpsError} = require("firebase-functions/v2/https"); 
 const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
 
 admin.initializeApp();
 
-/**
- * Creates a new staff member, their authentication account, role, and profile.
- * Triggered via an HTTPS request from the app.
- * Only callable by users with a 'manager' role.
- */
 exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
     if (req.method !== "POST") {
@@ -37,8 +31,8 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
       return res.status(500).send({ error: "Internal server error while verifying role." });
     }
 
-    const { email, password, fullName, position, department, startDate, baseSalary } = req.body;
-    if (!email || !password || !fullName || !position || !department || !startDate || !baseSalary) {
+    const { email, password, fullName, position, department, startDate, payType, rate } = req.body;
+    if (!email || !password || !fullName || !position || !department || !startDate || !payType || !rate) {
         return res.status(400).send({ error: "Missing required user data." });
     }
 
@@ -56,7 +50,8 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
           position: position,
           department: department,
           startDate: startDate,
-          baseSalary: Number(baseSalary),
+          payType: payType,
+          rate: Number(rate),
       };
 
       await db.collection("staff_profiles").doc(newUserId).set({
@@ -79,11 +74,6 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   });
 });
 
-/**
- * Deletes a staff member and all their associated data from the system.
- * Triggered via a direct call from the app.
- * Only callable by users with a 'manager' role.
- */
 exports.deleteStaff = onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "The function must be called while authenticated.");

@@ -7,14 +7,15 @@ export default function AddStaffForm({ auth, onClose, departments }) {
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [baseSalary, setBaseSalary] = useState('');
+    const [payType, setPayType] = useState('Monthly');
+    const [rate, setRate] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!fullName || !position || !department || !startDate || !email || !password || !baseSalary) {
+        if (!fullName || !position || !department || !startDate || !email || !password || !rate) {
             setError('Please fill out all fields.');
             return;
         }
@@ -27,13 +28,16 @@ export default function AddStaffForm({ auth, onClose, departments }) {
         setSuccess('');
 
         try {
+            // This URL is a placeholder; the Firebase SDK for functions is now preferred.
+            // However, since we are using v2 onRequest, we need to know the deployed URL.
+            // For now, let's assume this is correct from previous steps.
             const functionUrl = "https://createuser-3hzcubx72q-uc.a.run.app";
             const token = await auth.currentUser.getIdToken();
 
             const response = await fetch(functionUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ email, password, fullName, position, department, startDate, baseSalary }),
+                body: JSON.stringify({ email, password, fullName, position, department, startDate, payType, rate }),
             });
             
             const responseData = await response.json();
@@ -79,8 +83,17 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                     <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">Base Salary (THB)</label>
-                    <input type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Pay Type</label>
+                    <select value={payType} onChange={(e) => setPayType(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white">
+                        <option>Monthly</option>
+                        <option>Hourly</option>
+                    </select>
+                </div>
+            </div>
+            <div className="grid grid-cols-1">
+                 <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">{payType === 'Monthly' ? 'Base Salary (THB)' : 'Hourly Rate (THB)'}</label>
+                    <input type="number" value={rate} onChange={(e) => setRate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
             </div>
             <div className="border-t border-gray-700 pt-6">
@@ -103,4 +116,3 @@ export default function AddStaffForm({ auth, onClose, departments }) {
         </form>
     );
 };
-

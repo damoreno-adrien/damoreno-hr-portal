@@ -7,7 +7,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
     const [formData, setFormData] = useState({ fullName: staff.fullName, email: staff.email });
-    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
+    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState('');
@@ -17,7 +17,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     }, [staff]);
 
     const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
-    const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', baseSalary: 'N/A' };
+    const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', rate: 'N/A', payType: 'Monthly' };
 
     const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
     const handleNewJobChange = (e) => setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
@@ -29,11 +29,15 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { fullName: formData.fullName, email: formData.email });
             setIsEditing(false);
-        } catch (err) { setError("Failed to save changes."); } finally { setIsSaving(false); }
+        } catch (err) { 
+            setError("Failed to save changes."); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
     
     const handleAddNewJob = async () => {
-        if (!newJob.position || !newJob.department || !newJob.startDate || !newJob.baseSalary) {
+        if (!newJob.position || !newJob.department || !newJob.startDate || !newJob.rate) {
             setError("Please fill all fields for the new job role.");
             return;
         }
@@ -41,10 +45,16 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await updateDoc(staffDocRef, { jobHistory: arrayUnion({ ...newJob, baseSalary: Number(newJob.baseSalary) }) });
+            await updateDoc(staffDocRef, {
+                jobHistory: arrayUnion({ ...newJob, rate: Number(newJob.rate) })
+            });
             setIsAddingJob(false);
-            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], baseSalary: '' });
-        } catch (err) { setError("Failed to add new job role."); } finally { setIsSaving(false); }
+            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
+        } catch (err) { 
+            setError("Failed to add new job role."); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
     
     const handleDeleteJob = async (jobToDelete) => {
@@ -52,7 +62,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             try {
                 const staffDocRef = doc(db, 'staff_profiles', staff.id);
                 await updateDoc(staffDocRef, { jobHistory: arrayRemove(jobToDelete) });
-            } catch (err) { alert("Failed to delete job history entry."); }
+            } catch (err) { 
+                alert("Failed to delete job history entry."); 
+            }
         }
     };
 
@@ -76,6 +88,11 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const InfoRow = ({ label, value }) => (<div><p className="text-sm text-gray-400">{label}</p><p className="text-white text-lg">{value || '-'}</p></div>);
+    const formatRate = (job) => {
+        if (typeof job.rate !== 'number') return 'N/A';
+        const rateString = job.rate.toLocaleString();
+        return job.payType === 'Hourly' ? `${rateString} / hr` : `${rateString} / mo`;
+    };
 
     return (
         <div className="space-y-6">
@@ -94,7 +111,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     )}
                     <InfoRow label="Current Department" value={currentJob.department} />
                     <InfoRow label="Current Position" value={currentJob.position} />
-                    <InfoRow label="Current Base Salary (THB)" value={currentJob.baseSalary?.toLocaleString()} />
+                    <InfoRow label="Current Pay Rate (THB)" value={formatRate(currentJob)} />
                 </div>
                 {userRole === 'manager' && !isEditing && (
                     <div className="ml-6 flex-shrink-0">
@@ -115,7 +132,17 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div><label className="text-sm">Start Date</label><input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
-                        <div><label className="text-sm">Base Salary (THB)</label><input id="baseSalary" type="number" value={newJob.baseSalary} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/></div>
+                        <div>
+                            <label className="text-sm">Pay Type</label>
+                            <select id="payType" value={newJob.payType} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md">
+                                <option>Monthly</option>
+                                <option>Hourly</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-sm">{newJob.payType === 'Monthly' ? 'Base Salary (THB)' : 'Hourly Rate (THB)'}</label>
+                        <input id="rate" type="number" value={newJob.rate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md"/>
                     </div>
                     <div className="flex justify-end space-x-2"><button onClick={() => setIsAddingJob(false)} className="px-4 py-1 rounded-md bg-gray-500">Cancel</button><button onClick={handleAddNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600">{isSaving ? 'Saving...' : 'Save Job'}</button></div>
                     {error && <p className="text-red-400 text-sm text-right mt-2">{error}</p>}
@@ -129,7 +156,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group">
                         <div>
                             <p className="font-bold">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p>
-                            <p className="text-sm text-amber-400">{job.baseSalary?.toLocaleString()} THB</p>
+                            <p className="text-sm text-amber-400">{formatRate(job)}</p>
                         </div>
                         <div className="flex items-center space-x-3">
                              <p className="text-sm text-gray-300">{job.startDate}</p>
