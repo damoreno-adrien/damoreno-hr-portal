@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import Modal from '../components/Modal';
 
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
@@ -28,6 +29,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     const [payrollData, setPayrollData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
 
     const handleGeneratePayroll = async () => {
         if (!companyConfig) {
@@ -65,6 +67,8 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 const currentJob = getCurrentJob(staff);
                 let grossPay = 0;
                 let autoDeductions = 0;
+                let unpaidDaysList = [];
+                let hourlyTimesheet = [];
 
                 const hireDate = new Date(staff.startDate);
                 const yearsOfService = (new Date(year, 11, 31) - hireDate) / (1000 * 60 * 60 * 24 * 365);
@@ -77,9 +81,6 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 }
                 
                 const ytdLeave = allLeaveData.filter(l => l.staffId === staff.id);
-                const ytdSickDays = ytdLeave.filter(l => l.leaveType === 'Sick Leave').reduce((sum, l) => sum + l.totalDays, 0);
-                const ytdPersonalDays = ytdLeave.filter(l => l.leaveType === 'Personal Leave').reduce((sum, l) => sum + l.totalDays, 0);
-                const ytdAnnualDays = ytdLeave.filter(l => l.leaveType === 'Annual Leave').reduce((sum, l) => sum + l.totalDays, 0);
 
                 if (currentJob.payType === 'Monthly') {
                     grossPay = currentJob.rate || 0;
@@ -89,7 +90,6 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     const monthLeave = ytdLeave.filter(l => new Date(l.startDate) <= endDate && new Date(l.endDate) >= startDate);
                     
                     monthLeave.forEach(leave => {
-                        // Check if the leave taken this time exceeds the entitlement
                         const totalDaysBeforeThisLeave = ytdLeave
                             .filter(l => l.leaveType === leave.leaveType && new Date(l.startDate) < new Date(leave.startDate))
                             .reduce((sum, l) => sum + l.totalDays, 0);
@@ -102,7 +102,10 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                         const daysOverLimit = Math.max(0, (totalDaysBeforeThisLeave + leave.totalDays) - entitlement);
                         const unpaidDaysForThisLeave = Math.min(leave.totalDays, daysOverLimit);
 
-                        unpaidDays += unpaidDaysForThisLeave;
+                        if (unpaidDaysForThisLeave > 0) {
+                            unpaidDaysList.push({ date: leave.startDate, reason: `Unpaid ${leave.leaveType} (${unpaidDaysForThisLeave} days)` });
+                            unpaidDays += unpaidDaysForThisLeave;
+                        }
                     });
 
                     const staffSchedules = scheduleData.filter(s => s.staffId === staff.id);
@@ -113,6 +116,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
 
                         if (!didAttend && !wasOnLeave && !isPublicHoliday) {
                             unpaidDays += 1;
+                            unpaidDaysList.push({ date: schedule.date, reason: 'Absent' });
                         }
                     });
                     autoDeductions = dailyRate * unpaidDays;
@@ -123,7 +127,14 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     staffAttendance.forEach(att => {
                         const workHours = calculateHours(att.checkInTime, att.checkOutTime);
                         const breakHours = calculateHours(att.breakStart, att.breakEnd);
-                        totalHours += (workHours - breakHours);
+                        const netHours = workHours - breakHours;
+                        totalHours += netHours;
+                        hourlyTimesheet.push({
+                            date: att.date,
+                            checkIn: formatTime(att.checkInTime),
+                            checkOut: formatTime(att.checkOutTime),
+                            hours: netHours.toFixed(2)
+                        });
                     });
                     grossPay = totalHours * (currentJob.rate || 0);
                 }
@@ -132,6 +143,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     id: staff.id, name: staff.fullName, payType: currentJob.payType,
                     rate: currentJob.rate || 0, grossPay: grossPay, deductions: autoDeductions,
                     adjustments: 0, notes: '',
+                    unpaidDaysList, hourlyTimesheet,
                 };
             });
             setPayrollData(data);
@@ -183,6 +195,43 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
 
     return (
         <div>
+            {selectedStaffDetails && (
+                <Modal isOpen={true} onClose={() => setSelectedStaffDetails(null)} title={`Payroll Details for ${selectedStaffDetails.name}`}>
+                    <div className="space-y-4">
+                        {selectedStaffDetails.payType === 'Monthly' ? (
+                            <div>
+                                <h4 className="font-semibold text-lg text-white mb-2">Deduction Details</h4>
+                                {selectedStaffDetails.unpaidDaysList.length > 0 ? (
+                                    <ul className="space-y-1 text-sm max-h-80 overflow-y-auto">
+                                        {selectedStaffDetails.unpaidDaysList.map((day, i) => (
+                                            <li key={i} className="flex justify-between p-2 bg-gray-700 rounded-md">
+                                                <span className="text-gray-300">{day.date}</span>
+                                                <span className="font-semibold text-red-400">{day.reason}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : <p className="text-gray-400 text-sm">No automatic deductions for this period.</p>}
+                            </div>
+                        ) : (
+                            <div>
+                                <h4 className="font-semibold text-lg text-white mb-2">Hourly Timesheet</h4>
+                                {selectedStaffDetails.hourlyTimesheet.length > 0 ? (
+                                    <div className="space-y-1 text-sm max-h-80 overflow-y-auto">
+                                        {selectedStaffDetails.hourlyTimesheet.map((day, i) => (
+                                            <li key={i} className="flex justify-between items-center p-2 bg-gray-700 rounded-md">
+                                                <span className="text-gray-300">{day.date}</span>
+                                                <span className="text-white">{day.checkIn} - {day.checkOut}</span>
+                                                <span className="font-semibold text-amber-400">{day.hours} hours</span>
+                                            </li>
+                                        ))}
+                                    </div>
+                                ) : <p className="text-gray-400 text-sm">No hours recorded for this period.</p>}
+                            </div>
+                        )}
+                    </div>
+                </Modal>
+            )}
+
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Payroll Generation</h2>
             <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col sm:flex-row sm:items-end gap-4">
                 <div className="flex-grow">
@@ -223,12 +272,12 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                         {payrollData.length > 0 ? payrollData.map(item => {
                             const netPay = (item.grossPay || 0) - (parseFloat(item.deductions) || 0) + (parseFloat(item.adjustments) || 0);
                             return (
-                                <tr key={item.id}>
+                                <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.name}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.grossPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="number" value={item.deductions} onChange={(e) => handleAdjustmentChange(item.id, 'deductions', e.target.value)} className="w-24 bg-gray-600 rounded-md p-1 text-white"/></td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="number" value={item.adjustments} onChange={(e) => handleAdjustmentChange(item.id, 'adjustments', e.target.value)} className="w-24 bg-gray-600 rounded-md p-1 text-white"/></td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="text" value={item.notes} onChange={(e) => handleAdjustmentChange(item.id, 'notes', e.target.value)} className="w-32 bg-gray-600 rounded-md p-1 text-white"/></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="number" value={item.deductions} onChange={(e) => handleAdjustmentChange(item.id, 'deductions', e.target.value)} onClick={e => e.stopPropagation()} className="w-24 bg-gray-600 rounded-md p-1 text-white"/></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="number" value={item.adjustments} onChange={(e) => handleAdjustmentChange(item.id, 'adjustments', e.target.value)} onClick={e => e.stopPropagation()} className="w-24 bg-gray-600 rounded-md p-1 text-white"/></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><input type="text" value={item.notes} onChange={(e) => handleAdjustmentChange(item.id, 'notes', e.target.value)} onClick={e => e.stopPropagation()} className="w-32 bg-gray-600 rounded-md p-1 text-white"/></td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{netPay.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                 </tr>
                             )
