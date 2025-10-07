@@ -3,9 +3,8 @@ import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query,
 
 const ANNUAL_LEAVE_ENTITLEMENT = 15; // Days per year
 
-export default function DashboardPage({ db, user }) {
+export default function DashboardPage({ db, user, companyConfig }) {
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [attendanceDoc, setAttendanceDoc] = useState(null);
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
@@ -74,13 +73,18 @@ export default function DashboardPage({ db, user }) {
     }, [db, user]);
 
     useEffect(() => {
-        const RESTAURANT_LAT = 7.883420882320325;
-        const RESTAURANT_LON = 98.38736709999999;
-        const GEOFENCE_RADIUS_METERS = 50;
+        if (!companyConfig?.geofence) {
+            setLocationError("Geofence settings are not configured.");
+            return;
+        }
+
+        const { latitude: RESTAURANT_LAT, longitude: RESTAURANT_LON, radius: GEOFENCE_RADIUS_METERS } = companyConfig.geofence;
+        
         if (!("geolocation" in navigator)) {
             setLocationError("Geolocation is not supported by your browser.");
             return;
         }
+
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 const { latitude, longitude } = position.coords;
@@ -94,15 +98,16 @@ export default function DashboardPage({ db, user }) {
                 }
             },
             (error) => {
-                switch (error.code) {
+                 switch (error.code) {
                     case error.PERMISSION_DENIED: setLocationError("Location access was denied. Please enable it in your browser settings."); break;
                     case error.POSITION_UNAVAILABLE: setLocationError("Location information is unavailable."); break;
                     case error.TIMEOUT: setLocationError("The request to get user location timed out."); break;
                     default: setLocationError("An unknown error occurred while getting your location."); break;
                 }
-            }
+            },
+            { enableHighAccuracy: true }
         );
-    }, []);
+    }, [companyConfig]);
 
     const calculateDistance = (lat1, lon1, lat2, lon2) => {
         const R = 6371e3; // metres

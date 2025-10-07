@@ -30,7 +30,7 @@ export default function App() {
     const [staffProfile, setStaffProfile] = useState(null); 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [departments, setDepartments] = useState([]);
+    const [companyConfig, setCompanyConfig] = useState(null);
     const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -73,6 +73,30 @@ export default function App() {
     }, []);
 
     useEffect(() => {
+        if (!db) return;
+        const configDocRef = doc(db, 'settings', 'company_config');
+        const unsubscribe = onSnapshot(configDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setCompanyConfig(docSnap.data());
+            } else {
+                const defaultConfig = { 
+                    departments: ["Management", "Service", "Kitchen", "Pizza Department"],
+                    paidSickDays: 30,
+                    paidPersonalDays: 3,
+                    geofence: {
+                        latitude: 7.88342,
+                        longitude: 98.3873,
+                        radius: 50,
+                    }
+                };
+                setDoc(configDocRef, defaultConfig);
+                setCompanyConfig(defaultConfig);
+            }
+        });
+        return () => unsubscribe();
+    }, [db]);
+
+    useEffect(() => {
         if (userRole === 'manager' && db) {
             const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
             const unsubscribe = onSnapshot(q, (querySnapshot) => setPendingRequestsCount(querySnapshot.size));
@@ -87,18 +111,6 @@ export default function App() {
             return () => unsubscribe();
         } else { setUnreadLeaveUpdatesCount(0); }
     }, [userRole, user, db]);
-
-
-    useEffect(() => {
-        if (!db) return;
-        const configDocRef = doc(db, 'settings', 'company_config');
-        const unsubscribeSettings = onSnapshot(configDocRef, (docSnap) => {
-            if (docSnap.exists()) { setDepartments(docSnap.data().departments || []); } 
-            else { const defaultConfig = { departments: ["Management", "Service", "Kitchen", "Pizza Department"] }; setDoc(configDocRef, defaultConfig); }
-        });
-        return () => unsubscribeSettings();
-    }, [db]);
-
 
     useEffect(() => {
         if (userRole === 'manager' && db) {
@@ -121,19 +133,19 @@ export default function App() {
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-            if (userRole === 'staff') return <DashboardPage db={db} user={user} />;
+            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} />;
         }
         switch(currentPage) {
-            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={departments} userRole={userRole} />;
+            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
             case 'planning':
-                if (userRole === 'manager') return <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={departments} />;
+                if (userRole === 'manager') return <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} />;
                 if (userRole === 'staff') return <MySchedulePage db={db} user={user} />;
                 return null;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'payroll': return <PayrollPage db={db} staffList={staffList} />;
-            case 'settings': return <SettingsPage db={db} departments={departments} />;
+            case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
     };
