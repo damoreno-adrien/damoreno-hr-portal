@@ -83,6 +83,9 @@ export default function App() {
                     departments: ["Management", "Service", "Kitchen", "Pizza Department"],
                     paidSickDays: 30,
                     paidPersonalDays: 3,
+                    annualLeaveDays: 6,
+                    publicHolidays: [],
+                    publicHolidayCreditCap: 13,
                     geofence: {
                         latitude: 7.88342,
                         longitude: 98.3873,
@@ -111,6 +114,7 @@ export default function App() {
             return () => unsubscribe();
         } else { setUnreadLeaveUpdatesCount(0); }
     }, [userRole, user, db]);
+
 
     useEffect(() => {
         if (userRole === 'manager' && db) {
@@ -144,7 +148,7 @@ export default function App() {
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
-            case 'payroll': return <PayrollPage db={db} staffList={staffList} />;
+            case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
