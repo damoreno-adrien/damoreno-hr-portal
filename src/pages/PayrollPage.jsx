@@ -3,6 +3,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
+        // FIX: Return a complete default job object
         return { rate: 0, payType: 'Monthly' };
     }
     return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
@@ -34,7 +35,6 @@ export default function PayrollPage({ db, staffList }) {
             const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
             const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-            // 1. Fetch all necessary data for the period
             const attendanceQuery = query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate));
             const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("startDate", "<=", endDate), where("endDate", ">=", startDate));
             const schedulesQuery = query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate));
@@ -45,7 +45,6 @@ export default function PayrollPage({ db, staffList }) {
             const leaveData = leaveSnapshot.docs.map(doc => doc.data());
             const scheduleData = scheduleSnapshot.docs.map(doc => doc.data());
 
-            // 2. Process payroll for each staff member
             const data = staffList.map(staff => {
                 const currentJob = getCurrentJob(staff);
                 let netPay = 0;
@@ -55,15 +54,11 @@ export default function PayrollPage({ db, staffList }) {
                     const dailyRate = currentJob.rate / daysInMonth;
                     let unpaidDays = 0;
 
-                    // Find unpaid leave days
                     const unpaidLeave = leaveData.filter(l => l.staffId === staff.id && l.leaveType === 'Personal Leave');
                     unpaidLeave.forEach(l => {
-                        // This simple calculation adds all days in the range.
-                        // A more complex version would handle partial month ranges.
                         unpaidDays += l.totalDays;
                     });
 
-                    // Find absent days
                     const staffSchedules = scheduleData.filter(s => s.staffId === staff.id);
                     staffSchedules.forEach(schedule => {
                         const wasOnLeave = leaveData.some(l => l.staffId === staff.id && schedule.date >= l.startDate && schedule.date <= l.endDate);
@@ -90,6 +85,7 @@ export default function PayrollPage({ db, staffList }) {
                 return {
                     id: staff.id,
                     name: staff.fullName,
+                    // FIX: Use currentJob.rate instead of currentJob.baseSalary
                     baseSalary: currentJob.rate,
                     payType: currentJob.payType,
                     deductions: deductions.toFixed(2),
@@ -148,7 +144,7 @@ export default function PayrollPage({ db, staffList }) {
                             <tr key={item.id}>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.name}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.baseSalary.toLocaleString()} <span className="text-xs text-gray-500">{item.payType === 'Monthly' ? '/mo' : '/hr'}</span></td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-red-400">{item.deductions > 0 ? item.deductions : '-'}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-red-400">{item.deductions > 0 ? parseFloat(item.deductions).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{parseFloat(item.netPay).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                      <span className="px-3 py-1 inline-flex text-xs font-semibold rounded-full bg-gray-600 text-gray-100">Ready</span>
