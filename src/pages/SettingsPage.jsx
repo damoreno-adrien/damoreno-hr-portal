@@ -11,14 +11,14 @@ export default function SettingsPage({ db, companyConfig }) {
         annualLeaveDays: 6,
         publicHolidays: [],
         publicHolidayCreditCap: 13,
-        geofence: { latitude: 0, longitude: 0, radius: 100 } 
+        geofence: { latitude: 0, longitude: 0, radius: 100 },
+        attendanceBonus: { amount: 1000, allowedAbsences: 0, allowedLates: 1 } // New section
     };
 
     const [config, setConfig] = useState(defaultConfig);
     const [newDepartment, setNewDepartment] = useState('');
     const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
     const [isSaving, setIsSaving] = useState(false);
-    const [isAddingDept, setIsAddingDept] = useState(false);
 
     useEffect(() => {
         if (companyConfig) {
@@ -27,6 +27,7 @@ export default function SettingsPage({ db, companyConfig }) {
                 ...prev,
                 ...companyConfig,
                 geofence: { ...prev.geofence, ...companyConfig.geofence },
+                attendanceBonus: { ...prev.attendanceBonus, ...companyConfig.attendanceBonus },
                 publicHolidays: companyConfig.publicHolidays || []
             }));
         }
@@ -56,6 +57,11 @@ export default function SettingsPage({ db, companyConfig }) {
                     latitude: Number(config.geofence.latitude),
                     longitude: Number(config.geofence.longitude),
                     radius: Number(config.geofence.radius),
+                },
+                attendanceBonus: {
+                    amount: Number(config.attendanceBonus.amount),
+                    allowedAbsences: Number(config.attendanceBonus.allowedAbsences),
+                    allowedLates: Number(config.attendanceBonus.allowedLates),
                 }
             };
             await updateDoc(configDocRef, configToSave);
@@ -71,26 +77,15 @@ export default function SettingsPage({ db, companyConfig }) {
     const handleAddDepartment = async (e) => {
         e.preventDefault();
         if (!newDepartment.trim()) return;
-        setIsAddingDept(true);
         const configDocRef = doc(db, 'settings', 'company_config');
-        try {
-            await updateDoc(configDocRef, { departments: arrayUnion(newDepartment.trim()) });
-            setNewDepartment('');
-        } catch (err) {
-            alert("Failed to add department.");
-        } finally {
-            setIsAddingDept(false);
-        }
+        await updateDoc(configDocRef, { departments: arrayUnion(newDepartment.trim()) });
+        setNewDepartment('');
     };
     
     const handleDeleteDepartment = async (departmentToDelete) => {
         if (window.confirm(`Are you sure you want to delete "${departmentToDelete}"?`)) {
             const configDocRef = doc(db, 'settings', 'company_config');
-            try {
-                await updateDoc(configDocRef, { departments: arrayRemove(departmentToDelete) });
-            } catch (err) {
-                alert("Failed to delete department.");
-            }
+            await updateDoc(configDocRef, { departments: arrayRemove(departmentToDelete) });
         }
     };
 
@@ -99,22 +94,14 @@ export default function SettingsPage({ db, companyConfig }) {
         if (!newHoliday.date || !newHoliday.name.trim()) return;
         const holidayToAdd = { date: newHoliday.date, name: newHoliday.name.trim() };
         const configDocRef = doc(db, 'settings', 'company_config');
-        try {
-            await updateDoc(configDocRef, { publicHolidays: arrayUnion(holidayToAdd) });
-            setNewHoliday({ date: '', name: '' });
-        } catch (err) {
-            alert('Failed to add holiday.');
-        }
+        await updateDoc(configDocRef, { publicHolidays: arrayUnion(holidayToAdd) });
+        setNewHoliday({ date: '', name: '' });
     };
 
     const handleDeleteHoliday = async (holidayToDelete) => {
         if (window.confirm(`Are you sure you want to delete "${holidayToDelete.name}"?`)) {
             const configDocRef = doc(db, 'settings', 'company_config');
-            try {
-                await updateDoc(configDocRef, { publicHolidays: arrayRemove(holidayToDelete) });
-            } catch(err) {
-                alert('Failed to delete holiday.');
-            }
+            await updateDoc(configDocRef, { publicHolidays: arrayRemove(holidayToDelete) });
         }
     };
 
@@ -123,6 +110,26 @@ export default function SettingsPage({ db, companyConfig }) {
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Advanced Settings</h2>
             
             <div className="space-y-8">
+                {/* --- ATTENDANCE BONUS CONFIGURATION --- */}
+                <div className="bg-gray-800 rounded-lg shadow-lg p-6">
+                    <h3 className="text-xl font-semibold text-white">Attendance Bonus</h3>
+                    <p className="text-gray-400 mt-2">Define the rules for the monthly attendance bonus.</p>
+                    <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div>
+                            <label htmlFor="amount" className="block text-sm font-medium text-gray-300 mb-1">Bonus Amount (THB)</label>
+                            <input type="number" id="amount" value={config.attendanceBonus?.amount || ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences Allowed</label>
+                            <input type="number" id="allowedAbsences" value={config.attendanceBonus?.allowedAbsences ?? ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="allowedLates" className="block text-sm font-medium text-gray-300 mb-1">Max Late Arrivals Allowed</label>
+                            <input type="number" id="allowedLates" value={config.attendanceBonus?.allowedLates ?? ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                    </div>
+                </div>
+
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white">Leave Entitlements</h3>
                     <p className="text-gray-400 mt-2">Set the number of paid leave days per employee per year according to your contract.</p>
@@ -194,9 +201,9 @@ export default function SettingsPage({ db, companyConfig }) {
 
                     <form onSubmit={handleAddDepartment} className="mt-6 flex flex-col sm:flex-row items-stretch sm:space-x-4 space-y-2 sm:space-y-0">
                         <input type="text" value={newDepartment} onChange={(e) => setNewDepartment(e.target.value)} placeholder="New department name" className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
-                        <button type="submit" disabled={isAddingDept} className="flex-shrink-0 flex items-center justify-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
+                        <button type="submit" className="flex-shrink-0 flex items-center justify-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg">
                             <PlusIcon className="h-5 w-5 mr-2" />
-                            <span>{isAddingDept ? 'Adding...' : 'Add'}</span>
+                            <span>Add</span>
                         </button>
                     </form>
 
