@@ -48,10 +48,8 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             const endDateStr = endDate.toISOString().split('T')[0];
             const startOfYearStr = new Date(year, 0, 1).toISOString().split('T')[0];
 
-            // 1. Fetch all necessary data for the calculations
             const attendanceQuery = query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr));
             const schedulesQuery = query(collection(db, "schedules"), where("date", ">=", startDateStr), where("date", "<=", endDateStr));
-            // Fetch all leave for the entire year to calculate YTD usage
             const allLeaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("startDate", ">=", startOfYearStr), where("endDate", "<=", new Date(year, 11, 31).toISOString().split('T')[0]));
             
             const [attendanceSnapshot, scheduleSnapshot, allLeaveSnapshot] = await Promise.all([
@@ -63,21 +61,19 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             const allLeaveData = allLeaveSnapshot.docs.map(doc => doc.data());
             const publicHolidays = companyConfig.publicHolidays.map(h => h.date);
 
-            // 2. Process payroll for each staff member
             const data = staffList.map(staff => {
                 const currentJob = getCurrentJob(staff);
                 let grossPay = 0;
                 let autoDeductions = 0;
 
-                // --- PRO-RATA & YTD LEAVE CALCULATION ---
                 const hireDate = new Date(staff.startDate);
-                const yearsOfService = (new Date() - hireDate) / (1000 * 60 * 60 * 24 * 365);
+                const yearsOfService = (new Date(year, 11, 31) - hireDate) / (1000 * 60 * 60 * 24 * 365);
                 let annualLeaveEntitlement = 0;
                 if (yearsOfService >= 1) {
                     annualLeaveEntitlement = companyConfig.annualLeaveDays;
-                } else {
-                    const monthsWorkedThisYear = hireDate.getFullYear() === year ? 12 - hireDate.getMonth() : 12;
-                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorkedThisYear);
+                } else if (hireDate.getFullYear() === year) {
+                    const monthsWorked = 12 - hireDate.getMonth();
+                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked);
                 }
                 
                 const ytdLeave = allLeaveData.filter(l => l.staffId === staff.id);
@@ -85,26 +81,28 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 const ytdPersonalDays = ytdLeave.filter(l => l.leaveType === 'Personal Leave').reduce((sum, l) => sum + l.totalDays, 0);
                 const ytdAnnualDays = ytdLeave.filter(l => l.leaveType === 'Annual Leave').reduce((sum, l) => sum + l.totalDays, 0);
 
-                // --- PAYROLL CALCULATION ---
                 if (currentJob.payType === 'Monthly') {
                     grossPay = currentJob.rate || 0;
                     const dailyRate = grossPay / daysInMonth;
                     let unpaidDays = 0;
 
-                    const monthLeave = ytdLeave.filter(l => l.startDate <= endDateStr && l.endDate >= startDateStr);
+                    const monthLeave = ytdLeave.filter(l => new Date(l.startDate) <= endDate && new Date(l.endDate) >= startDate);
                     
                     monthLeave.forEach(leave => {
-                        let unpaidLeaveDaysInMonth = 0;
-                        if (leave.leaveType === 'Sick Leave' && ytdSickDays - leave.totalDays >= companyConfig.paidSickDays) {
-                           unpaidLeaveDaysInMonth = leave.totalDays;
-                        }
-                        if (leave.leaveType === 'Personal Leave' && ytdPersonalDays - leave.totalDays >= companyConfig.paidPersonalDays) {
-                           unpaidLeaveDaysInMonth = leave.totalDays;
-                        }
-                        if (leave.leaveType === 'Annual Leave' && ytdAnnualDays - leave.totalDays >= annualLeaveEntitlement) {
-                           unpaidLeaveDaysInMonth = leave.totalDays;
-                        }
-                        unpaidDays += unpaidLeaveDaysInMonth;
+                        // Check if the leave taken this time exceeds the entitlement
+                        const totalDaysBeforeThisLeave = ytdLeave
+                            .filter(l => l.leaveType === leave.leaveType && new Date(l.startDate) < new Date(leave.startDate))
+                            .reduce((sum, l) => sum + l.totalDays, 0);
+                        
+                        let entitlement = 0;
+                        if (leave.leaveType === 'Sick Leave') entitlement = companyConfig.paidSickDays;
+                        if (leave.leaveType === 'Personal Leave') entitlement = companyConfig.paidPersonalDays;
+                        if (leave.leaveType === 'Annual Leave') entitlement = annualLeaveEntitlement;
+
+                        const daysOverLimit = Math.max(0, (totalDaysBeforeThisLeave + leave.totalDays) - entitlement);
+                        const unpaidDaysForThisLeave = Math.min(leave.totalDays, daysOverLimit);
+
+                        unpaidDays += unpaidDaysForThisLeave;
                     });
 
                     const staffSchedules = scheduleData.filter(s => s.staffId === staff.id);
@@ -151,7 +149,35 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         );
     };
 
-    const handleExportPDF = () => { /* ... Unchanged ... */ };
+    const handleExportPDF = () => {
+        const doc = new jsPDF();
+        const payPeriodTitle = `${months[payPeriod.month - 1]} ${payPeriod.year}`;
+        doc.text(`Payroll Report - ${payPeriodTitle}`, 14, 15);
+
+        const tableColumns = ['Staff Name', 'Gross Pay', 'Deductions', 'Adjustments', 'Notes', 'Net Pay'];
+        const tableRows = [];
+
+        payrollData.forEach(item => {
+            const netPay = (item.grossPay || 0) - (parseFloat(item.deductions) || 0) + (parseFloat(item.adjustments) || 0);
+            const rowData = [
+                item.name,
+                item.grossPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                parseFloat(item.deductions).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                parseFloat(item.adjustments).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                item.notes,
+                netPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            ];
+            tableRows.push(rowData);
+        });
+
+        autoTable(doc, {
+            head: [tableColumns],
+            body: tableRows,
+            startY: 20,
+        });
+        doc.save(`payroll_report_${payPeriod.year}_${payPeriod.month}.pdf`);
+    };
+
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const years = [new Date().getFullYear(), new Date().getFullYear() - 1];
 
