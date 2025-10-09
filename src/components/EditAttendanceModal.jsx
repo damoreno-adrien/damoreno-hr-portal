@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
 
 export default function EditAttendanceModal({ db, record, onClose }) {
+    const isCreating = !record.fullRecord; // Check if we are creating a new record
+    
     const [formData, setFormData] = useState({
-        checkIn: record.checkInTime ? new Date(record.checkInTime.seconds * 1000).toTimeString().substring(0, 5) : '',
-        breakStart: record.breakStart ? new Date(record.breakStart.seconds * 1000).toTimeString().substring(0, 5) : '',
-        breakEnd: record.breakEnd ? new Date(record.breakEnd.seconds * 1000).toTimeString().substring(0, 5) : '',
-        checkOut: record.checkOutTime ? new Date(record.checkOutTime.seconds * 1000).toTimeString().substring(0, 5) : '',
+        checkIn: record.fullRecord?.checkInTime ? new Date(record.fullRecord.checkInTime.seconds * 1000).toTimeString().substring(0, 5) : '',
+        breakStart: record.fullRecord?.breakStart ? new Date(record.fullRecord.breakStart.seconds * 1000).toTimeString().substring(0, 5) : '',
+        breakEnd: record.fullRecord?.breakEnd ? new Date(record.fullRecord.breakEnd.seconds * 1000).toTimeString().substring(0, 5) : '',
+        checkOut: record.fullRecord?.checkOutTime ? new Date(record.fullRecord.checkOutTime.seconds * 1000).toTimeString().substring(0, 5) : '',
     });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -19,24 +21,38 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         setIsSaving(true);
         setError('');
         try {
-            const docRef = doc(db, 'attendance', record.id);
             const datePart = record.date;
 
-            // Function to convert HH:mm string to a Firestore Timestamp for a given date
             const toTimestamp = (timeString) => {
                 if (!timeString) return null;
                 const [hours, minutes] = timeString.split(':');
-                const date = new Date(datePart);
+                const date = new Date(datePart + 'T00:00:00');
                 date.setHours(hours, minutes, 0, 0);
                 return Timestamp.fromDate(date);
             };
 
-            await updateDoc(docRef, {
+            const dataToSave = {
                 checkInTime: toTimestamp(formData.checkIn),
                 breakStart: toTimestamp(formData.breakStart),
                 breakEnd: toTimestamp(formData.breakEnd),
                 checkOutTime: toTimestamp(formData.checkOut),
-            });
+            };
+
+            if (isCreating) {
+                // Create a new document
+                const newDocId = `${record.staffId}_${record.date}`;
+                const docRef = doc(db, 'attendance', newDocId);
+                await setDoc(docRef, {
+                    ...dataToSave,
+                    staffId: record.staffId,
+                    staffName: record.staffName,
+                    date: record.date,
+                });
+            } else {
+                // Update the existing document
+                const docRef = doc(db, 'attendance', record.id);
+                await updateDoc(docRef, dataToSave);
+            }
             onClose();
         } catch (err) {
             setError('Failed to save changes. Please check the times and try again.');
@@ -84,7 +100,11 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             </div>
             {error && <p className="text-red-400 text-sm text-center">{error}</p>}
             <div className="flex justify-between items-center pt-4">
-                <button onClick={handleDelete} disabled={isSaving} className="px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white">Delete Record</button>
+                <div>
+                    {!isCreating && (
+                        <button onClick={handleDelete} disabled={isSaving} className="px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white">Delete Record</button>
+                    )}
+                </div>
                 <div className="space-x-4">
                     <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
                     <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button>

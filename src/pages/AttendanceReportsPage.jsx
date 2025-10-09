@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import Modal from '../components/Modal';
-import EditAttendanceModal from '../components/EditAttendanceModal'; // Import the new modal
+import EditAttendanceModal from '../components/EditAttendanceModal';
 
 export default function AttendanceReportsPage({ db, staffList }) {
     const [reportData, setReportData] = useState([]);
@@ -9,7 +9,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [selectedStaffId, setSelectedStaffId] = useState('all');
-    // --- NEW: State for the edit modal ---
     const [editingRecord, setEditingRecord] = useState(null);
 
     const handleGenerateReport = async () => {
@@ -17,30 +16,26 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setReportData([]);
 
         try {
-            // Fetch schedules for the date range
             const schedulesQuery = query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate));
             const schedulesSnapshot = await getDocs(schedulesQuery);
             const schedulesMap = new Map();
             schedulesSnapshot.docs.forEach(doc => {
                 const data = doc.data();
-                const key = `${data.staffId}_${data.date}`;
-                schedulesMap.set(key, data);
+                schedulesMap.set(`${data.staffId}_${data.date}`, data);
             });
 
-            // Fetch attendance for the date range
             const attendanceQuery = query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate));
             const attendanceSnapshot = await getDocs(attendanceQuery);
             const attendanceMap = new Map();
             attendanceSnapshot.docs.forEach(doc => {
                 const data = doc.data();
-                const key = `${data.staffId}_${data.date}`;
-                attendanceMap.set(key, {id: doc.id, ...data});
+                attendanceMap.set(`${data.staffId}_${data.date}`, {id: doc.id, ...data});
             });
 
             const staffToReport = selectedStaffId === 'all' ? staffList : staffList.filter(s => s.id === selectedStaffId);
             const generatedData = [];
 
-            staffToReport.forEach(staff => {
+            for (const staff of staffToReport) {
                 for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
                     const dateStr = d.toISOString().split('T')[0];
                     const key = `${staff.id}_${dateStr}`;
@@ -73,18 +68,18 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
                         generatedData.push({
                             id: attendance ? attendance.id : key,
+                            staffId: staff.id, // Pass staffId for creation case
                             staffName: staff.fullName,
                             date: dateStr,
-                            checkIn: checkInTime?.toLocaleTimeString('en-GB') || '-',
-                            checkOut: checkOutTime?.toLocaleTimeString('en-GB') || '-',
+                            checkIn: checkInTime?.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) || '-',
+                            checkOut: checkOutTime?.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) || '-',
                             workHours: workHours.toFixed(2),
                             status: status,
-                            // Pass the full record for editing
                             fullRecord: attendance,
                         });
                     }
                 }
-            });
+            }
             
             generatedData.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.date.localeCompare(b.date));
             setReportData(generatedData);
@@ -94,20 +89,15 @@ export default function AttendanceReportsPage({ db, staffList }) {
             setIsLoading(false);
         }
     };
-    
-    // --- NEW: Function to open the edit modal ---
+
     const handleRowClick = (record) => {
-        // Only open modal if there is an actual attendance record to edit
-        if (record.fullRecord) {
-            setEditingRecord(record.fullRecord);
-        }
+        setEditingRecord(record);
     };
 
     return (
         <div>
-            {/* --- NEW: Render the edit modal when a record is selected --- */}
             {editingRecord && (
-                <Modal isOpen={true} onClose={() => setEditingRecord(null)} title="Edit Attendance Record">
+                <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord ? "Edit Attendance Record" : "Create Attendance Record"}>
                     <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} />
                 </Modal>
             )}
@@ -148,13 +138,13 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     </thead>
                     <tbody className="divide-y divide-gray-700">
                         {reportData.length > 0 ? reportData.map((row, index) => (
-                            <tr key={index} onClick={() => handleRowClick(row)} className={row.fullRecord ? "hover:bg-gray-700 cursor-pointer" : ""}>
+                            <tr key={index} onClick={() => handleRowClick(row)} className="hover:bg-gray-700 cursor-pointer">
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.date}</td>
                                 <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${row.status === 'Absent' ? 'text-red-400' : (row.status.startsWith('Late') ? 'text-yellow-400' : 'text-gray-300')}`}>{row.status}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours > 0 ? row.workHours : '-'}</td>
                             </tr>
                         )) : (
                             <tr>
