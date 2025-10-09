@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ChevronUpIcon, ChevronDownIcon } from '../components/Icons';
+import Modal from '../components/Modal';
+import EditAttendanceModal from '../components/EditAttendanceModal';
 
 const getTodayString = () => new Date().toISOString().split('T')[0];
 
@@ -8,6 +10,7 @@ export default function AttendancePage({ db, staffList }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
     const [todaysLeave, setTodaysLeave] = useState([]);
+    const [editingRecord, setEditingRecord] = useState(null);
 
     useEffect(() => {
         if (!db) return;
@@ -21,7 +24,9 @@ export default function AttendancePage({ db, staffList }) {
         const checkInQuery = query(collection(db, "attendance"), where("date", "==", todayStr));
         const unsubscribeCheckIns = onSnapshot(checkInQuery, (snapshot) => {
             const checkInMap = {};
-            snapshot.forEach(doc => { checkInMap[doc.data().staffId] = doc.data(); });
+            snapshot.forEach(doc => { 
+                checkInMap[doc.data().staffId] = { id: doc.id, ...doc.data() }; 
+            });
             setCheckIns(checkInMap);
         });
 
@@ -32,6 +37,20 @@ export default function AttendancePage({ db, staffList }) {
 
         return () => { unsubscribeShifts(); unsubscribeCheckIns(); unsubscribeLeave(); };
     }, [db]);
+
+    const handleCardClick = (staff) => {
+        const todayStr = getTodayString();
+        const attendanceRecord = checkIns[staff.id];
+        
+        const recordForModal = {
+            id: attendanceRecord ? attendanceRecord.id : `${staff.id}_${todayStr}`,
+            staffId: staff.id,
+            staffName: staff.fullName,
+            date: todayStr,
+            fullRecord: attendanceRecord || null, // Pass full record if it exists
+        };
+        setEditingRecord(recordForModal);
+    };
 
     const staffWithStatus = staffList.map(staff => {
         const checkIn = checkIns[staff.id];
@@ -56,7 +75,7 @@ export default function AttendancePage({ db, staffList }) {
         return timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     };
 
-    const StaffCard = ({ staff, checkInData }) => {
+    const StaffCard = ({ staff, checkInData, onClick }) => {
         let statusColor, statusText;
         switch (staff.category) {
             case 'on-shift': statusColor = 'bg-green-500'; statusText = `Checked In: ${formatTime(checkInData?.checkInTime)}`; break;
@@ -70,8 +89,11 @@ export default function AttendancePage({ db, staffList }) {
                 break;
             default: statusColor = 'bg-gray-900'; statusText = 'Unknown';
         }
-        return (
-            <div className="bg-gray-700 p-4 rounded-lg flex items-center space-x-4">
+
+        // Make card a button if it's not an "Off Today" status
+        const isClickable = staff.reason !== 'Off Today';
+        const CardContent = () => (
+            <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
                 <div className={`w-3 h-3 rounded-full ${statusColor} flex-shrink-0`}></div>
                 <div className="flex-1 overflow-hidden">
                     <p className="font-bold text-white truncate">{staff.fullName}</p>
@@ -79,6 +101,7 @@ export default function AttendancePage({ db, staffList }) {
                 </div>
             </div>
         );
+        return isClickable ? <button onClick={onClick} className="w-full text-left">{CardContent()}</button> : CardContent();
     };
 
     const StatusColumn = ({ title, staff }) => {
@@ -91,7 +114,7 @@ export default function AttendancePage({ db, staffList }) {
                 </button>
                 {isOpen && (
                     <div className="px-4 pb-4 space-y-3">
-                        {staff.length > 0 ? staff.map(s => <StaffCard key={s.id} staff={s} checkInData={checkIns[s.id]} />)
+                        {staff.length > 0 ? staff.map(s => <StaffCard key={s.id} staff={s} checkInData={checkIns[s.id]} onClick={() => handleCardClick(s)} />)
                         : <p className="text-sm text-gray-500">No staff in this category.</p>}
                     </div>
                 )}
@@ -101,6 +124,11 @@ export default function AttendancePage({ db, staffList }) {
 
     return (
         <div>
+            {editingRecord && (
+                <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord ? "Edit Attendance Record" : "Create Attendance Record"}>
+                    <EditAttendanceModal db={db} record={editingRecord} onClose={() => setEditingRecord(null)} />
+                </Modal>
+            )}
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
                 <p className="text-lg text-gray-300 hidden sm:block">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
