@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 
-export default function DashboardPage({ db, user, companyConfig, publicHolidayCredits }) {
+export default function DashboardPage({ db, user, companyConfig, leaveBalances }) {
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
-    const [leaveTaken, setLeaveTaken] = useState(0);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
 
@@ -46,28 +45,6 @@ export default function DashboardPage({ db, user, companyConfig, publicHolidayCr
             setIsOnLeaveToday(!snapshot.empty);
         });
     }, [db, user]);
-
-    useEffect(() => {
-        if (!db || !user || !companyConfig) return;
-        const currentYear = new Date().getFullYear();
-        const startOfYear = `${currentYear}-01-01`;
-        const endOfYear = `${currentYear}-12-31`;
-        
-        const q = query(
-            collection(db, 'leave_requests'),
-            where('staffId', '==', user.uid),
-            where('status', '==', 'approved'),
-            where('leaveType', '==', 'Annual Leave'),
-            where('startDate', '>=', startOfYear),
-            where('startDate', '<=', endOfYear)
-        );
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            let totalDaysTaken = 0;
-            snapshot.forEach(doc => { totalDaysTaken += doc.data().totalDays; });
-            setLeaveTaken(totalDaysTaken);
-        });
-        return () => unsubscribe();
-    }, [db, user, companyConfig]);
     
     useEffect(() => {
         if (!db || !user || !companyConfig?.attendanceBonus) return;
@@ -92,6 +69,7 @@ export default function DashboardPage({ db, user, companyConfig, publicHolidayCr
             
             schedules.forEach(schedule => {
                 if (new Date(schedule.date) > new Date()) return;
+
                 const attendance = attendanceRecords.get(schedule.date);
                 if (!attendance) {
                     absenceCount++;
@@ -205,17 +183,19 @@ export default function DashboardPage({ db, user, companyConfig, publicHolidayCr
                     <DashboardCard title="Leave Balance">
                         <div className="flex justify-between items-center">
                             <span className="text-gray-300">Annual Leave Remaining</span>
-                            <span className="text-3xl font-bold text-amber-400">{ (companyConfig?.annualLeaveDays || 0) - leaveTaken}</span>
+                            <span className="text-3xl font-bold text-amber-400">{leaveBalances.annual}</span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-2">Based on {companyConfig?.annualLeaveDays || 0} days per year.</p>
+                        <p className="text-xs text-gray-500 mt-2">Days available for the rest of the year.</p>
                     </DashboardCard>
+                    
                     <DashboardCard title="Public Holiday Credit">
                         <div className="flex justify-between items-center">
                             <span className="text-gray-300">Credits Remaining</span>
-                            <span className="text-3xl font-bold text-blue-400">{publicHolidayCredits}</span>
+                            <span className="text-3xl font-bold text-blue-400">{leaveBalances.publicHoliday}</span>
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Earned from working on public holidays.</p>
                     </DashboardCard>
+
                     <DashboardCard title="Bonus Status">
                          <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>

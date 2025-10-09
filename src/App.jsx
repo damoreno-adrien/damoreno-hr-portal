@@ -16,7 +16,7 @@ import TeamSchedulePage from './pages/TeamSchedulePage';
 import PayrollPage from './pages/PayrollPage';
 import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
 
-const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
+const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
 export default function App() {
     const [auth, setAuth] = useState(null);
@@ -35,7 +35,7 @@ export default function App() {
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-    const [publicHolidayCredits, setPublicHolidayCredits] = useState(0);
+    const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0 });
 
     useEffect(() => {
         try {
@@ -123,29 +123,51 @@ export default function App() {
     }, [userRole, db]);
 
     useEffect(() => {
-        if (userRole === 'staff' && db && user && companyConfig) {
-            const calculateCredits = async () => {
+        if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
+            const calculateBalances = async () => {
                 const currentYear = new Date().getFullYear();
                 const today = new Date();
+                
+                const hireDate = new Date(staffProfile.startDate);
+                const yearsOfService = (today - hireDate) / (1000 * 60 * 60 * 24 * 365);
+                let annualLeaveEntitlement = 0;
+                if (yearsOfService >= 1) {
+                    annualLeaveEntitlement = companyConfig.annualLeaveDays;
+                } else if (hireDate.getFullYear() === currentYear) {
+                    const monthsWorked = 12 - hireDate.getMonth();
+                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked);
+                }
+
                 const pastHolidays = companyConfig.publicHolidays
                     .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
                 const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
+
                 const q = query(
                     collection(db, 'leave_requests'),
                     where('staffId', '==', user.uid),
-                    where('status', '==', 'approved'),
-                    where('leaveType', '==', 'Public Holiday (In Lieu)'),
+                    where('status', 'in', ['approved', 'pending']),
                     where('startDate', '>=', `${currentYear}-01-01`)
                 );
                 const snapshot = await getDocs(q);
-                const usedCredits = snapshot.docs.reduce((sum, doc) => sum + doc.data().totalDays, 0);
-                setPublicHolidayCredits(earnedCredits - usedCredits);
+                
+                let usedAnnual = 0;
+                let usedPublicHoliday = 0;
+                snapshot.docs.forEach(doc => {
+                    const leave = doc.data();
+                    if (leave.leaveType === 'Annual Leave') usedAnnual += leave.totalDays;
+                    if (leave.leaveType === 'Public Holiday (In Lieu)') usedPublicHoliday += leave.totalDays;
+                });
+                
+                setLeaveBalances({
+                    annual: annualLeaveEntitlement - usedAnnual,
+                    publicHoliday: earnedCredits - usedPublicHoliday,
+                });
             };
-            calculateCredits();
+            calculateBalances();
         } else {
-            setPublicHolidayCredits(0);
+            setLeaveBalances({ annual: 0, publicHoliday: 0 });
         }
-    }, [db, user, userRole, companyConfig]);
+    }, [db, user, userRole, companyConfig, staffProfile]);
     
     const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); if (!auth) return; try { await signInWithEmailAndPassword(auth, email, password); } catch (error) { setLoginError('Invalid email or password. Please try again.'); } };
     const handleLogout = async () => { if (!auth) return; await signOut(auth); setCurrentPage('dashboard'); };
@@ -156,7 +178,7 @@ export default function App() {
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} publicHolidayCredits={publicHolidayCredits} />;
+            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
         }
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
@@ -165,7 +187,7 @@ export default function App() {
                 if (userRole === 'staff') return <MySchedulePage db={db} user={user} />;
                 return null;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
-            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} publicHolidayCredits={publicHolidayCredits} />;
+            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;

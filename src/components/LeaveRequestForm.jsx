@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 
-export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig, publicHolidayCredits = 0 }) {
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig, leaveBalances }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -49,10 +49,15 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             return;
         }
 
-        // --- NEW: Credit Limit Validation for Staff ---
-        if (userRole === 'staff' && leaveType === 'Public Holiday (In Lieu)' && totalDays > publicHolidayCredits) {
-            setError(`You only have ${publicHolidayCredits} public holiday credits available.`);
-            return;
+        if (userRole === 'staff') {
+            if (leaveType === 'Public Holiday (In Lieu)' && totalDays > leaveBalances.publicHoliday) {
+                setError(`You only have ${leaveBalances.publicHoliday} public holiday credits available.`);
+                return;
+            }
+            if (leaveType === 'Annual Leave' && totalDays > leaveBalances.annual) {
+                setError(`You only have ${leaveBalances.annual} annual leave days available.`);
+                return;
+            }
         }
 
         const newStart = new Date(startDate);
@@ -101,6 +106,10 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     };
 
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const minDate = tomorrow.toISOString().split('T')[0];
+
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             {isManagerCreating && (
@@ -118,22 +127,25 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     <option>Annual Leave</option>
                     <option>Sick Leave</option>
                     <option>Personal Leave</option>
-                    {(userRole === 'manager' || publicHolidayCredits > 0) && (
+                    {(userRole === 'manager' || leaveBalances.publicHoliday > 0) && (
                         <option>Public Holiday (In Lieu)</option>
                     )}
                 </select>
-                {userRole === 'staff' && leaveType === 'Public Holiday (In Lieu)' && (
-                    <p className="text-xs text-gray-400 mt-1">Available Public Holiday Credits: {publicHolidayCredits}</p>
+                {userRole === 'staff' && (
+                    <div className="text-xs text-gray-400 mt-1 space-y-1">
+                        <p>Annual Leave Remaining: {leaveBalances.annual}</p>
+                        <p>Public Holiday Credits: {leaveBalances.publicHoliday}</p>
+                    </div>
                 )}
             </div>
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
-                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} min={minDate} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
-                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate || minDate} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
             </div>
              <div><p className="text-sm text-gray-400">Total days: <span className="font-bold text-white">{totalDays > 0 ? totalDays : ''}</span></p></div>

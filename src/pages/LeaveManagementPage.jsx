@@ -4,7 +4,7 @@ import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon, BriefcaseIcon, TrashIcon } from '../components/Icons';
 
-export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, publicHolidayCredits }) {
+export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
     const [filter, setFilter] = useState('pending');
@@ -70,6 +70,15 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
             catch (error) { alert("Failed to delete request."); }
         }
     };
+
+    const handleMcStatusChange = async (id, currentStatus) => {
+        const requestDocRef = doc(db, "leave_requests", id);
+        try {
+            await updateDoc(requestDocRef, { mcReceived: !currentStatus });
+        } catch (error) {
+            alert("Failed to update MC status.");
+        }
+    };
     
     const openEditModal = (request) => { setRequestToEdit(request); setIsModalOpen(true); };
     const openNewRequestModal = () => { setRequestToEdit(null); setIsModalOpen(true); };
@@ -86,7 +95,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         return (
             <div>
                 <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
-                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={staffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} />
+                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={staffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
                 </Modal>
                 <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-8">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Leave Management</h2>
@@ -142,7 +151,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
-                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} publicHolidayCredits={publicHolidayCredits} companyConfig={companyConfig} />
+                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
             </Modal>
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>
