@@ -11,9 +11,12 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState('');
+    // --- NEW: State for bonus streak management ---
+    const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
 
     useEffect(() => {
         setFormData({ fullName: staff.fullName, email: staff.email });
+        setBonusStreak(staff.bonusStreak || 0);
     }, [staff]);
 
     const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
@@ -84,6 +87,17 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             } finally {
                 setIsDeleting(false);
             }
+        }
+    };
+    
+    // --- NEW: Function to manually set the bonus streak ---
+    const handleSetBonusStreak = async () => {
+        const staffDocRef = doc(db, 'staff_profiles', staff.id);
+        try {
+            await updateDoc(staffDocRef, { bonusStreak: Number(bonusStreak) });
+            alert(`Bonus streak for ${staff.fullName} has been set to ${bonusStreak}.`);
+        } catch (err) {
+            alert("Failed to update bonus streak.");
         }
     };
 
@@ -168,6 +182,19 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 ))}
             </div>
             
+            {/* --- NEW: Bonus Management Section (Manager Only) --- */}
+            {userRole === 'manager' && (
+                 <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                    <h4 className="text-base font-semibold text-white">Bonus Management (Manager Tool)</h4>
+                    <p className="text-sm text-gray-400 mt-1">Manually set the bonus streak for testing purposes.</p>
+                    <div className="mt-4 flex items-center space-x-4">
+                        <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
+                        <input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" />
+                        <button onClick={handleSetBonusStreak} className="px-4 py-1 rounded-md bg-blue-600 text-sm">Set Streak</button>
+                    </div>
+                 </div>
+            )}
+
             <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
                 {isEditing ? (
                     <><button onClick={() => { setIsEditing(false); setError(''); }} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button><button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button></>
