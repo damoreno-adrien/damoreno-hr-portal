@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions } from "firebase/functions";
 
 import StaffManagementPage from './pages/StaffManagementPage';
@@ -35,7 +35,8 @@ export default function App() {
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-    
+    const [publicHolidayCredits, setPublicHolidayCredits] = useState(0);
+
     useEffect(() => {
         try {
             const firebaseConfigString = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_FIREBASE_CONFIG : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
@@ -56,10 +57,11 @@ export default function App() {
                     setUser(currentUser); setUserRole(role);
                     if (role === 'staff') {
                         const staffProfileRef = doc(dbInstance, 'staff_profiles', currentUser.uid);
-                        const staffProfileSnap = await getDoc(staffProfileRef);
-                         if (staffProfileSnap.exists()) {
-                            setStaffProfile({ id: staffProfileSnap.id, ...staffProfileSnap.data() });
-                        }
+                        onSnapshot(staffProfileRef, (staffProfileSnap) => {
+                            if (staffProfileSnap.exists()) {
+                                setStaffProfile({ id: staffProfileSnap.id, ...staffProfileSnap.data() });
+                            }
+                        });
                     }
                 } else {
                     setUser(null); setUserRole(null); setStaffProfile(null);
@@ -81,16 +83,10 @@ export default function App() {
             } else {
                 const defaultConfig = { 
                     departments: ["Management", "Service", "Kitchen", "Pizza Department"],
-                    paidSickDays: 30,
-                    paidPersonalDays: 3,
-                    annualLeaveDays: 6,
-                    publicHolidays: [],
-                    publicHolidayCreditCap: 13,
-                    geofence: {
-                        latitude: 7.88342,
-                        longitude: 98.3873,
-                        radius: 50,
-                    }
+                    paidSickDays: 30, paidPersonalDays: 3, annualLeaveDays: 6,
+                    publicHolidays: [], publicHolidayCreditCap: 13,
+                    geofence: { latitude: 7.88342, longitude: 98.3873, radius: 50 },
+                    attendanceBonus: { month1: 400, month2: 800, month3: 1200, allowedAbsences: 0, allowedLates: 1 }
                 };
                 setDoc(configDocRef, defaultConfig);
                 setCompanyConfig(defaultConfig);
@@ -115,7 +111,6 @@ export default function App() {
         } else { setUnreadLeaveUpdatesCount(0); }
     }, [userRole, user, db]);
 
-
     useEffect(() => {
         if (userRole === 'manager' && db) {
             const staffCollectionRef = collection(db, 'staff_profiles');
@@ -126,18 +121,42 @@ export default function App() {
             return () => unsubscribeStaff();
         } else { setStaffList([]); }
     }, [userRole, db]);
+
+    useEffect(() => {
+        if (userRole === 'staff' && db && user && companyConfig) {
+            const calculateCredits = async () => {
+                const currentYear = new Date().getFullYear();
+                const today = new Date();
+                const pastHolidays = companyConfig.publicHolidays
+                    .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
+                const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
+                const q = query(
+                    collection(db, 'leave_requests'),
+                    where('staffId', '==', user.uid),
+                    where('status', '==', 'approved'),
+                    where('leaveType', '==', 'Public Holiday (In Lieu)'),
+                    where('startDate', '>=', `${currentYear}-01-01`)
+                );
+                const snapshot = await getDocs(q);
+                const usedCredits = snapshot.docs.reduce((sum, doc) => sum + doc.data().totalDays, 0);
+                setPublicHolidayCredits(earnedCredits - usedCredits);
+            };
+            calculateCredits();
+        } else {
+            setPublicHolidayCredits(0);
+        }
+    }, [db, user, userRole, companyConfig]);
     
     const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); if (!auth) return; try { await signInWithEmailAndPassword(auth, email, password); } catch (error) { setLoginError('Invalid email or password. Please try again.'); } };
     const handleLogout = async () => { if (!auth) return; await signOut(auth); setCurrentPage('dashboard'); };
     
     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
-
     if (!user) { return ( <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900"><div className="w-full max-w-md p-8 space-y-8 bg-white rounded-2xl shadow-lg dark:bg-gray-800"> <div className="text-center"> <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Da Moreno At Town</h1> <p className="mt-2 text-gray-600 dark:text-gray-300">HR Management Portal</p></div> <form className="mt-8 space-y-6" onSubmit={handleLogin}> <div className="rounded-md shadow-sm"> <div> <input id="email-address" name="email" type="email" autoComplete="email" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} /> </div> <div className="-mt-px"> <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} /> </div></div> {loginError && (<p className="mt-2 text-center text-sm text-red-600 dark:text-red-400">{loginError}</p>)} <div> <button type="submit" className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"> <span className="absolute left-0 inset-y-0 flex items-center pl-3"><LogInIcon className="h-5 w-5 text-amber-500 group-hover:text-amber-400" /></span> Sign in </button> </div> </form> </div></div> ); }
     
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} />;
+            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} publicHolidayCredits={publicHolidayCredits} />;
         }
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
@@ -146,7 +165,7 @@ export default function App() {
                 if (userRole === 'staff') return <MySchedulePage db={db} user={user} />;
                 return null;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
-            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} />;
+            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} publicHolidayCredits={publicHolidayCredits} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
@@ -174,7 +193,6 @@ export default function App() {
     return (
         <div className="relative min-h-screen md:flex bg-gray-900 text-white font-sans">
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
-
             <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
                 <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4">
                     <div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
@@ -185,7 +203,6 @@ export default function App() {
                         <XIcon className="h-6 w-6"/>
                     </button>
                 </div>
-                
                 <nav className="flex-1 space-y-2 px-4">
                     {userRole === 'manager' && (
                         <>
@@ -211,12 +228,10 @@ export default function App() {
                     <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
                         <p className="text-sm text-gray-400 truncate">{user.email}</p>
                     </div>
-                    
                     <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700`}>
                         <LogOutIcon className="h-5 w-5"/>
                         <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span>
                     </button>
-
                     <div className="hidden md:block border-t border-gray-700 mt-4 pt-4">
                         <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="flex items-center justify-center w-full py-2 text-gray-400 hover:bg-gray-700 rounded-lg">
                             {isSidebarCollapsed ? <ChevronRightIcon className="h-6 w-6" /> : <ChevronLeftIcon className="h-6 w-6" />}
@@ -224,7 +239,6 @@ export default function App() {
                     </div>
                 </div>
             </aside>
-            
             <div className="flex-1 flex flex-col overflow-hidden">
                 <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center">
                     <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white">
@@ -232,7 +246,6 @@ export default function App() {
                     </button>
                     <h1 className="text-lg font-bold text-white">Da Moreno HR</h1>
                 </header>
-
                 <main className="flex-1 p-6 md:p-10 overflow-auto">
                     {renderPageContent()}
                 </main>

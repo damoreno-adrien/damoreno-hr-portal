@@ -4,7 +4,7 @@ import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon, BriefcaseIcon, TrashIcon } from '../components/Icons';
 
-export default function LeaveManagementPage({ db, user, userRole, staffList }) {
+export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, publicHolidayCredits }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
     const [filter, setFilter] = useState('pending');
@@ -63,16 +63,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         catch (error) { alert("Failed to update request."); }
     };
 
-    // --- NEW: Function to toggle MC status ---
-    const handleMcStatusChange = async (id, currentStatus) => {
-        const requestDocRef = doc(db, "leave_requests", id);
-        try {
-            await updateDoc(requestDocRef, { mcReceived: !currentStatus });
-        } catch (error) {
-            alert("Failed to update MC status.");
-        }
-    };
-
     const handleDeleteRequest = async (id) => {
         if (window.confirm("Are you sure you want to permanently delete this leave request?")) {
             const requestDocRef = doc(db, "leave_requests", id);
@@ -96,7 +86,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         return (
             <div>
                 <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
-                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={staffList} existingRequests={allLeaveRequests} />
+                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={staffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} />
                 </Modal>
                 <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-8">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Leave Management</h2>
@@ -133,17 +123,10 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
                                     </div>
                                 </div>
                                 {req.reason && (<p className="mt-2 text-sm text-amber-300 bg-gray-700 p-2 rounded-md"><span className="font-semibold">Reason:</span> {req.reason}</p>)}
-                                
-                                {/* --- NEW: MC Tracking Checkbox --- */}
                                 {req.leaveType === 'Sick Leave' && req.totalDays >= 3 && (
                                     <div className="mt-3 pt-3 border-t border-gray-700">
                                         <label className="flex items-center space-x-2 cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={!!req.mcReceived} 
-                                                onChange={() => handleMcStatusChange(req.id, req.mcReceived)}
-                                                className="w-4 h-4 rounded bg-gray-600 border-gray-500 text-amber-500 focus:ring-amber-500"
-                                            />
+                                            <input type="checkbox" checked={!!req.mcReceived} onChange={() => handleMcStatusChange(req.id, req.mcReceived)} className="w-4 h-4 rounded bg-gray-600 border-gray-500 text-amber-500 focus:ring-amber-500"/>
                                             <span className="text-sm text-gray-300">Medical Certificate Received</span>
                                         </label>
                                     </div>
@@ -156,11 +139,10 @@ export default function LeaveManagementPage({ db, user, userRole, staffList }) {
         );
     }
 
-    // Staff view remains unchanged
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
-                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} />
+                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} publicHolidayCredits={publicHolidayCredits} companyConfig={companyConfig} />
             </Modal>
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>

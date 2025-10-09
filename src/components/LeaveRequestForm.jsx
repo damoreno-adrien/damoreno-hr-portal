@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { addDoc, collection, serverTimestamp, doc, updateDoc, getDocs, query, where } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 
-export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig }) {
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig, publicHolidayCredits = 0 }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -9,8 +9,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
-    // --- NEW: State for public holiday credits ---
-    const [publicHolidayCredits, setPublicHolidayCredits] = useState(0);
 
     const isManagerCreating = userRole === 'manager' && !existingRequest;
 
@@ -23,36 +21,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             setSelectedStaffId(existingRequest.staffId);
         }
     }, [existingRequest]);
-
-    // --- NEW: Effect to calculate available holiday credits ---
-    useEffect(() => {
-        if (!db || !user || !companyConfig || userRole !== 'staff') return;
-
-        const calculateCredits = async () => {
-            const currentYear = new Date().getFullYear();
-            const today = new Date();
-
-            // 1. Count past public holidays this year
-            const pastHolidays = companyConfig.publicHolidays
-                .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
-            
-            const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-
-            // 2. Count used holiday leave credits this year
-            const q = query(
-                collection(db, 'leave_requests'),
-                where('staffId', '==', user.uid),
-                where('status', '==', 'approved'),
-                where('leaveType', '==', 'Public Holiday (In Lieu)'),
-                where('startDate', '>=', `${currentYear}-01-01`)
-            );
-            const snapshot = await getDocs(q);
-            const usedCredits = snapshot.docs.reduce((sum, doc) => sum + doc.data().totalDays, 0);
-
-            setPublicHolidayCredits(earnedCredits - usedCredits);
-        };
-        calculateCredits();
-    }, [db, user, companyConfig, userRole]);
 
     useEffect(() => {
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
@@ -83,7 +51,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
         const newStart = new Date(startDate);
         const newEnd = new Date(endDate);
-        const checkStaffId = isManagerCreating ? selectedStaffId : user.uid;
+        const checkStaffId = isManagerCreating ? selectedStaffId : (existingRequest ? existingRequest.staffId : user.uid);
         
         const overlaps = existingRequests.some(req => {
             if (req.staffId !== checkStaffId) return false;
@@ -101,7 +69,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         setIsSaving(true);
         const selectedStaff = staffList.find(s => s.id === selectedStaffId);
         const requestData = {
-            staffId: isManagerCreating ? selectedStaffId : (existingRequest ? existingRequest.staffId : user.uid),
+            staffId: checkStaffId,
             staffName: isManagerCreating ? selectedStaff.fullName : (existingRequest ? existingRequest.staffName : (user.displayName || user.email)),
             leaveType, startDate, endDate, totalDays, reason,
             status: existingRequest ? existingRequest.status : 'pending',
@@ -111,7 +79,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             if (existingRequest) {
                 const docRef = doc(db, 'leave_requests', existingRequest.id);
                 await updateDoc(docRef, requestData);
-
             } else {
                 await addDoc(collection(db, 'leave_requests'), {
                     ...requestData,
@@ -145,7 +112,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     <option>Annual Leave</option>
                     <option>Sick Leave</option>
                     <option>Personal Leave</option>
-                    {/* --- NEW: Conditionally show Public Holiday option --- */}
                     {(userRole === 'manager' || publicHolidayCredits > 0) && (
                         <option>Public Holiday (In Lieu)</option>
                     )}
