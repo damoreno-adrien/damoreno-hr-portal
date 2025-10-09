@@ -1,9 +1,10 @@
-const {onRequest, onCall, HttpsError} = require("firebase-functions/v2/https"); 
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
 
 admin.initializeApp();
 
+// createUser function (unchanged)
 exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
     if (req.method !== "POST") {
@@ -74,6 +75,7 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   });
 });
 
+// deleteStaff function (unchanged)
 exports.deleteStaff = onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
@@ -110,5 +112,83 @@ exports.deleteStaff = onCall({ region: "us-central1" }, async (request) => {
     } catch (error) {
         console.error("Error deleting staff member:", error);
         throw new HttpsError("internal", "An error occurred while deleting the staff member.", error.message);
+    }
+});
+
+// --- NEW FUNCTION ---
+// This function calculates the bonus for a single staff member for a given month.
+exports.calculateAndApplyBonus = onCall({ region: "us-central1" }, async (request) => {
+    if (!request.auth || !request.data.staffId || !request.data.payPeriod) {
+        throw new HttpsError("invalid-argument", "Required data is missing.");
+    }
+
+    const db = admin.firestore();
+    const { staffId, payPeriod } = request.data;
+    const { year, month } = payPeriod;
+
+    try {
+        // 1. Get company bonus rules
+        const configDoc = await db.collection("settings").doc("company_config").get();
+        if (!configDoc.exists) throw new HttpsError("not-found", "Company config not found.");
+        const bonusRules = configDoc.data().attendanceBonus;
+
+        // 2. Get staff profile to read their current streak
+        const staffProfileRef = db.collection("staff_profiles").doc(staffId);
+        const staffProfileDoc = await staffProfileRef.get();
+        if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile not found.");
+        
+        const currentStreak = staffProfileDoc.data().bonusStreak || 0;
+
+        // 3. Fetch attendance and schedule data for the pay period
+        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+
+        const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDate).where("date", "<=", endDate);
+        const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDate).where("date", "<=", endDate);
+        
+        const [schedulesSnapshot, attendanceSnapshot] = await Promise.all([schedulesQuery.get(), attendanceQuery.get()]);
+        const schedules = schedulesSnapshot.docs.map(doc => doc.data());
+        const attendanceRecords = new Map(attendanceSnapshot.docs.map(doc => [doc.data().date, doc.data()]));
+
+        // 4. Check if the employee qualifies
+        let lateCount = 0;
+        let absenceCount = 0;
+        schedules.forEach(schedule => {
+            const attendance = attendanceRecords.get(schedule.date);
+            if (!attendance) {
+                absenceCount++;
+            } else {
+                const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
+                const actualCheckIn = attendance.checkInTime.toDate();
+                if (actualCheckIn > scheduledStart) {
+                    lateCount++;
+                }
+            }
+        });
+
+        let newStreak = 0;
+        let bonusAmount = 0;
+
+        if (absenceCount <= bonusRules.allowedAbsences && lateCount <= bonusRules.allowedLates) {
+            // They qualify, increase streak and determine bonus
+            newStreak = currentStreak + 1;
+            if (newStreak === 1) bonusAmount = bonusRules.month1;
+            else if (newStreak === 2) bonusAmount = bonusRules.month2;
+            else bonusAmount = bonusRules.month3;
+        } else {
+            // They don't qualify, reset streak
+            newStreak = 0;
+            bonusAmount = 0;
+        }
+
+        // 5. Update the bonus streak in the staff's profile
+        await staffProfileRef.update({ bonusStreak: newStreak });
+
+        // 6. Return the calculated bonus
+        return { bonusAmount };
+
+    } catch (error) {
+        console.error("Error calculating bonus:", error);
+        throw new HttpsError("internal", "An error occurred while calculating the bonus.", error.message);
     }
 });
