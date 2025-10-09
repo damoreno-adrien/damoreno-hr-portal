@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, doc, updateDoc, getDocs, query, where } from 'firebase/firestore';
 
-export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [] }) {
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -9,6 +9,8 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
+    // --- NEW: State for public holiday credits ---
+    const [publicHolidayCredits, setPublicHolidayCredits] = useState(0);
 
     const isManagerCreating = userRole === 'manager' && !existingRequest;
 
@@ -22,16 +24,44 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     }, [existingRequest]);
 
-    // --- NEW: Effect to clear end date if it's before the start date ---
+    // --- NEW: Effect to calculate available holiday credits ---
+    useEffect(() => {
+        if (!db || !user || !companyConfig || userRole !== 'staff') return;
+
+        const calculateCredits = async () => {
+            const currentYear = new Date().getFullYear();
+            const today = new Date();
+
+            // 1. Count past public holidays this year
+            const pastHolidays = companyConfig.publicHolidays
+                .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
+            
+            const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
+
+            // 2. Count used holiday leave credits this year
+            const q = query(
+                collection(db, 'leave_requests'),
+                where('staffId', '==', user.uid),
+                where('status', '==', 'approved'),
+                where('leaveType', '==', 'Public Holiday (In Lieu)'),
+                where('startDate', '>=', `${currentYear}-01-01`)
+            );
+            const snapshot = await getDocs(q);
+            const usedCredits = snapshot.docs.reduce((sum, doc) => sum + doc.data().totalDays, 0);
+
+            setPublicHolidayCredits(earnedCredits - usedCredits);
+        };
+        calculateCredits();
+    }, [db, user, companyConfig, userRole]);
+
     useEffect(() => {
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
             setEndDate('');
         }
     }, [startDate, endDate]);
 
-
     const calculateDays = (start, end) => {
-        if (!start || !end || new Date(end) < new Date(start)) return 0; // Prevent calculation for invalid dates
+        if (!start || !end || new Date(end) < new Date(start)) return 0;
         const diffTime = Math.abs(new Date(end) - new Date(start));
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     };
@@ -40,14 +70,12 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setError(''); // Clear previous errors
+        setError('');
 
         if (!leaveType || !startDate || !endDate || (isManagerCreating && !selectedStaffId)) {
-            setError('Please fill in all required fields, including selecting a staff member.');
+            setError('Please fill in all required fields.');
             return;
         }
-        
-        // --- NEW: Submission validation for date range ---
         if (new Date(endDate) < new Date(startDate)) {
             setError('The end date cannot be before the start date.');
             return;
@@ -60,7 +88,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         const overlaps = existingRequests.some(req => {
             if (req.staffId !== checkStaffId) return false;
             if (existingRequest && req.id === existingRequest.id) return false;
-            
             const existingStart = new Date(req.startDate);
             const existingEnd = new Date(req.endDate);
             return newStart <= existingEnd && newEnd >= existingStart;
@@ -72,9 +99,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
 
         setIsSaving(true);
-
         const selectedStaff = staffList.find(s => s.id === selectedStaffId);
-
         const requestData = {
             staffId: isManagerCreating ? selectedStaffId : (existingRequest ? existingRequest.staffId : user.uid),
             staffName: isManagerCreating ? selectedStaff.fullName : (existingRequest ? existingRequest.staffName : (user.displayName || user.email)),
@@ -86,11 +111,13 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             if (existingRequest) {
                 const docRef = doc(db, 'leave_requests', existingRequest.id);
                 await updateDoc(docRef, requestData);
+
             } else {
                 await addDoc(collection(db, 'leave_requests'), {
                     ...requestData,
                     requestedAt: serverTimestamp(),
-                    status: isManagerCreating ? 'approved' : 'pending'
+                    status: isManagerCreating ? 'approved' : 'pending',
+                    isReadByStaff: isManagerCreating ? false : null,
                 });
             }
             onClose();
@@ -115,8 +142,17 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">Leave Type</label>
                 <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md">
-                    <option>Annual Leave</option><option>Sick Leave</option><option>Personal Leave</option>
+                    <option>Annual Leave</option>
+                    <option>Sick Leave</option>
+                    <option>Personal Leave</option>
+                    {/* --- NEW: Conditionally show Public Holiday option --- */}
+                    {(userRole === 'manager' || publicHolidayCredits > 0) && (
+                        <option>Public Holiday (In Lieu)</option>
+                    )}
                 </select>
+                {userRole === 'staff' && (
+                    <p className="text-xs text-gray-400 mt-1">Available Public Holiday Credits: {publicHolidayCredits}</p>
+                )}
             </div>
             <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -125,7 +161,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
-                    {/* --- NEW: Add min attribute to End Date input --- */}
                     <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
             </div>
