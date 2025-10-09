@@ -69,7 +69,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
             
             schedules.forEach(schedule => {
                 if (new Date(schedule.date) > new Date()) return;
-
                 const attendance = attendanceRecords.get(schedule.date);
                 if (!attendance) {
                     absenceCount++;
@@ -142,10 +141,10 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         if (isOnLeaveToday) {
             return <p className="text-center text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
         }
-        const commonButtonClasses = "w-full py-4 text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
+        const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
         switch (status) {
             case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
-            case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
+            case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
             case 'on-break': return <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>;
             case 'checked-out-final': return <p className="text-center text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
             default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
@@ -167,7 +166,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
                     <DashboardCard title="Time Clock">
                         <div className="text-center mb-6">
                             <p className="text-lg text-gray-300">{currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-                            <p className="text-6xl font-mono font-bold tracking-widest mt-1">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
+                            <p className="text-5xl sm:text-6xl font-mono font-bold tracking-widest mt-1">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
                         </div>
                         <div className="mt-6">
                             {renderButtons()}
