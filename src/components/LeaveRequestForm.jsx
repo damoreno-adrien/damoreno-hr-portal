@@ -49,6 +49,12 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             return;
         }
 
+        // --- NEW: Credit Limit Validation for Staff ---
+        if (userRole === 'staff' && leaveType === 'Public Holiday (In Lieu)' && totalDays > publicHolidayCredits) {
+            setError(`You only have ${publicHolidayCredits} public holiday credits available.`);
+            return;
+        }
+
         const newStart = new Date(startDate);
         const newEnd = new Date(endDate);
         const checkStaffId = isManagerCreating ? selectedStaffId : (existingRequest ? existingRequest.staffId : user.uid);
@@ -116,7 +122,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                         <option>Public Holiday (In Lieu)</option>
                     )}
                 </select>
-                {userRole === 'staff' && (
+                {userRole === 'staff' && leaveType === 'Public Holiday (In Lieu)' && (
                     <p className="text-xs text-gray-400 mt-1">Available Public Holiday Credits: {publicHolidayCredits}</p>
                 )}
             </div>
