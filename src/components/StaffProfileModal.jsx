@@ -6,16 +6,27 @@ import { PlusIcon, TrashIcon } from './Icons';
 export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
-    const [formData, setFormData] = useState({ fullName: staff.fullName, email: staff.email });
+    const [formData, setFormData] = useState({ 
+        fullName: staff.fullName, 
+        email: staff.email,
+        phoneNumber: staff.phoneNumber || '',
+        birthdate: staff.birthdate || '',
+        bankAccount: staff.bankAccount || '',
+    });
     const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState('');
-    // --- NEW: State for bonus streak management ---
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
 
     useEffect(() => {
-        setFormData({ fullName: staff.fullName, email: staff.email });
+        setFormData({ 
+            fullName: staff.fullName, 
+            email: staff.email,
+            phoneNumber: staff.phoneNumber || '',
+            birthdate: staff.birthdate || '',
+            bankAccount: staff.bankAccount || '',
+        });
         setBonusStreak(staff.bonusStreak || 0);
     }, [staff]);
 
@@ -30,7 +41,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await updateDoc(staffDocRef, { fullName: formData.fullName, email: formData.email });
+            // Update the document with all the new fields from the form
+            await updateDoc(staffDocRef, { 
+                fullName: formData.fullName, 
+                email: formData.email,
+                phoneNumber: formData.phoneNumber,
+                birthdate: formData.birthdate,
+                bankAccount: formData.bankAccount,
+            });
             setIsEditing(false);
         } catch (err) { 
             setError("Failed to save changes."); 
@@ -59,7 +77,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             setIsSaving(false); 
         }
     };
-    
     const handleDeleteJob = async (jobToDelete) => {
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}"?`)) {
             try {
@@ -70,7 +87,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             }
         }
     };
-
     const handleDeleteStaff = async () => {
         if (window.confirm(`Are you sure you want to permanently delete ${staff.fullName}? This will remove their login, profile, shifts, and all associated data.`) &&
             window.confirm("This action is permanent and cannot be undone. Please confirm one last time.")) {
@@ -89,8 +105,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             }
         }
     };
-    
-    // --- NEW: Function to manually set the bonus streak ---
     const handleSetBonusStreak = async () => {
         const staffDocRef = doc(db, 'staff_profiles', staff.id);
         try {
@@ -111,21 +125,28 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-start pb-6 border-b border-gray-700">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-grow">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
                     {isEditing ? (
                         <>
                             <div><label className="text-sm text-gray-400">Full Name</label><input id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                             <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                            <div><label className="text-sm text-gray-400">Phone Number</label><input id="phoneNumber" value={formData.phoneNumber} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                            <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                            <div className="md:col-span-2"><label className="text-sm text-gray-400">Bank Account Details</label><input id="bankAccount" value={formData.bankAccount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                         </>
                     ) : (
                         <>
                             <InfoRow label="Full Name" value={staff.fullName} />
                             <InfoRow label="Email Address" value={staff.email} />
+                            <InfoRow label="Phone Number" value={staff.phoneNumber} />
+                            <InfoRow label="Birthdate" value={staff.birthdate} />
+                            <div className="md:col-span-2"><InfoRow label="Bank Account Details" value={staff.bankAccount} /></div>
+                            <hr className="md:col-span-2 border-gray-700 my-2" />
+                            <InfoRow label="Current Department" value={currentJob.department} />
+                            <InfoRow label="Current Position" value={currentJob.position} />
+                            <InfoRow label="Current Pay Rate (THB)" value={formatRate(currentJob)} />
                         </>
                     )}
-                    <InfoRow label="Current Department" value={currentJob.department} />
-                    <InfoRow label="Current Position" value={currentJob.position} />
-                    <InfoRow label="Current Pay Rate (THB)" value={formatRate(currentJob)} />
                 </div>
                 {userRole === 'manager' && !isEditing && (
                     <div className="ml-6 flex-shrink-0">
@@ -182,7 +203,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 ))}
             </div>
             
-            {/* --- NEW: Bonus Management Section (Manager Only) --- */}
             {userRole === 'manager' && (
                  <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                     <h4 className="text-base font-semibold text-white">Bonus Management (Manager Tool)</h4>
