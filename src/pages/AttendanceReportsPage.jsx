@@ -1,120 +1,120 @@
-import React, { useState } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-
-const formatTime = (timestamp) => {
-    if (!timestamp?.toDate) return '-';
-    return timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-};
-
-const calculateHours = (start, end) => {
-    if (!start?.toDate || !end?.toDate) return 0;
-    const diffMillis = end.toDate() - start.toDate();
-    return diffMillis / (1000 * 60 * 60);
-};
+import React, { useState, useEffect } from 'react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import Modal from '../components/Modal';
+import EditAttendanceModal from '../components/EditAttendanceModal'; // Import the new modal
 
 export default function AttendanceReportsPage({ db, staffList }) {
-    const today = new Date().toISOString().split('T')[0];
-    const [startDate, setStartDate] = useState(today);
-    const [endDate, setEndDate] = useState(today);
     const [reportData, setReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
+    const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+    const [selectedStaffId, setSelectedStaffId] = useState('all');
+    // --- NEW: State for the edit modal ---
+    const [editingRecord, setEditingRecord] = useState(null);
 
     const handleGenerateReport = async () => {
-        if (!startDate || !endDate) {
-            setError('Please select both a start and end date.');
-            return;
-        }
         setIsLoading(true);
-        setError('');
         setReportData([]);
 
         try {
-            const schedulesQuery = query(
-                collection(db, "schedules"),
-                where("date", ">=", startDate),
-                where("date", "<=", endDate)
-            );
+            // Fetch schedules for the date range
+            const schedulesQuery = query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate));
             const schedulesSnapshot = await getDocs(schedulesQuery);
-            const schedulesData = schedulesSnapshot.docs.map(doc => doc.data());
+            const schedulesMap = new Map();
+            schedulesSnapshot.docs.forEach(doc => {
+                const data = doc.data();
+                const key = `${data.staffId}_${data.date}`;
+                schedulesMap.set(key, data);
+            });
 
-            const attendanceQuery = query(
-                collection(db, "attendance"),
-                where("date", ">=", startDate),
-                where("date", "<=", endDate)
-            );
+            // Fetch attendance for the date range
+            const attendanceQuery = query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate));
             const attendanceSnapshot = await getDocs(attendanceQuery);
             const attendanceMap = new Map();
             attendanceSnapshot.docs.forEach(doc => {
                 const data = doc.data();
                 const key = `${data.staffId}_${data.date}`;
-                attendanceMap.set(key, data);
+                attendanceMap.set(key, {id: doc.id, ...data});
             });
 
-            const processedData = schedulesData.map(schedule => {
-                const key = `${schedule.staffId}_${schedule.date}`;
-                const attendance = attendanceMap.get(key);
-                const staffMember = staffList.find(s => s.id === schedule.staffId);
+            const staffToReport = selectedStaffId === 'all' ? staffList : staffList.filter(s => s.id === selectedStaffId);
+            const generatedData = [];
 
-                if (!attendance) {
-                    return {
-                        id: key, date: schedule.date, staffName: staffMember?.fullName || 'Unknown',
-                        checkInTime: '-', checkOutTime: '-', breakHours: 0, totalHours: 0, status: 'Absent'
-                    };
+            staffToReport.forEach(staff => {
+                for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
+                    const dateStr = d.toISOString().split('T')[0];
+                    const key = `${staff.id}_${dateStr}`;
+                    const schedule = schedulesMap.get(key);
+                    const attendance = attendanceMap.get(key);
+
+                    if (schedule || attendance) {
+                        const checkInTime = attendance?.checkInTime?.toDate();
+                        const scheduledTime = schedule ? new Date(`${dateStr}T${schedule.startTime}`) : null;
+                        
+                        let status = 'On Time';
+                        if (!attendance && schedule) status = 'Absent';
+                        if (attendance && !schedule) status = 'Extra Shift';
+                        if (checkInTime && scheduledTime && checkInTime > scheduledTime) {
+                            const lateMinutes = Math.round((checkInTime - scheduledTime) / 60000);
+                            status = `Late (${lateMinutes}m)`;
+                        }
+
+                        const checkOutTime = attendance?.checkOutTime?.toDate();
+                        const breakStartTime = attendance?.breakStart?.toDate();
+                        const breakEndTime = attendance?.breakEnd?.toDate();
+
+                        let workHours = 0;
+                        if (checkInTime && checkOutTime) {
+                            workHours = (checkOutTime - checkInTime) / 3600000;
+                            if (breakStartTime && breakEndTime) {
+                                workHours -= (breakEndTime - breakStartTime) / 3600000;
+                            }
+                        }
+
+                        generatedData.push({
+                            id: attendance ? attendance.id : key,
+                            staffName: staff.fullName,
+                            date: dateStr,
+                            checkIn: checkInTime?.toLocaleTimeString('en-GB') || '-',
+                            checkOut: checkOutTime?.toLocaleTimeString('en-GB') || '-',
+                            workHours: workHours.toFixed(2),
+                            status: status,
+                            // Pass the full record for editing
+                            fullRecord: attendance,
+                        });
+                    }
                 }
-
-                const breakHours = calculateHours(attendance.breakStart, attendance.breakEnd);
-                const grossHours = calculateHours(attendance.checkInTime, attendance.checkOutTime);
-                const netHours = grossHours - breakHours;
-
-                const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
-                scheduledStart.setMinutes(scheduledStart.getMinutes() + 5);
-                const actualCheckIn = attendance.checkInTime.toDate();
-                const status = actualCheckIn > scheduledStart ? 'Late' : 'Completed';
-                
-                return {
-                    id: key, date: schedule.date, staffName: staffMember?.fullName || 'Unknown',
-                    checkInTime: attendance.checkInTime,
-                    checkOutTime: attendance.checkOutTime,
-                    breakHours: breakHours.toFixed(2),
-                    totalHours: netHours.toFixed(2),
-                    status: attendance.checkOutTime ? status : 'On Shift',
-                };
             });
-
-            processedData.sort((a, b) => {
-                if (a.date < b.date) return -1;
-                if (a.date > b.date) return 1;
-                if (a.staffName < b.staffName) return -1;
-                if (a.staffName > b.staffName) return 1;
-                return 0;
-            });
-
-            setReportData(processedData);
-
-        } catch (err) {
-            setError('Failed to generate report. A database index may be required. Please check the browser console (F12) for a link to create it.');
-            console.error(err);
+            
+            generatedData.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.date.localeCompare(b.date));
+            setReportData(generatedData);
+        } catch (error) {
+            console.error("Error generating report: ", error);
         } finally {
             setIsLoading(false);
         }
     };
     
-    const StatusBadge = ({ status }) => {
-        let color = 'bg-gray-500';
-        if (status === 'Completed') color = 'bg-green-600';
-        if (status === 'Late') color = 'bg-yellow-500';
-        if (status === 'Absent') color = 'bg-red-600';
-        if (status === 'On Shift') color = 'bg-blue-500';
-        return <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${color} text-white`}>{status}</span>;
+    // --- NEW: Function to open the edit modal ---
+    const handleRowClick = (record) => {
+        // Only open modal if there is an actual attendance record to edit
+        if (record.fullRecord) {
+            setEditingRecord(record.fullRecord);
+        }
     };
 
     return (
         <div>
+            {/* --- NEW: Render the edit modal when a record is selected --- */}
+            {editingRecord && (
+                <Modal isOpen={true} onClose={() => setEditingRecord(null)} title="Edit Attendance Record">
+                    <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} />
+                </Modal>
+            )}
+
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Attendance Reports</h2>
-            
-            <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col space-y-4 md:space-y-0 md:flex-row md:items-end md:space-x-4">
-                 <div className="flex-grow">
+            <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col sm:flex-row sm:items-end gap-4">
+                <div className="flex-grow">
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
@@ -122,41 +122,44 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md" />
                 </div>
-                <button onClick={handleGenerateReport} disabled={isLoading} className="w-full md:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">
+                <div className="flex-grow">
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Staff Member</label>
+                    <select value={selectedStaffId} onChange={e => setSelectedStaffId(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md">
+                        <option value="all">All Staff</option>
+                        {staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.fullName}</option>)}
+                    </select>
+                </div>
+                <button onClick={handleGenerateReport} disabled={isLoading} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">
                     {isLoading ? 'Generating...' : 'Generate Report'}
                 </button>
             </div>
 
-            {error && <p className="text-red-400 text-center mb-4">{error}</p>}
-            
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
-                 <table className="min-w-full">
+                <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Check-In</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Check-Out</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Break (Hrs)</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Hours Worked</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Work Hours</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
-                        {reportData.length > 0 ? reportData.map(item => (
-                            <tr key={item.id}>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.date}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.staffName}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatTime(item.checkInTime)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatTime(item.checkOutTime)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{item.breakHours > 0 ? item.breakHours : '-'}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{item.totalHours > 0 ? item.totalHours : '-'}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={item.status} /></td>
+                        {reportData.length > 0 ? reportData.map((row, index) => (
+                            <tr key={index} onClick={() => handleRowClick(row)} className={row.fullRecord ? "hover:bg-gray-700 cursor-pointer" : ""}>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.date}</td>
+                                <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${row.status === 'Absent' ? 'text-red-400' : (row.status.startsWith('Late') ? 'text-yellow-400' : 'text-gray-300')}`}>{row.status}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours}</td>
                             </tr>
                         )) : (
                             <tr>
-                                <td colSpan="7" className="px-6 py-10 text-center text-gray-500">
-                                    {isLoading ? 'Loading data...' : 'No data to display. Please generate a report.'}
+                                <td colSpan="6" className="px-6 py-10 text-center text-gray-500">
+                                    {isLoading ? 'Loading data...' : 'Select a date range and staff member to generate a report.'}
                                 </td>
                             </tr>
                         )}
@@ -165,4 +168,4 @@ export default function AttendanceReportsPage({ db, staffList }) {
             </div>
         </div>
     );
-};
+}
