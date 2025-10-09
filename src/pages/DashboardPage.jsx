@@ -9,12 +9,16 @@ export default function DashboardPage({ db, user, companyConfig }) {
     const [leaveTaken, setLeaveTaken] = useState(0);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
+    // --- NEW: State for public holiday credits ---
+    const [publicHolidayCredits, setPublicHolidayCredits] = useState(0);
 
+    // Effect for the live clock
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
 
+    // Effect for fetching attendance data
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = new Date().toISOString().split('T')[0];
@@ -32,6 +36,7 @@ export default function DashboardPage({ db, user, companyConfig }) {
         return () => unsubscribe();
     }, [db, user]);
     
+    // Effect to check for approved leave for today
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = new Date().toISOString().split('T')[0];
@@ -47,11 +52,36 @@ export default function DashboardPage({ db, user, companyConfig }) {
         });
     }, [db, user]);
 
+    // Effect to calculate leave balance & public holiday credits
     useEffect(() => {
         if (!db || !user || !companyConfig) return;
         const currentYear = new Date().getFullYear();
         const startOfYear = `${currentYear}-01-01`;
         const endOfYear = `${currentYear}-12-31`;
+
+        // --- Calculate Public Holiday Credits ---
+        const calculateCredits = async () => {
+            const today = new Date();
+            const pastHolidays = companyConfig.publicHolidays
+                .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
+            
+            const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
+
+            const q = query(
+                collection(db, 'leave_requests'),
+                where('staffId', '==', user.uid),
+                where('status', '==', 'approved'),
+                where('leaveType', '==', 'Public Holiday (In Lieu)'),
+                where('startDate', '>=', startOfYear)
+            );
+            const snapshot = await getDocs(q);
+            const usedCredits = snapshot.docs.reduce((sum, doc) => sum + doc.data().totalDays, 0);
+
+            setPublicHolidayCredits(earnedCredits - usedCredits);
+        };
+        calculateCredits();
+        
+        // --- Calculate Annual Leave Balance ---
         const q = query(
             collection(db, 'leave_requests'),
             where('staffId', '==', user.uid),
@@ -68,9 +98,9 @@ export default function DashboardPage({ db, user, companyConfig }) {
         return () => unsubscribe();
     }, [db, user, companyConfig]);
     
+    // Effect to calculate Bonus Status
     useEffect(() => {
         if (!db || !user || !companyConfig?.attendanceBonus) return;
-
         const checkBonusStatus = async () => {
             const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus;
             const now = new Date();
@@ -91,7 +121,6 @@ export default function DashboardPage({ db, user, companyConfig }) {
             
             schedules.forEach(schedule => {
                 if (new Date(schedule.date) > new Date()) return;
-
                 const attendance = attendanceRecords.get(schedule.date);
                 if (!attendance) {
                     absenceCount++;
@@ -113,6 +142,7 @@ export default function DashboardPage({ db, user, companyConfig }) {
         checkBonusStatus();
     }, [db, user, companyConfig]);
 
+    // Effect for checking geolocation
     useEffect(() => {
         if (!companyConfig?.geofence) {
             setLocationError("Geofence settings are not configured.");
@@ -208,6 +238,15 @@ export default function DashboardPage({ db, user, companyConfig }) {
                             <span className="text-3xl font-bold text-amber-400">{ (companyConfig?.annualLeaveDays || 0) - leaveTaken}</span>
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Based on {companyConfig?.annualLeaveDays || 0} days per year.</p>
+                    </DashboardCard>
+                    
+                    {/* --- NEW: Public Holiday Credit Card --- */}
+                    <DashboardCard title="Public Holiday Credit">
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-300">Credits Remaining</span>
+                            <span className="text-3xl font-bold text-blue-400">{publicHolidayCredits}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">Earned from working on public holidays.</p>
                     </DashboardCard>
 
                     <DashboardCard title="Bonus Status">
