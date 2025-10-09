@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where, getDocs } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where } from 'firebase/firestore';
 import { getFunctions } from "firebase/functions";
 
 import StaffManagementPage from './pages/StaffManagementPage';
@@ -16,7 +16,7 @@ import TeamSchedulePage from './pages/TeamSchedulePage';
 import PayrollPage from './pages/PayrollPage';
 import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
 
-const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
+const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
 export default function App() {
     const [auth, setAuth] = useState(null);
@@ -124,10 +124,17 @@ export default function App() {
 
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
-            const calculateBalances = async () => {
-                const currentYear = new Date().getFullYear();
+            const currentYear = new Date().getFullYear();
+            const q = query(
+                collection(db, 'leave_requests'),
+                where('staffId', '==', user.uid),
+                where('status', 'in', ['approved', 'pending']),
+                where('startDate', '>=', `${currentYear}-01-01`)
+            );
+
+            // Use onSnapshot for real-time updates
+            const unsubscribe = onSnapshot(q, (snapshot) => {
                 const today = new Date();
-                
                 const hireDate = new Date(staffProfile.startDate);
                 const yearsOfService = (today - hireDate) / (1000 * 60 * 60 * 24 * 365);
                 let annualLeaveEntitlement = 0;
@@ -142,14 +149,6 @@ export default function App() {
                     .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
                 const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
 
-                const q = query(
-                    collection(db, 'leave_requests'),
-                    where('staffId', '==', user.uid),
-                    where('status', 'in', ['approved', 'pending']),
-                    where('startDate', '>=', `${currentYear}-01-01`)
-                );
-                const snapshot = await getDocs(q);
-                
                 let usedAnnual = 0;
                 let usedPublicHoliday = 0;
                 snapshot.docs.forEach(doc => {
@@ -162,8 +161,10 @@ export default function App() {
                     annual: annualLeaveEntitlement - usedAnnual,
                     publicHoliday: earnedCredits - usedPublicHoliday,
                 });
-            };
-            calculateBalances();
+            });
+
+            return () => unsubscribe(); // Cleanup the listener
+
         } else {
             setLeaveBalances({ annual: 0, publicHoliday: 0 });
         }
