@@ -139,36 +139,36 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
 
     const renderButtons = () => {
         if (isOnLeaveToday) {
-            return <p className="text-center text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
+            return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
         }
         const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
         switch (status) {
             case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
             case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
             case 'on-break': return <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>;
-            case 'checked-out-final': return <p className="text-center text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
+            case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
             default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
         }
     };
 
-    const DashboardCard = ({ title, children }) => (
-        <div className="bg-gray-800 rounded-lg shadow-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">{title}</h3>
-            {children}
+    const DashboardCard = ({ title, children, className }) => (
+        <div className={`bg-gray-800 rounded-lg shadow-lg ${className}`}>
+            <h3 className="text-lg font-semibold text-white mb-4 px-4 pt-4">{title}</h3>
+            <div className="p-4">{children}</div>
         </div>
     );
 
     return (
         <div>
-            <h2 className="text-3xl font-bold text-white mb-8">My Dashboard</h2>
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
-                    <DashboardCard title="Time Clock">
+                    <DashboardCard title="Time Clock" className="p-2 sm:p-6">
                         <div className="text-center mb-6">
-                            <p className="text-lg text-gray-300">{currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-                            <p className="text-5xl sm:text-6xl font-mono font-bold tracking-widest mt-1">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
+                            <p className="text-base sm:text-lg text-gray-300">{currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                            <p className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold tracking-tight sm:tracking-widest mt-1">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
                         </div>
-                        <div className="mt-6">
+                        <div className="mt-6 px-2 sm:px-0">
                             {renderButtons()}
                         </div>
                         <div className="text-center mt-6 text-sm text-gray-500 h-5">
