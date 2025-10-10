@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { PlusIcon, TrashIcon } from '../components/Icons';
 
 export default function SettingsPage({ db, companyConfig }) {
     const defaultConfig = { 
-        // --- NEW FIELDS ADDED ---
         companyName: '',
         companyAddress: '',
         companyTaxId: '',
-        // --- END NEW FIELDS ---
+        companyLogoUrl: '',
         departments: [], 
         paidSickDays: 30, 
         paidPersonalDays: 3,
@@ -16,29 +16,31 @@ export default function SettingsPage({ db, companyConfig }) {
         publicHolidays: [],
         publicHolidayCreditCap: 13,
         geofence: { latitude: 0, longitude: 0, radius: 100 },
-        attendanceBonus: { 
-            month1: 400, 
-            month2: 800, 
-            month3: 1200, 
-            allowedAbsences: 0, 
-            allowedLates: 1 
-        }
+        attendanceBonus: { month1: 400, month2: 800, month3: 1200, allowedAbsences: 0, allowedLates: 1 },
+        ssoRate: 5,
+        ssoCap: 750
     };
 
     const [config, setConfig] = useState(defaultConfig);
+    const [logoFile, setLogoFile] = useState(null);
+    const [logoPreview, setLogoPreview] = useState('');
     const [newDepartment, setNewDepartment] = useState('');
     const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (companyConfig) {
-            setConfig(prev => ({
-                ...defaultConfig, // Use default config as a base
+            const mergedConfig = {
+                ...defaultConfig,
                 ...companyConfig,
                 geofence: { ...defaultConfig.geofence, ...companyConfig.geofence },
                 attendanceBonus: { ...defaultConfig.attendanceBonus, ...companyConfig.attendanceBonus },
                 publicHolidays: companyConfig.publicHolidays || []
-            }));
+            };
+            setConfig(mergedConfig);
+            if (mergedConfig.companyLogoUrl) {
+                setLogoPreview(mergedConfig.companyLogoUrl);
+            }
         }
     }, [companyConfig]);
 
@@ -50,29 +52,38 @@ export default function SettingsPage({ db, companyConfig }) {
             setConfig(prev => ({ ...prev, [id]: value }));
         }
     };
+
+    const handleLogoChange = (e) => {
+        if (e.target.files[0]) {
+            const file = e.target.files[0];
+            setLogoFile(file);
+            setLogoPreview(URL.createObjectURL(file));
+        }
+    };
     
     const handleSaveSettings = async () => {
         setIsSaving(true);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
+            let logoUrl = config.companyLogoUrl;
+            if (logoFile) {
+                const storage = getStorage();
+                const storageRef = ref(storage, `company_assets/logo`); // Use a consistent name for easier management
+                await uploadBytes(storageRef, logoFile);
+                logoUrl = await getDownloadURL(storageRef);
+            }
+
             const configToSave = {
                 ...config,
+                companyLogoUrl: logoUrl,
                 paidSickDays: Number(config.paidSickDays),
                 paidPersonalDays: Number(config.paidPersonalDays),
                 annualLeaveDays: Number(config.annualLeaveDays),
                 publicHolidayCreditCap: Number(config.publicHolidayCreditCap),
-                geofence: {
-                    latitude: Number(config.geofence.latitude),
-                    longitude: Number(config.geofence.longitude),
-                    radius: Number(config.geofence.radius),
-                },
-                attendanceBonus: {
-                    month1: Number(config.attendanceBonus.month1),
-                    month2: Number(config.attendanceBonus.month2),
-                    month3: Number(config.attendanceBonus.month3),
-                    allowedAbsences: Number(config.attendanceBonus.allowedAbsences),
-                    allowedLates: Number(config.attendanceBonus.allowedLates),
-                }
+                geofence: { latitude: Number(config.geofence.latitude), longitude: Number(config.geofence.longitude), radius: Number(config.geofence.radius) },
+                attendanceBonus: { month1: Number(config.attendanceBonus.month1), month2: Number(config.attendanceBonus.month2), month3: Number(config.attendanceBonus.month3), allowedAbsences: Number(config.attendanceBonus.allowedAbsences), allowedLates: Number(config.attendanceBonus.allowedLates) },
+                ssoRate: Number(config.ssoRate),
+                ssoCap: Number(config.ssoCap)
             };
             await updateDoc(configDocRef, configToSave);
             alert('Settings saved successfully!');
@@ -85,33 +96,23 @@ export default function SettingsPage({ db, companyConfig }) {
     };
 
     const handleAddDepartment = async (e) => { e.preventDefault(); if (!newDepartment.trim()) return; await updateDoc(doc(db, 'settings', 'company_config'), { departments: arrayUnion(newDepartment.trim()) }); setNewDepartment(''); };
-    const handleDeleteDepartment = async (departmentToDelete) => { if (window.confirm(`Delete "${departmentToDelete}"?`)) { await updateDoc(doc(db, 'settings', 'company_config'), { departments: arrayRemove(departmentToDelete) }); } };
-    const handleAddHoliday = async (e) => { e.preventDefault(); if (!newHoliday.date || !newHoliday.name.trim()) return; const holidayToAdd = { date: newHoliday.date, name: newHoliday.name.trim() }; await updateDoc(doc(db, 'settings', 'company_config'), { publicHolidays: arrayUnion(holidayToAdd) }); setNewHoliday({ date: '', name: '' }); };
-    const handleDeleteHoliday = async (holidayToDelete) => { if (window.confirm(`Delete "${holidayToDelete.name}"?`)) { await updateDoc(doc(db, 'settings', 'company_config'), { publicHolidays: arrayRemove(holidayToDelete) }); } };
+    const handleDeleteDepartment = async (dept) => { if (window.confirm(`Delete "${dept}"?`)) { await updateDoc(doc(db, 'settings', 'company_config'), { departments: arrayRemove(dept) }); } };
+    const handleAddHoliday = async (e) => { e.preventDefault(); if (!newHoliday.date || !newHoliday.name.trim()) return; await updateDoc(doc(db, 'settings', 'company_config'), { publicHolidays: arrayUnion({ date: newHoliday.date, name: newHoliday.name.trim() }) }); setNewHoliday({ date: '', name: '' }); };
+    const handleDeleteHoliday = async (holiday) => { if (window.confirm(`Delete "${holiday.name}"?`)) { await updateDoc(doc(db, 'settings', 'company_config'), { publicHolidays: arrayRemove(holiday) }); } };
 
     return (
         <div>
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Advanced Settings</h2>
-            
             <div className="space-y-8">
-                {/* --- NEW SECTION FOR COMPANY INFO --- */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white">Company Information</h3>
                     <p className="text-gray-400 mt-2">These details will be used in official documents like payslips.</p>
                     <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="md:col-span-2">
-                            <label htmlFor="companyName" className="block text-sm font-medium text-gray-300 mb-1">Company Legal Name</label>
-                            <input type="text" id="companyName" value={config.companyName || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
-                        </div>
-                        <div className="md:col-span-2">
-                            <label htmlFor="companyAddress" className="block text-sm font-medium text-gray-300 mb-1">Company Address</label>
-                            <textarea id="companyAddress" value={config.companyAddress || ''} onChange={handleConfigChange} rows="3" className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"></textarea>
-                        </div>
-                        <div>
-                            <label htmlFor="companyTaxId" className="block text-sm font-medium text-gray-300 mb-1">Company Tax ID</label>
-                            <input type="text" id="companyTaxId" value={config.companyTaxId || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
-                        </div>
+                        <div className="md:col-span-2"><label htmlFor="companyName" className="block text-sm font-medium text-gray-300 mb-1">Company Legal Name</label><input type="text" id="companyName" value={config.companyName || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
+                        <div className="md:col-span-2"><label htmlFor="companyAddress" className="block text-sm font-medium text-gray-300 mb-1">Company Address</label><textarea id="companyAddress" value={config.companyAddress || ''} onChange={handleConfigChange} rows="3" className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"></textarea></div>
+                        <div><label htmlFor="companyTaxId" className="block text-sm font-medium text-gray-300 mb-1">Company Tax ID</label><input type="text" id="companyTaxId" value={config.companyTaxId || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     </div>
+                    <div className="mt-6"><label className="block text-sm font-medium text-gray-300 mb-1">Company Logo</label><div className="flex items-center space-x-4">{logoPreview && <img src={logoPreview} alt="Logo Preview" className="h-16 w-16 object-contain rounded-md bg-white p-1" />}<input type="file" accept="image/png, image/jpeg" onChange={handleLogoChange} className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700"/></div></div>
                 </div>
 
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
@@ -138,7 +139,6 @@ export default function SettingsPage({ db, companyConfig }) {
                     </div>
                 </div>
 
-                {/* Other sections remain unchanged... */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white">Public Holidays</h3>
                     <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
