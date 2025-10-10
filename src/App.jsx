@@ -14,6 +14,7 @@ import AttendanceReportsPage from './pages/AttendanceReportsPage';
 import MySchedulePage from './pages/MySchedulePage';
 import TeamSchedulePage from './pages/TeamSchedulePage';
 import PayrollPage from './pages/PayrollPage';
+import FinancialsPage from './pages/FinancialsPage'; // 1. IMPORT THE NEW PAGE
 import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
@@ -190,6 +191,7 @@ export default function App() {
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
+            case 'financials': return <FinancialsPage db={db} staffList={staffList} />; // 2. ADD PAGE TO RENDERER
             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
@@ -234,7 +236,9 @@ export default function App() {
                            <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5"/>} />
                            <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingRequestsCount} />
                            <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5"/>} />
-                           <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5"/>} />
+                           <NavLink page="financials" label="Financials" icon={<DollarSignIcon className="h-5 w-5"/>} />
+                           <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5"/>} /> 
+                           {/* 3. ADD NAVIGATION LINK */}
                            <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
                         </>
                     )}
