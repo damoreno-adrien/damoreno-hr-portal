@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { PlusIcon, PencilIcon, TrashIcon } from '../components/Icons';
+import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '../components/Icons'; // Assuming CheckCircleIcon and XCircleIcon exist or can be added
 import LoanModal from '../components/LoanModal';
 import AdvanceModal from '../components/AdvanceModal';
 import AdjustmentModal from '../components/AdjustmentModal';
@@ -8,10 +8,25 @@ import AdjustmentModal from '../components/AdjustmentModal';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1];
 
+const StatusBadge = ({ status }) => {
+    const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
+    const statusMap = {
+        pending: "bg-yellow-500/20 text-yellow-300",
+        approved: "bg-green-500/20 text-green-300",
+        rejected: "bg-red-500/20 text-red-300",
+        paid: "bg-blue-500/20 text-blue-300",
+    };
+    return <span className={`${baseClasses} ${statusMap[status] || 'bg-gray-500/20 text-gray-300'}`}>{status}</span>;
+};
+
 export default function FinancialsPage({ staffList, db }) {
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
     
+    // State for Pending Advances (All Staff)
+    const [pendingAdvances, setPendingAdvances] = useState([]);
+    const [isLoadingPending, setIsLoadingPending] = useState(true);
+
     const [loans, setLoans] = useState([]);
     const [isLoadingLoans, setIsLoadingLoans] = useState(false);
     const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
@@ -27,66 +42,83 @@ export default function FinancialsPage({ staffList, db }) {
     const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
     const [editingAdjustment, setEditingAdjustment] = useState(null);
 
-    // Fetch Loans (not dependent on pay period)
+    // Fetch All Pending Advances
+    useEffect(() => {
+        if (!db) return;
+        setIsLoadingPending(true);
+        const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
+        const unsubscribe = onSnapshot(q, (snap) => {
+            const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            // Add staff name to each request for easy display
+            const hydratedList = pendingList.map(req => ({...req, staffName: staffList.find(s => s.id === req.staffId)?.fullName || 'Unknown Staff'}));
+            setPendingAdvances(hydratedList);
+            setIsLoadingPending(false);
+        }, (err) => { console.error(err); setIsLoadingPending(false); });
+        return () => unsubscribe();
+    }, [db, staffList]);
+
+    // Fetch data for selected staff member
     useEffect(() => {
         if (selectedStaffId && db) {
             setIsLoadingLoans(true);
-            const q = query(collection(db, 'loans'), where('staffId', '==', selectedStaffId));
-            const unsubscribe = onSnapshot(q, (snap) => {
+            setIsLoadingAdvances(true);
+            setIsLoadingAdjustments(true);
+
+            // Fetch Loans
+            const loansQuery = query(collection(db, 'loans'), where('staffId', '==', selectedStaffId));
+            const unsubLoans = onSnapshot(loansQuery, (snap) => {
                 setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 setIsLoadingLoans(false);
             }, (err) => { console.error(err); setIsLoadingLoans(false); });
-            return () => unsubscribe();
-        } else { setLoans([]); }
-    }, [selectedStaffId, db]);
 
-    // Fetch Advances & Adjustments (dependent on pay period)
-    useEffect(() => {
-        if (selectedStaffId && db) {
-            setIsLoadingAdvances(true);
-            setIsLoadingAdjustments(true);
-            
-            const commonQueries = [
-                where('staffId', '==', selectedStaffId),
-                where('payPeriodMonth', '==', payPeriod.month),
-                where('payPeriodYear', '==', payPeriod.year)
-            ];
-
-            const advancesQuery = query(collection(db, 'salary_advances'), ...commonQueries);
-            const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), ...commonQueries);
-
+            // Fetch Advances for selected period
+            const advancesQuery = query(collection(db, 'salary_advances'), where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year));
             const unsubAdvances = onSnapshot(advancesQuery, (snap) => {
                 setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 setIsLoadingAdvances(false);
             }, (err) => { console.error(err); setIsLoadingAdvances(false); });
             
+            // Fetch Adjustments for selected period
+            const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year));
             const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => {
                 setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 setIsLoadingAdjustments(false);
             }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
 
-            return () => {
-                unsubAdvances();
-                unsubAdjustments();
-            };
+            return () => { unsubLoans(); unsubAdvances(); unsubAdjustments(); };
         } else {
-            setAdvances([]);
-            setAdjustments([]);
+            setLoans([]); setAdvances([]); setAdjustments([]);
         }
     }, [selectedStaffId, db, payPeriod]);
 
     // Handlers
-    const handleStaffChange = (e) => setSelectedStaffId(e.target.value);
     const handlePeriodChange = (e) => setPayPeriod(p => ({ ...p, [e.target.name]: Number(e.target.value) }));
-
+    const handleStaffChange = (e) => setSelectedStaffId(e.target.value);
+    
+    // Loan Handlers
     const handleOpenAddLoanModal = () => { setEditingLoan(null); setIsLoanModalOpen(true); };
     const handleOpenEditLoanModal = (loan) => { setEditingLoan(loan); setIsLoanModalOpen(true); };
     const handleDeleteLoan = async (id) => { if (window.confirm("Delete this loan record?")) await deleteDoc(doc(db, 'loans', id)); };
 
+    // Advance Handlers
     const handleOpenAddAdvanceModal = () => { setEditingAdvance(null); setIsAdvanceModalOpen(true); };
     const handleOpenEditAdvanceModal = (adv) => { setEditingAdvance(adv); setIsAdvanceModalOpen(true); };
     const handleDeleteAdvance = async (id) => { if (window.confirm("Delete this advance record?")) await deleteDoc(doc(db, 'salary_advances', id)); };
+
+    const handleApproveAdvance = async (id) => {
+        const advRef = doc(db, 'salary_advances', id);
+        await updateDoc(advRef, { status: 'approved', isReadByStaff: false });
+    };
+
+    const handleRejectAdvance = async (id) => {
+        const reason = window.prompt("Please provide a reason for rejecting this request.");
+        if (reason) {
+            const advRef = doc(db, 'salary_advances', id);
+            await updateDoc(advRef, { status: 'rejected', rejectionReason: reason, isReadByStaff: false });
+        }
+    };
     
+    // Adjustment Handlers
     const handleOpenAddAdjustmentModal = () => { setEditingAdjustment(null); setIsAdjustmentModalOpen(true); };
     const handleOpenEditAdjustmentModal = (adj) => { setEditingAdjustment(adj); setIsAdjustmentModalOpen(true); };
     const handleDeleteAdjustment = async (id) => { if (window.confirm("Delete this adjustment record?")) await deleteDoc(doc(db, 'monthly_adjustments', id)); };
@@ -108,6 +140,19 @@ export default function FinancialsPage({ staffList, db }) {
                 </div>
             </div>
 
+            {/* NEW PENDING REQUESTS SECTION */}
+            <section className="mb-10">
+                <h3 className="text-xl font-semibold text-white mb-4">Pending Salary Advance Requests</h3>
+                <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
+                    <table className="min-w-full">
+                        <thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead>
+                        <tbody className="divide-y divide-gray-700">
+                            {isLoadingPending ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">Loading...</td></tr>) : pendingAdvances.length === 0 ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">No pending requests.</td></tr>) : (pendingAdvances.map(req => (<tr key={req.id}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{req.staffName}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td><td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-right space-x-2"><button onClick={() => handleApproveAdvance(req.id)} className="p-2 bg-green-600 rounded-full hover:bg-green-500" title="Approve"><CheckCircleIcon className="h-5 w-5"/></button><button onClick={() => handleRejectAdvance(req.id)} className="p-2 bg-red-600 rounded-full hover:bg-red-500" title="Reject"><XCircleIcon className="h-5 w-5"/></button></td></tr>)))}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
             {selectedStaffId ? (
                 <div className="space-y-10">
                     <section>
@@ -115,8 +160,8 @@ export default function FinancialsPage({ staffList, db }) {
                         <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto"><table className="min-w-full"><thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Monthly</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Remaining</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Start Date</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead><tbody className="divide-y divide-gray-700">{isLoadingLoans ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">Loading...</td></tr>) : loans.length === 0 ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">No active loans.</td></tr>) : (loans.map(loan => (<tr key={loan.id} className="hover:bg-gray-700"><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{loan.loanName}</td><td className="px-6 py-4 text-sm text-gray-300">{loan.totalAmount.toLocaleString()}</td><td className="px-6 py-4 text-sm text-gray-300">{loan.monthlyRepayment.toLocaleString()}</td><td className="px-6 py-4 text-sm font-semibold text-amber-400">{loan.remainingBalance.toLocaleString()}</td><td className="px-6 py-4 text-sm text-gray-300">{loan.startDate}</td><td className="px-6 py-4 text-sm text-right"><button onClick={() => handleOpenEditLoanModal(loan)} className="text-blue-400 hover:text-blue-300 mr-4"><PencilIcon className="h-5 w-5"/></button><button onClick={() => handleDeleteLoan(loan.id)} className="text-red-400 hover:text-red-300"><TrashIcon className="h-5 w-5"/></button></td></tr>)))}</tbody></table></div>
                     </section>
                     <section>
-                        <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-semibold text-white">Salary Advances</h3><button onClick={handleOpenAddAdvanceModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Add Advance</button></div>
-                        <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto"><table className="min-w-full"><thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead><tbody className="divide-y divide-gray-700">{isLoadingAdvances ? (<tr><td colSpan="3" className="text-center py-10 text-gray-500">Loading...</td></tr>) : advances.length === 0 ? (<tr><td colSpan="3" className="text-center py-10 text-gray-500">No advances for this period.</td></tr>) : (advances.map(adv => (<tr key={adv.id} className="hover:bg-gray-700"><td className="px-6 py-4 text-sm text-gray-300">{adv.date}</td><td className="px-6 py-4 text-sm font-semibold text-amber-400">{adv.amount.toLocaleString()}</td><td className="px-6 py-4 text-sm text-right"><button onClick={() => handleOpenEditAdvanceModal(adv)} className="text-blue-400 hover:text-blue-300 mr-4"><PencilIcon className="h-5 w-5"/></button><button onClick={() => handleDeleteAdvance(adv.id)} className="text-red-400 hover:text-red-300"><TrashIcon className="h-5 w-5"/></button></td></tr>)))}</tbody></table></div>
+                        <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-semibold text-white">Salary Advances History</h3><button onClick={handleOpenAddAdvanceModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Add Advance</button></div>
+                        <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto"><table className="min-w-full"><thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead><tbody className="divide-y divide-gray-700">{isLoadingAdvances ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">Loading...</td></tr>) : advances.length === 0 ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">No advances for this period.</td></tr>) : (advances.map(adv => (<tr key={adv.id} className="hover:bg-gray-700"><td className="px-6 py-4 text-sm text-gray-300">{adv.date}</td><td className="px-6 py-4 text-sm font-semibold text-amber-400">{adv.amount.toLocaleString()}</td><td className="px-6 py-4 text-sm"><StatusBadge status={adv.status} /></td><td className="px-6 py-4 text-sm text-right"><button onClick={() => handleOpenEditAdvanceModal(adv)} className="text-blue-400 hover:text-blue-300 mr-4"><PencilIcon className="h-5 w-5"/></button><button onClick={() => handleDeleteAdvance(adv.id)} className="text-red-400 hover:text-red-300"><TrashIcon className="h-5 w-5"/></button></td></tr>)))}</tbody></table></div>
                     </section>
                     <section>
                          <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-semibold text-white">Other Monthly Adjustments</h3><button onClick={handleOpenAddAdjustmentModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Add Adjustment</button></div>
@@ -124,7 +169,7 @@ export default function FinancialsPage({ staffList, db }) {
                     </section>
                 </div>
             ) : (
-                <div className="text-center py-20 bg-gray-800 rounded-lg"><p className="text-gray-400">Please select a pay period and staff member to begin.</p></div>
+                <div className="text-center py-10"><p className="text-gray-400">Please select a staff member to view their detailed financial records.</p></div>
             )}
         </div>
     );
