@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
 import { PlusIcon } from '../components/Icons';
 import RequestAdvanceModal from '../components/RequestAdvanceModal';
 
@@ -29,16 +29,12 @@ export default function SalaryAdvancePage({ db, user }) {
         const calculateEligibility = httpsCallable(functions, 'calculateAdvanceEligibility');
         
         calculateEligibility()
-            .then((result) => {
-                setEligibility(result.data);
-            })
+            .then((result) => setEligibility(result.data))
             .catch((err) => {
                 console.error(err);
                 setError("Could not determine eligibility. " + err.message);
             })
-            .finally(() => {
-                setIsLoadingEligibility(false);
-            });
+            .finally(() => setIsLoadingEligibility(false));
 
         // Listen for changes to salary advance requests
         const q = query(
@@ -47,8 +43,19 @@ export default function SalaryAdvancePage({ db, user }) {
             orderBy('createdAt', 'desc')
         );
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            const requestData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setRequests(requestData);
             setIsLoadingRequests(false);
+
+            // --- NEW: LOGIC TO CLEAR NOTIFICATIONS ---
+            const unreadDocs = snapshot.docs.filter(doc => doc.data().isReadByStaff === false);
+            if (unreadDocs.length > 0) {
+                const batch = writeBatch(db);
+                unreadDocs.forEach(doc => {
+                    batch.update(doc.ref, { isReadByStaff: true });
+                });
+                batch.commit();
+            }
         }, (err) => {
             console.error(err);
             setError("Could not load request history.");

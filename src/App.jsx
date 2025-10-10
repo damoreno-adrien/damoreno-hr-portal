@@ -33,11 +33,15 @@ export default function App() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [companyConfig, setCompanyConfig] = useState(null);
-    const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
-    const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0 });
+
+    // --- NEW STATE FOR NOTIFICATION COUNTS ---
+    const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+    const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
+    const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
+    const [unreadAdvanceUpdatesCount, setUnreadAdvanceUpdatesCount] = useState(0);
 
     useEffect(() => {
         try {
@@ -75,43 +79,49 @@ export default function App() {
             console.error("Firebase Initialization Error:", error); setIsLoading(false);
         }
     }, []);
+    
+    // --- NOTIFICATION LISTENERS ---
+    useEffect(() => {
+        if (!db) return;
+        // Manager: Listen for pending leave requests
+        if (userRole === 'manager') {
+            const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
+            const unsubscribe = onSnapshot(q, (snap) => setPendingLeaveCount(snap.size));
+            return () => unsubscribe();
+        }
+        // Staff: Listen for unread leave updates
+        if (userRole === 'staff' && user) {
+            const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
+            const unsubscribe = onSnapshot(q, (snap) => setUnreadLeaveUpdatesCount(snap.size));
+            return () => unsubscribe();
+        }
+    }, [userRole, db, user]);
+
+    useEffect(() => {
+        if (!db) return;
+        // Manager: Listen for pending advance requests
+        if (userRole === 'manager') {
+            const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
+            const unsubscribe = onSnapshot(q, (snap) => setPendingAdvanceCount(snap.size));
+            return () => unsubscribe();
+        }
+        // Staff: Listen for unread advance updates
+        if (userRole === 'staff' && user) {
+            const q = query(collection(db, 'salary_advances'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
+            const unsubscribe = onSnapshot(q, (snap) => setUnreadAdvanceUpdatesCount(snap.size));
+            return () => unsubscribe();
+        }
+    }, [userRole, db, user]);
+
 
     useEffect(() => {
         if (!db) return;
         const configDocRef = doc(db, 'settings', 'company_config');
         const unsubscribe = onSnapshot(configDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-                setCompanyConfig(docSnap.data());
-            } else {
-                const defaultConfig = { 
-                    departments: ["Management", "Service", "Kitchen", "Pizza Department"],
-                    paidSickDays: 30, paidPersonalDays: 3, annualLeaveDays: 6,
-                    publicHolidays: [], publicHolidayCreditCap: 13,
-                    geofence: { latitude: 7.88342, longitude: 98.3873, radius: 50 },
-                    attendanceBonus: { month1: 400, month2: 800, month3: 1200, allowedAbsences: 0, allowedLates: 1 }
-                };
-                setDoc(configDocRef, defaultConfig);
-                setCompanyConfig(defaultConfig);
-            }
+            if (docSnap.exists()) { setCompanyConfig(docSnap.data()); }
         });
         return () => unsubscribe();
     }, [db]);
-
-    useEffect(() => {
-        if (userRole === 'manager' && db) {
-            const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
-            const unsubscribe = onSnapshot(q, (querySnapshot) => setPendingRequestsCount(querySnapshot.size));
-            return () => unsubscribe();
-        } else { setPendingRequestsCount(0); }
-    }, [userRole, db]);
-
-    useEffect(() => {
-        if (userRole === 'staff' && db && user) {
-            const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
-            const unsubscribe = onSnapshot(q, (querySnapshot) => setUnreadLeaveUpdatesCount(querySnapshot.size));
-            return () => unsubscribe();
-        } else { setUnreadLeaveUpdatesCount(0); }
-    }, [userRole, user, db]);
 
     useEffect(() => {
         if (userRole === 'manager' && db) {
@@ -119,7 +129,7 @@ export default function App() {
             const unsubscribeStaff = onSnapshot(staffCollectionRef, (querySnapshot) => {
                 const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 setStaffList(list);
-            }, (error) => console.error("Error fetching staff list:", error));
+            });
             return () => unsubscribeStaff();
         } else { setStaffList([]); }
     }, [userRole, db]);
@@ -127,41 +137,26 @@ export default function App() {
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
             const currentYear = new Date().getFullYear();
-            const q = query(
-                collection(db, 'leave_requests'),
-                where('staffId', '==', user.uid),
-                where('status', 'in', ['approved', 'pending']),
-                where('startDate', '>=', `${currentYear}-01-01`)
-            );
+            const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', 'in', ['approved', 'pending']), where('startDate', '>=', `${currentYear}-01-01`));
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 const today = new Date();
                 const hireDate = new Date(staffProfile.startDate);
                 const yearsOfService = (today - hireDate) / (1000 * 60 * 60 * 24 * 365);
                 let annualLeaveEntitlement = 0;
-                if (yearsOfService >= 1) {
-                    annualLeaveEntitlement = companyConfig.annualLeaveDays;
-                } else if (hireDate.getFullYear() === currentYear) {
-                    const monthsWorked = 12 - hireDate.getMonth();
-                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked);
-                }
+                if (yearsOfService >= 1) { annualLeaveEntitlement = companyConfig.annualLeaveDays; } 
+                else if (hireDate.getFullYear() === currentYear) { const monthsWorked = 12 - hireDate.getMonth(); annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked); }
                 const pastHolidays = companyConfig.publicHolidays.filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
                 const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-                let usedAnnual = 0;
-                let usedPublicHoliday = 0;
+                let usedAnnual = 0, usedPublicHoliday = 0;
                 snapshot.docs.forEach(doc => {
                     const leave = doc.data();
                     if (leave.leaveType === 'Annual Leave') usedAnnual += leave.totalDays;
                     if (leave.leaveType === 'Public Holiday (In Lieu)') usedPublicHoliday += leave.totalDays;
                 });
-                setLeaveBalances({
-                    annual: annualLeaveEntitlement - usedAnnual,
-                    publicHoliday: earnedCredits - usedPublicHoliday,
-                });
+                setLeaveBalances({ annual: annualLeaveEntitlement - usedAnnual, publicHoliday: earnedCredits - usedPublicHoliday });
             });
             return () => unsubscribe();
-        } else {
-            setLeaveBalances({ annual: 0, publicHoliday: 0 });
-        }
+        } else { setLeaveBalances({ annual: 0, publicHoliday: 0 }); }
     }, [db, user, userRole, companyConfig, staffProfile]);
     
     const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); if (!auth) return; try { await signInWithEmailAndPassword(auth, email, password); } catch (error) { setLoginError('Invalid email or password. Please try again.'); } };
@@ -177,10 +172,7 @@ export default function App() {
         }
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
-            case 'planning':
-                if (userRole === 'manager') return <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} />;
-                if (userRole === 'staff') return <MySchedulePage db={db} user={user} />;
-                return null;
+            case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} />;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
@@ -192,22 +184,7 @@ export default function App() {
         }
     };
     
-    const NavLink = ({ icon, label, page, badgeCount }) => (
-        <button 
-            onClick={() => { setCurrentPage(page); setIsMobileMenuOpen(false); }} 
-            className={`flex items-center w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === page ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}
-        >
-            <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center w-full' : ''}`}>
-                {icon}
-                <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>{label}</span>
-            </div>
-            {!isSidebarCollapsed && badgeCount > 0 && ( 
-                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-                    {badgeCount}
-                </span> 
-            )}
-        </button>
-    );
+    const NavLink = ({ icon, label, page, badgeCount }) => ( <button onClick={() => { setCurrentPage(page); setIsMobileMenuOpen(false); }} className={`flex items-center w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === page ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}><div className={`flex items-center ${isSidebarCollapsed ? 'justify-center w-full' : ''}`}>{icon}<span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>{label}</span></div>{!isSidebarCollapsed && badgeCount > 0 && ( <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">{badgeCount}</span> )}</button> );
 
     return (
         <div className="relative min-h-screen md:flex bg-gray-900 text-white font-sans">
@@ -220,9 +197,9 @@ export default function App() {
                            <NavLink page="dashboard" label="Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
                            <NavLink page="staff" label="Manage Staff" icon={<BriefcaseIcon className="h-5 w-5"/>} />
                            <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5"/>} />
-                           <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingRequestsCount} />
+                           <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingLeaveCount} />
                            <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5"/>} />
-                           <NavLink page="financials" label="Financials" icon={<DollarSignIcon className="h-5 w-5"/>} />
+                           <NavLink page="financials" label="Financials" icon={<DollarSignIcon className="h-5 w-5"/>} badgeCount={pendingAdvanceCount} />
                            <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5"/>} />
                            <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
                         </>
@@ -233,7 +210,7 @@ export default function App() {
                            <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5"/>} />
                            <NavLink page="team-schedule" label="Team Schedule" icon={<UsersIcon className="h-5 w-5"/>} />
                            <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadLeaveUpdatesCount} />
-                           <NavLink page="salary-advance" label="Salary Advance" icon={<DollarSignIcon className="h-5 w-5"/>} />
+                           <NavLink page="salary-advance" label="Salary Advance" icon={<DollarSignIcon className="h-5 w-5"/>} badgeCount={unreadAdvanceUpdatesCount} />
                         </>
                     )}
                 </nav>
