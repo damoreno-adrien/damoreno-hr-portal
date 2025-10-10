@@ -4,6 +4,7 @@ const cors = require("cors")({ origin: true });
 
 admin.initializeApp();
 
+// --- createUser function (unchanged) ---
 exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
     if (req.method !== "POST") {
@@ -52,6 +53,7 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   });
 });
 
+// --- deleteStaff function (unchanged) ---
 exports.deleteStaff = onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
@@ -83,6 +85,8 @@ exports.deleteStaff = onCall({ region: "us-central1" }, async (request) => {
     }
 });
 
+
+// --- calculateBonus function (unchanged) ---
 exports.calculateBonus = onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth || !request.data.staffId || !request.data.payPeriod) {
         throw new HttpsError("invalid-argument", "Required data is missing.");
@@ -130,6 +134,7 @@ exports.calculateBonus = onCall({ region: "us-central1" }, async (request) => {
     }
 });
 
+// --- finalizePayrollStreaks function (unchanged) ---
 exports.finalizePayrollStreaks = onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth || !request.data.payrollResults) {
         throw new HttpsError("invalid-argument", "Payroll results are missing.");
@@ -144,8 +149,8 @@ exports.finalizePayrollStreaks = onCall({ region: "us-central1" }, async (reques
     return { result: "Bonus streaks updated successfully." };
 });
 
+// --- Salary Advance Eligibility Calculation Function (FIXED) ---
 exports.calculateAdvanceEligibility = onCall({ region: "us-central1" }, async (request) => {
-    // 1. Authenticate the request. For security, we use the caller's UID as the staffId.
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
@@ -153,15 +158,13 @@ exports.calculateAdvanceEligibility = onCall({ region: "us-central1" }, async (r
     const db = admin.firestore();
 
     try {
-        // 2. Get current date information
         const today = new Date();
         const year = today.getFullYear();
-        const month = today.getMonth(); // 0-indexed (0 for January)
+        const month = today.getMonth();
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
 
-        // 3. Fetch staff profile to get their current salary
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile could not be found.");
         
@@ -174,9 +177,9 @@ exports.calculateAdvanceEligibility = onCall({ region: "us-central1" }, async (r
         const baseSalary = latestJob.rate;
         const dailyRate = baseSalary / daysInMonth;
 
-        // 4. Fetch all necessary data for the current month up to today
         const configDoc = await db.collection("settings").doc("company_config").get();
-        const publicHolidays = configDoc.exists() ? configDoc.data().publicHolidays.map(h => h.date) : [];
+        // ** THE FIX IS HERE ** Changed configDoc.exists() to configDoc.exists
+        const publicHolidays = configDoc.exists ? configDoc.data().publicHolidays.map(h => h.date) : [];
         
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
@@ -188,7 +191,6 @@ exports.calculateAdvanceEligibility = onCall({ region: "us-central1" }, async (r
         const attendanceDates = new Set(attendanceSnap.docs.map(doc => doc.data().date));
         const approvedLeave = leaveSnap.docs.map(doc => doc.data());
 
-        // 5. Calculate unpaid absences so far this month
         let unpaidAbsences = 0;
         schedules.forEach(schedule => {
             const isPublicHoliday = publicHolidays.includes(schedule.date);
@@ -200,10 +202,9 @@ exports.calculateAdvanceEligibility = onCall({ region: "us-central1" }, async (r
             }
         });
 
-        // 6. Calculate the final amounts
         const absenceDeductions = dailyRate * unpaidAbsences;
         const currentSalaryDue = Math.max(0, baseSalary - absenceDeductions);
-        const maxAdvance = Math.floor(currentSalaryDue * 0.5); // 50% of the salary due
+        const maxAdvance = Math.floor(currentSalaryDue * 0.5);
 
         return { maxAdvance, currentSalaryDue, baseSalary, absenceDeductions, unpaidAbsences };
     } catch (error) {
