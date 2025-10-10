@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://damoreno-hr-portal.vercel.app"],
+    "method": ["GET", "PUT", "POST", "DELETE"],
+    "responseHeader": ["Content-Type"],
+    "maxAgeSeconds": 3600
+  }
+]
