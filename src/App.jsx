@@ -14,7 +14,8 @@ import AttendanceReportsPage from './pages/AttendanceReportsPage';
 import MySchedulePage from './pages/MySchedulePage';
 import TeamSchedulePage from './pages/TeamSchedulePage';
 import PayrollPage from './pages/PayrollPage';
-import FinancialsPage from './pages/FinancialsPage'; // 1. IMPORT THE NEW PAGE
+import FinancialsPage from './pages/FinancialsPage';
+import SalaryAdvancePage from './pages/SalaryAdvancePage';
 import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
@@ -132,8 +133,6 @@ export default function App() {
                 where('status', 'in', ['approved', 'pending']),
                 where('startDate', '>=', `${currentYear}-01-01`)
             );
-
-            // Use onSnapshot for real-time updates
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 const today = new Date();
                 const hireDate = new Date(staffProfile.startDate);
@@ -145,11 +144,8 @@ export default function App() {
                     const monthsWorked = 12 - hireDate.getMonth();
                     annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked);
                 }
-
-                const pastHolidays = companyConfig.publicHolidays
-                    .filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
+                const pastHolidays = companyConfig.publicHolidays.filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
                 const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-
                 let usedAnnual = 0;
                 let usedPublicHoliday = 0;
                 snapshot.docs.forEach(doc => {
@@ -157,15 +153,12 @@ export default function App() {
                     if (leave.leaveType === 'Annual Leave') usedAnnual += leave.totalDays;
                     if (leave.leaveType === 'Public Holiday (In Lieu)') usedPublicHoliday += leave.totalDays;
                 });
-                
                 setLeaveBalances({
                     annual: annualLeaveEntitlement - usedAnnual,
                     publicHoliday: earnedCredits - usedPublicHoliday,
                 });
             });
-
-            return () => unsubscribe(); // Cleanup the listener
-
+            return () => unsubscribe();
         } else {
             setLeaveBalances({ annual: 0, publicHoliday: 0 });
         }
@@ -190,8 +183,9 @@ export default function App() {
                 return null;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
+            case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
-            case 'financials': return <FinancialsPage db={db} staffList={staffList} />; // 2. ADD PAGE TO RENDERER
+            case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
@@ -219,15 +213,7 @@ export default function App() {
         <div className="relative min-h-screen md:flex bg-gray-900 text-white font-sans">
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
             <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
-                <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4">
-                    <div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
-                        <h1 className="text-2xl font-bold text-white whitespace-nowrap">Da Moreno HR</h1>
-                        <p className="text-sm text-amber-400 capitalize">{userRole} Portal</p>
-                    </div>
-                    <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white">
-                        <XIcon className="h-6 w-6"/>
-                    </button>
-                </div>
+                <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4"><div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}><h1 className="text-2xl font-bold text-white whitespace-nowrap">Da Moreno HR</h1><p className="text-sm text-amber-400 capitalize">{userRole} Portal</p></div><button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white"><XIcon className="h-6 w-6"/></button></div>
                 <nav className="flex-1 space-y-2 px-4">
                     {userRole === 'manager' && (
                         <>
@@ -237,8 +223,7 @@ export default function App() {
                            <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5"/>} badgeCount={pendingRequestsCount} />
                            <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5"/>} />
                            <NavLink page="financials" label="Financials" icon={<DollarSignIcon className="h-5 w-5"/>} />
-                           <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5"/>} /> 
-                           {/* 3. ADD NAVIGATION LINK */}
+                           <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5"/>} />
                            <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
                         </>
                     )}
@@ -248,34 +233,19 @@ export default function App() {
                            <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5"/>} />
                            <NavLink page="team-schedule" label="Team Schedule" icon={<UsersIcon className="h-5 w-5"/>} />
                            <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadLeaveUpdatesCount} />
+                           <NavLink page="salary-advance" label="Salary Advance" icon={<DollarSignIcon className="h-5 w-5"/>} />
                         </>
                     )}
                 </nav>
                 <div className="mt-auto p-4">
-                    <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
-                        <p className="text-sm text-gray-400 truncate">{user.email}</p>
-                    </div>
-                    <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700`}>
-                        <LogOutIcon className="h-5 w-5"/>
-                        <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span>
-                    </button>
-                    <div className="hidden md:block border-t border-gray-700 mt-4 pt-4">
-                        <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="flex items-center justify-center w-full py-2 text-gray-400 hover:bg-gray-700 rounded-lg">
-                            {isSidebarCollapsed ? <ChevronRightIcon className="h-6 w-6" /> : <ChevronLeftIcon className="h-6 w-6" />}
-                        </button>
-                    </div>
+                    <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}><p className="text-sm text-gray-400 truncate">{user.email}</p></div>
+                    <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700`}><LogOutIcon className="h-5 w-5"/><span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span></button>
+                    <div className="hidden md:block border-t border-gray-700 mt-4 pt-4"><button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="flex items-center justify-center w-full py-2 text-gray-400 hover:bg-gray-700 rounded-lg">{isSidebarCollapsed ? <ChevronRightIcon className="h-6 w-6" /> : <ChevronLeftIcon className="h-6 w-6" />}</button></div>
                 </div>
             </aside>
             <div className="flex-1 flex flex-col overflow-hidden">
-                <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center">
-                    <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white">
-                        <HamburgerIcon className="h-6 w-6" />
-                    </button>
-                    <h1 className="text-lg font-bold text-white">Da Moreno HR</h1>
-                </header>
-                <main className="flex-1 p-6 md:p-10 overflow-auto">
-                    {renderPageContent()}
-                </main>
+                <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center"><button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white"><HamburgerIcon className="h-6 w-6" /></button><h1 className="text-lg font-bold text-white">Da Moreno HR</h1></header>
+                <main className="flex-1 p-6 md:p-10 overflow-auto">{renderPageContent()}</main>
             </div>
         </div>
     );
