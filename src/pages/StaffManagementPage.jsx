@@ -11,6 +11,13 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
     
+    // Helper to get the display name, prioritizing nickname
+    const getDisplayName = (staff) => {
+        if (staff.nickname) return staff.nickname;
+        if (staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+        return staff.fullName; // Fallback for old data
+    };
+
     const getCurrentPosition = (staff) => {
         if (staff.jobHistory && staff.jobHistory.length > 0) {
             return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0].position;
@@ -21,9 +28,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     useEffect(() => {
         if (selectedStaff) {
             const updatedStaff = staffList.find(staff => staff.id === selectedStaff.id);
-            if (updatedStaff) {
-                setSelectedStaff(updatedStaff);
-            }
+            if (updatedStaff) { setSelectedStaff(updatedStaff); }
         }
     }, [staffList, selectedStaff?.id]);
 
@@ -34,7 +39,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             </Modal>
             
             {selectedStaff && (
-                 <Modal isOpen={true} onClose={closeProfileModal} title="Staff Profile">
+                 <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
                     <StaffProfileModal staff={selectedStaff} db={db} onClose={closeProfileModal} departments={departments} userRole={userRole} />
                 </Modal>
             )}
@@ -51,7 +56,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Full Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Display Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Position</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Start Date</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
@@ -60,7 +65,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     <tbody className="divide-y divide-gray-700">
                         {staffList.map(staff => (
                             <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{staff.fullName}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{getCurrentPosition(staff)}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.startDate}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">

@@ -6,15 +6,34 @@ import { PlusIcon, TrashIcon } from './Icons';
 
 export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
     const [activeTab, setActiveTab] = useState('details');
+    
+    const getInitialFormData = () => {
+        let initialData = {
+            email: staff.email,
+            phoneNumber: staff.phoneNumber || '',
+            birthdate: staff.birthdate || '',
+            bankAccount: staff.bankAccount || '',
+        };
+
+        if (staff.firstName || staff.lastName) { // New format exists
+            return {
+                ...initialData,
+                firstName: staff.firstName || '',
+                lastName: staff.lastName || '',
+                nickname: staff.nickname || '',
+            };
+        }
+        
+        // Old format: Split fullName as a starting suggestion
+        const nameParts = (staff.fullName || '').split(' ');
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+        return { ...initialData, firstName, lastName, nickname: '' };
+    };
+
+    const [formData, setFormData] = useState(getInitialFormData());
     const [isEditing, setIsEditing] = useState(false);
     const [isAddingJob, setIsAddingJob] = useState(false);
-    const [formData, setFormData] = useState({ 
-        fullName: staff.fullName, 
-        email: staff.email,
-        phoneNumber: staff.phoneNumber || '',
-        birthdate: staff.birthdate || '',
-        bankAccount: staff.bankAccount || '',
-    });
     const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -25,18 +44,13 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [isUploading, setIsUploading] = useState(false);
 
     useEffect(() => {
-        setFormData({ 
-            fullName: staff.fullName, 
-            email: staff.email,
-            phoneNumber: staff.phoneNumber || '',
-            birthdate: staff.birthdate || '',
-            bankAccount: staff.bankAccount || '',
-        });
+        setFormData(getInitialFormData());
         setBonusStreak(staff.bonusStreak || 0);
     }, [staff]);
 
     const sortedJobHistory = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
     const currentJob = sortedJobHistory[0] || { position: 'N/A', department: 'N/A', rate: 'N/A', payType: 'Monthly' };
+    const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
 
     const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
     const handleNewJobChange = (e) => setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
@@ -47,21 +61,21 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { 
-                fullName: formData.fullName, 
+                firstName: formData.firstName,
+                lastName: formData.lastName,
+                nickname: formData.nickname,
                 email: formData.email,
                 phoneNumber: formData.phoneNumber,
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
+                fullName: null // Set old field to null to complete migration for this user
             });
             setIsEditing(false);
-        } catch (err) { setError("Failed to save changes."); } finally { setIsSaving(false); }
+        } catch (err) { setError("Failed to save changes."); console.error(err); } finally { setIsSaving(false); }
     };
     
     const handleAddNewJob = async () => {
-        if (!newJob.position || !newJob.department || !newJob.startDate || !newJob.rate) {
-            setError("Please fill all fields for the new job role.");
-            return;
-        }
+        if (!newJob.position || !newJob.department || !newJob.startDate || !newJob.rate) { setError("Please fill all fields for the new job role."); return; }
         setIsSaving(true);
         setError('');
         try {
@@ -80,7 +94,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         }
     };
     const handleDeleteStaff = async () => {
-        if (window.confirm(`Are you sure you want to permanently delete ${staff.fullName}?`) && window.confirm("This action is permanent. Confirm one last time.")) {
+        if (window.confirm(`Are you sure you want to permanently delete ${displayName}?`) && window.confirm("This action is permanent. Confirm one last time.")) {
             setIsDeleting(true);
             try {
                 const functions = getFunctions();
@@ -94,7 +108,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         const staffDocRef = doc(db, 'staff_profiles', staff.id);
         try {
             await updateDoc(staffDocRef, { bonusStreak: Number(bonusStreak) });
-            alert(`Bonus streak for ${staff.fullName} has been set to ${bonusStreak}.`);
+            alert(`Bonus streak for ${displayName} has been set to ${bonusStreak}.`);
         } catch (err) { alert("Failed to update bonus streak."); }
     };
 
@@ -111,8 +125,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
             setFileToUpload(null);
             document.getElementById('file-upload-input').value = '';
-        } catch (error) { console.error("File upload error:", error); alert("Failed to upload file. See console for details.");
-        } finally { setIsUploading(false); }
+        } catch (error) { console.error("File upload error:", error); alert("Failed to upload file."); } finally { setIsUploading(false); }
     };
     
     const handleDeleteFile = async (fileToDelete) => {
@@ -144,7 +157,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
                              {isEditing ? (
                                 <>
-                                    <div><label className="text-sm text-gray-400">Full Name</label><input id="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                                    <div><label className="text-sm text-gray-400">First Name</label><input id="firstName" value={formData.firstName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                                    <div><label className="text-sm text-gray-400">Last Name</label><input id="lastName" value={formData.lastName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                                    <div><label className="text-sm text-gray-400">Nickname</label><input id="nickname" value={formData.nickname} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Phone Number</label><input id="phoneNumber" value={formData.phoneNumber} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
@@ -152,10 +167,10 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                 </>
                             ) : (
                                 <>
-                                    <InfoRow label="Full Name" value={staff.fullName} />
+                                    <InfoRow label="Legal Name" value={displayName} />
+                                    <InfoRow label="Nickname" value={staff.nickname} />
                                     <InfoRow label="Email Address" value={staff.email} />
                                     <InfoRow label="Phone Number" value={staff.phoneNumber} />
-                                    <InfoRow label="Birthdate" value={staff.birthdate} />
                                     <div className="md:col-span-2"><InfoRow label="Bank Account" value={staff.bankAccount} /></div>
                                     <hr className="md:col-span-2 border-gray-700 my-2" />
                                     <InfoRow label="Current Department" value={currentJob.department} />

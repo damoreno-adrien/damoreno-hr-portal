@@ -6,22 +6,20 @@ import autoTable from 'jspdf-autotable';
 import Modal from '../components/Modal';
 
 // Helper to format currency
-const formatCurrency = (num) => num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
-// --- Payslip Detail Component (UPDATED) ---
+const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// --- Payslip Detail Component ---
 const PayslipDetailView = ({ details, companyConfig, payPeriod }) => {
     if (!details) return null;
 
-    const handleExportIndividualPDF = async () => { // Function is now async
+    const handleExportIndividualPDF = async () => {
         const doc = new jsPDF();
         const payPeriodTitle = `${months[payPeriod.month - 1]} ${payPeriod.year}`;
 
-        // --- NEW: Add Logo to PDF ---
         if (companyConfig?.companyLogoUrl) {
             try {
-                // Fetching the image can be tricky due to CORS. A direct fetch might be blocked.
-                // A better approach would be to convert the image to base64 when uploading or use a proxy.
-                // For now, we'll attempt a direct conversion which works for many storage configurations.
                 const response = await fetch(companyConfig.companyLogoUrl);
                 const blob = await response.blob();
                 const reader = new FileReader();
@@ -30,19 +28,17 @@ const PayslipDetailView = ({ details, companyConfig, payPeriod }) => {
                     reader.onerror = reject;
                     reader.readAsDataURL(blob);
                 });
-                // Adjust x, y, width, height for logo placement
-                doc.addImage(base64Image, 'PNG', 14, 10, 30, 15); 
+                doc.addImage(base64Image, 'PNG', 14, 10, 30, 15);
             } catch (error) {
-                console.error("Error loading company logo for PDF. CORS policy might be an issue.", error);
+                console.error("Error loading company logo for PDF:", error);
             }
         }
-        
+
         doc.setFontSize(18);
         doc.text("Salary Statement", 105, 15, { align: 'center' });
         doc.setFontSize(12);
         doc.text(`Month: ${payPeriodTitle}`, 105, 22, { align: 'center' });
 
-        // --- FIX: Added companyAddress and companyTaxId ---
         autoTable(doc, {
             body: [
                 [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, details.name],
@@ -77,8 +73,8 @@ const PayslipDetailView = ({ details, companyConfig, payPeriod }) => {
         doc.setFont('helvetica', 'bold');
         doc.text("Net Pay:", 14, doc.lastAutoTable.finalY + 10);
         doc.text(`${formatCurrency(details.netPay)} THB`, 196, doc.lastAutoTable.finalY + 10, { align: 'right' });
-        
-        doc.save(`Payslip_${details.name.replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
+
+        doc.save(`payslip_${details.name.replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
     };
 
     return (
@@ -117,7 +113,6 @@ const PayslipDetailView = ({ details, companyConfig, payPeriod }) => {
 const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { rate: 0, payType: 'Monthly' }; } const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) { return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' }; } return latestJob; };
 const calculateHours = (start, end) => { if (!start?.toDate || !end?.toDate) return 0; const diffMillis = end.toDate() - start.toDate(); return diffMillis / (1000 * 60 * 60); };
 const formatTime = (timestamp) => timestamp ? timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'N/A';
-const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export default function PayrollPage({ db, staffList, companyConfig }) {
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
@@ -180,7 +175,15 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                         if (!didAttend && !wasOnLeave && !publicHolidays.includes(schedule.date)) { unpaidDays++; }
                     });
                     autoDeductions = dailyRate * unpaidDays;
-                } else if (currentJob.payType === 'Hourly') { /* ... hourly logic ... */ }
+                } else if (currentJob.payType === 'Hourly') { 
+                    const staffAttendance = Array.from(attendanceData.values()).filter(a => a.staffId === staff.id);
+                    let totalHours = 0;
+                    staffAttendance.forEach(att => {
+                        const netHours = calculateHours(att.checkInTime, att.checkOutTime) - calculateHours(att.breakStart, att.breakEnd);
+                        totalHours += netHours;
+                    });
+                    basePay = totalHours * (currentJob.rate || 0);
+                }
 
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
                 const otherEarnings = staffAdjustments.filter(a => a.type === 'Earning').reduce((sum, item) => sum + item.amount, 0);
@@ -203,7 +206,9 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 const netPay = totalEarnings - totalDeductions;
 
                 return {
-                    id: staff.id, name: staff.fullName, payType: currentJob.position,
+                    id: staff.id, 
+                    name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName,
+                    payType: currentJob.position,
                     totalEarnings, totalDeductions, netPay,
                     earnings: { basePay, attendanceBonus, ssoAllowance, others: staffAdjustments.filter(a => a.type === 'Earning') },
                     deductions: { absences: autoDeductions, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: staffAdjustments.filter(a => a.type === 'Deduction') },
@@ -249,17 +254,22 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
-                        <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
+                        <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Display Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
-                        {payrollData.length > 0 ? payrollData.map(item => (
-                            <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.name}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
-                            </tr>
-                        )) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating payroll...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
+                        {payrollData.length > 0 ? payrollData.map(item => {
+                            const staffMember = staffList.find(s => s.id === item.id);
+                            const displayName = staffMember?.nickname || item.name;
+
+                            return (
+                                <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{displayName}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
+                                </tr>
+                            )
+                        }) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
                     </tbody>
                 </table>
             </div>

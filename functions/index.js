@@ -4,7 +4,7 @@ const cors = require("cors")({ origin: true });
 
 admin.initializeApp();
 
-// --- createUser function (unchanged) ---
+// --- UPDATED createUser function ---
 exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
     if (req.method !== "POST") {
@@ -29,18 +29,30 @@ exports.createUser = onRequest({ region: "us-central1" }, (req, res) => {
     } catch (error) {
       return res.status(500).send({ error: "Internal server error while verifying role." });
     }
-    const { email, password, fullName, position, department, startDate, payType, rate } = req.body;
-    if (!email || !password || !fullName || !position || !department || !startDate || !payType || !rate) {
+    
+    const { email, password, firstName, lastName, nickname, position, department, startDate, payType, rate } = req.body;
+    if (!email || !password || !firstName || !lastName || !nickname || !position || !department || !startDate || !payType || !rate) {
         return res.status(400).send({ error: "Missing required user data." });
     }
+
     try {
-      const userRecord = await admin.auth().createUser({ email, password, displayName: fullName });
+      const userRecord = await admin.auth().createUser({ email, password, displayName: nickname });
       const newUserId = userRecord.uid;
+      
       await db.collection("users").doc(newUserId).set({ role: "staff" });
+      
       const initialJob = { position, department, startDate, payType, rate: Number(rate) };
+      
       await db.collection("staff_profiles").doc(newUserId).set({
-        fullName, email, startDate, uid: newUserId, jobHistory: [initialJob],
-        createdAt: admin.firestore.FieldValue.serverTimestamp(), bonusStreak: 0
+        firstName, 
+        lastName, 
+        nickname, 
+        email, 
+        startDate, 
+        uid: newUserId, 
+        jobHistory: [initialJob],
+        createdAt: admin.firestore.FieldValue.serverTimestamp(), 
+        bonusStreak: 0
       });
       return res.status(200).send({ result: `Successfully created user ${email}` });
     } catch (error) {
