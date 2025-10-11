@@ -148,24 +148,33 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         switch (status) {
             case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
             case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
+            
+            // --- UPDATED 'on-break' CASE ---
             case 'on-break': {
                 const breakStartTime = todaysAttendance?.breakStart?.toDate();
                 let minutesOnBreak = 0;
                 if (breakStartTime) {
                     minutesOnBreak = (currentTime - breakStartTime) / 60000;
                 }
-                const canEndBreak = minutesOnBreak >= 50;
-                const remainingMinutes = Math.ceil(50 - minutesOnBreak);
+                const canEndBreak = minutesOnBreak >= 50; // Minimum 50 min rule
+                const remainingBreakMinutes = Math.max(0, 60 - minutesOnBreak); // Countdown from 60 min
 
                 return (
                     <div>
+                        <div className="text-center mb-4 space-y-1">
+                            {breakStartTime && (
+                                <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{breakStartTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span></p>
+                            )}
+                            <p className="text-lg font-bold text-yellow-300">{Math.floor(remainingBreakMinutes)} minutes remaining</p>
+                        </div>
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence || !canEndBreak} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>
                         {!canEndBreak && breakStartTime && (
-                            <p className="text-center text-xs text-yellow-400 mt-2">You can end your break in {remainingMinutes} minute(s).</p>
+                            <p className="text-center text-xs text-gray-500 mt-2">(You can end your break in {Math.ceil(50 - minutesOnBreak)} minute(s))</p>
                         )}
                     </div>
                 );
             }
+
             case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
             default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
         }
