@@ -37,7 +37,6 @@ export default function App() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0 });
 
-    // --- NEW STATE FOR NOTIFICATION COUNTS ---
     const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
@@ -80,16 +79,13 @@ export default function App() {
         }
     }, []);
     
-    // --- NOTIFICATION LISTENERS ---
     useEffect(() => {
         if (!db) return;
-        // Manager: Listen for pending leave requests
         if (userRole === 'manager') {
             const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
             const unsubscribe = onSnapshot(q, (snap) => setPendingLeaveCount(snap.size));
             return () => unsubscribe();
         }
-        // Staff: Listen for unread leave updates
         if (userRole === 'staff' && user) {
             const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
             const unsubscribe = onSnapshot(q, (snap) => setUnreadLeaveUpdatesCount(snap.size));
@@ -99,20 +95,17 @@ export default function App() {
 
     useEffect(() => {
         if (!db) return;
-        // Manager: Listen for pending advance requests
         if (userRole === 'manager') {
             const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
             const unsubscribe = onSnapshot(q, (snap) => setPendingAdvanceCount(snap.size));
             return () => unsubscribe();
         }
-        // Staff: Listen for unread advance updates
         if (userRole === 'staff' && user) {
             const q = query(collection(db, 'salary_advances'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
             const unsubscribe = onSnapshot(q, (snap) => setUnreadAdvanceUpdatesCount(snap.size));
             return () => unsubscribe();
         }
     }, [userRole, db, user]);
-
 
     useEffect(() => {
         if (!db) return;
@@ -124,15 +117,16 @@ export default function App() {
     }, [db]);
 
     useEffect(() => {
-        if (userRole === 'manager' && db) {
+        // This listener needs to run for both managers and staff to populate staffList
+        if (db) {
             const staffCollectionRef = collection(db, 'staff_profiles');
             const unsubscribeStaff = onSnapshot(staffCollectionRef, (querySnapshot) => {
                 const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 setStaffList(list);
             });
             return () => unsubscribeStaff();
-        } else { setStaffList([]); }
-    }, [userRole, db]);
+        }
+    }, [db]);
 
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
@@ -168,7 +162,6 @@ export default function App() {
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-            // --- UPDATED to pass staffList ---
             if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} />;
         }
         switch(currentPage) {
