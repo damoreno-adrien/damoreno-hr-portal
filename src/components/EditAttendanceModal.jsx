@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
 
 export default function EditAttendanceModal({ db, record, onClose }) {
-    const isCreating = !record.fullRecord; // Check if we are creating a new record
+    const isCreating = !record.fullRecord;
     
     const [formData, setFormData] = useState({
         checkIn: record.fullRecord?.checkInTime ? new Date(record.fullRecord.checkInTime.seconds * 1000).toTimeString().substring(0, 5) : '',
@@ -22,11 +22,10 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         setError('');
         try {
             const datePart = record.date;
-
             const toTimestamp = (timeString) => {
                 if (!timeString) return null;
                 const [hours, minutes] = timeString.split(':');
-                const date = new Date(datePart + 'T00:00:00');
+                const date = new Date(datePart); // Use date directly
                 date.setHours(hours, minutes, 0, 0);
                 return Timestamp.fromDate(date);
             };
@@ -39,7 +38,6 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             };
 
             if (isCreating) {
-                // Create a new document
                 const newDocId = `${record.staffId}_${record.date}`;
                 const docRef = doc(db, 'attendance', newDocId);
                 await setDoc(docRef, {
@@ -49,7 +47,6 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     date: record.date,
                 });
             } else {
-                // Update the existing document
                 const docRef = doc(db, 'attendance', record.id);
                 await updateDoc(docRef, dataToSave);
             }
@@ -63,17 +60,14 @@ export default function EditAttendanceModal({ db, record, onClose }) {
     };
 
     const handleDelete = async () => {
-        if (window.confirm("Are you sure you want to permanently delete this attendance record? This action cannot be undone.")) {
+        if (window.confirm("Are you sure you want to permanently delete this attendance record?")) {
             setIsSaving(true);
             try {
                 const docRef = doc(db, 'attendance', record.id);
                 await deleteDoc(docRef);
                 onClose();
-            } catch (err) {
-                setError('Failed to delete the record.');
-            } finally {
-                setIsSaving(false);
-            }
+            } catch (err) { setError('Failed to delete the record.');
+            } finally { setIsSaving(false); }
         }
     };
 
@@ -99,15 +93,17 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                 </div>
             </div>
             {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-            <div className="flex justify-between items-center pt-4">
+            
+            {/* --- UPDATED BUTTON LAYOUT --- */}
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center pt-4 mt-4 border-t border-gray-600">
                 <div>
                     {!isCreating && (
-                        <button onClick={handleDelete} disabled={isSaving} className="px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white">Delete Record</button>
+                        <button onClick={handleDelete} disabled={isSaving} className="w-full sm:w-auto mt-2 sm:mt-0 px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white">Delete Record</button>
                     )}
                 </div>
-                <div className="space-x-4">
-                    <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
-                    <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button>
+                <div className="flex w-full sm:w-auto justify-end space-x-4">
+                    <button type="button" onClick={onClose} className="flex-grow sm:flex-grow-0 px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
+                    <button onClick={handleSave} disabled={isSaving} className="flex-grow sm:flex-grow-0 px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save'}</button>
                 </div>
             </div>
         </div>
