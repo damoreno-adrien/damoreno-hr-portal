@@ -147,7 +147,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1))),
-                Promise.all(staffList.map(staff => calculateBonus({ staffId: staff.id, payPeriod: { year, month: month + 1 } }).then(result => ({ staffId: staff.id, ...result.data })).catch(err => ({ staffId: staff.id, bonusAmount: 0 }))))
+                Promise.all(staffList.map(staff => calculateBonus({ staffId: staff.id, payPeriod: { year, month: month + 1 } }).then(result => ({ staffId: staff.id, ...result.data })).catch(err => ({ staffId: staff.id, bonusAmount: 0, newStreak: 0 }))))
             ]);
 
             const attendanceData = new Map(attendanceSnapshot.docs.map(doc => [`${doc.data().staffId}_${doc.data().date}`, doc.data()]));
@@ -189,7 +189,8 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 const otherEarnings = staffAdjustments.filter(a => a.type === 'Earning').reduce((sum, item) => sum + item.amount, 0);
                 const otherDeductions = staffAdjustments.filter(a => a.type === 'Deduction').reduce((sum, item) => sum + item.amount, 0);
 
-                const attendanceBonus = bonusMap.get(staff.id)?.bonusAmount || 0;
+                const bonusInfo = bonusMap.get(staff.id) || { bonusAmount: 0, newStreak: 0 };
+                const attendanceBonus = bonusInfo.bonusAmount;
                 const grossPayForSSO = basePay + otherEarnings;
 
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
@@ -210,6 +211,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName,
                     payType: currentJob.position,
                     totalEarnings, totalDeductions, netPay,
+                    bonusInfo: { newStreak: bonusInfo.newStreak },
                     earnings: { basePay, attendanceBonus, ssoAllowance, others: staffAdjustments.filter(a => a.type === 'Earning') },
                     deductions: { absences: autoDeductions, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: staffAdjustments.filter(a => a.type === 'Deduction') },
                 };
@@ -230,7 +232,25 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         doc.save(`payroll_summary_${payPeriod.year}_${payPeriod.month}.pdf`);
     };
     
-    const handleFinalizePayroll = async () => { /* Logic to finalize payroll */ };
+    const handleFinalizePayroll = async () => {
+        if (!window.confirm(`Are you sure you want to finalize the payroll for ${months[payPeriod.month - 1]} ${payPeriod.year}? This will save the payslips and make them visible to staff.`)) {
+            return;
+        }
+
+        setIsFinalizing(true);
+        try {
+            const functions = getFunctions();
+            const finalizeAndStorePayslips = httpsCallable(functions, 'finalizeAndStorePayslips');
+            const result = await finalizeAndStorePayslips({ payrollData, payPeriod });
+
+            alert("Payroll finalized and payslips stored successfully!");
+        } catch (error) {
+            console.error("Error finalizing payroll:", error);
+            alert(`Failed to finalize payroll: ${error.message}`);
+        } finally {
+            setIsFinalizing(false);
+        }
+    };
     const years = [new Date().getFullYear(), new Date().getFullYear() - 1];
 
     return (
