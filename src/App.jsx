@@ -16,7 +16,9 @@ import TeamSchedulePage from './pages/TeamSchedulePage';
 import PayrollPage from './pages/PayrollPage';
 import FinancialsPage from './pages/FinancialsPage';
 import SalaryAdvancePage from './pages/SalaryAdvancePage';
-import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
+import FinancialsDashboardPage from './pages/FinancialsDashboardPage';
+import MyPayslipsPage from './pages/MyPayslipsPage';
+import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, LogInIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ChevronUpIcon } from './components/Icons';
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
@@ -29,7 +31,7 @@ export default function App() {
     const [loginError, setLoginError] = useState('');
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffList, setStaffList] = useState([]);
-    const [staffProfile, setStaffProfile] = useState(null); 
+    const [staffProfile, setStaffProfile] = useState(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [companyConfig, setCompanyConfig] = useState(null);
@@ -41,6 +43,7 @@ export default function App() {
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
     const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
     const [unreadAdvanceUpdatesCount, setUnreadAdvanceUpdatesCount] = useState(0);
+    const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
 
     useEffect(() => {
         try {
@@ -78,7 +81,7 @@ export default function App() {
             console.error("Firebase Initialization Error:", error); setIsLoading(false);
         }
     }, []);
-    
+
     useEffect(() => {
         if (!db) return;
         if (userRole === 'manager') {
@@ -116,9 +119,8 @@ export default function App() {
         return () => unsubscribe();
     }, [db]);
 
-    // --- CORRECTED: This listener now only runs WHEN A USER IS LOGGED IN ---
     useEffect(() => {
-        if (db && user) { // The 'user' check prevents this from running before login
+        if (db && user) {
             const staffCollectionRef = collection(db, 'staff_profiles');
             const unsubscribeStaff = onSnapshot(staffCollectionRef, (querySnapshot) => {
                 const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -126,9 +128,9 @@ export default function App() {
             });
             return () => unsubscribeStaff();
         } else {
-            setStaffList([]); // Clear staff list on logout
+            setStaffList([]);
         }
-    }, [db, user]); // Dependency on 'user' is key
+    }, [db, user]);
 
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
@@ -139,7 +141,7 @@ export default function App() {
                 const hireDate = new Date(staffProfile.startDate);
                 const yearsOfService = (today - hireDate) / (1000 * 60 * 60 * 24 * 365);
                 let annualLeaveEntitlement = 0;
-                if (yearsOfService >= 1) { annualLeaveEntitlement = companyConfig.annualLeaveDays; } 
+                if (yearsOfService >= 1) { annualLeaveEntitlement = companyConfig.annualLeaveDays; }
                 else if (hireDate.getFullYear() === currentYear) { const monthsWorked = 12 - hireDate.getMonth(); annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked); }
                 const pastHolidays = companyConfig.publicHolidays.filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
                 const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
@@ -154,13 +156,13 @@ export default function App() {
             return () => unsubscribe();
         } else { setLeaveBalances({ annual: 0, publicHoliday: 0 }); }
     }, [db, user, userRole, companyConfig, staffProfile]);
-    
+
     const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); if (!auth) return; try { await signInWithEmailAndPassword(auth, email, password); } catch (error) { setLoginError('Invalid email or password. Please try again.'); } };
     const handleLogout = async () => { if (!auth) return; await signOut(auth); setCurrentPage('dashboard'); };
-    
+
     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
     if (!user) { return ( <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900"><div className="w-full max-w-md p-8 space-y-8 bg-white rounded-2xl shadow-lg dark:bg-gray-800"> <div className="text-center"> <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Da Moreno At Town</h1> <p className="mt-2 text-gray-600 dark:text-gray-300">HR Management Portal</p></div> <form className="mt-8 space-y-6" onSubmit={handleLogin}> <div className="rounded-md shadow-sm"> <div> <input id="email-address" name="email" type="email" autoComplete="email" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} /> </div> <div className="-mt-px"> <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} /> </div></div> {loginError && (<p className="mt-2 text-center text-sm text-red-600 dark:text-red-400">{loginError}</p>)} <div> <button type="submit" className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"> <span className="absolute left-0 inset-y-0 flex items-center pl-3"><LogInIcon className="h-5 w-5 text-amber-500 group-hover:text-amber-400" /></span> Sign in </button> </div> </form> </div></div> ); }
-    
+
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
@@ -172,6 +174,8 @@ export default function App() {
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
+            case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} staffList={staffList} />;
+            case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
@@ -206,7 +210,26 @@ export default function App() {
                            <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5"/>} />
                            <NavLink page="team-schedule" label="Team Schedule" icon={<UsersIcon className="h-5 w-5"/>} />
                            <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadLeaveUpdatesCount} />
-                           <NavLink page="salary-advance" label="Salary Advance" icon={<DollarSignIcon className="h-5 w-5"/>} badgeCount={unreadAdvanceUpdatesCount} />
+                           
+                           <div>
+                                <button 
+                                    onClick={() => setIsFinancialsMenuOpen(!isFinancialsMenuOpen)}
+                                    className="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg hover:bg-gray-700 text-gray-300"
+                                >
+                                    <div className="flex items-center">
+                                        <DollarSignIcon className="h-5 w-5"/>
+                                        <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Financials</span>
+                                    </div>
+                                    {!isSidebarCollapsed && (isFinancialsMenuOpen ? <ChevronUpIcon className="h-5 w-5"/> : <ChevronDownIcon className="h-5 w-5"/>)}
+                                </button>
+                                {isFinancialsMenuOpen && !isSidebarCollapsed && (
+                                    <div className="py-2 pl-8 space-y-2">
+                                        <NavLink page="financials-dashboard" label="Dashboard" icon={<BarChartIcon className="h-5 w-5"/>} />
+                                        <NavLink page="salary-advance" label="Salary Advance" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadAdvanceUpdatesCount} />
+                                        <NavLink page="my-payslips" label="My Payslips" icon={<BriefcaseIcon className="h-5 w-5"/>} />
+                                    </div>
+                                )}
+                           </div>
                         </>
                     )}
                 </nav>
