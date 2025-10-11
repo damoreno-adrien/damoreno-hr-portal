@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 
+const getDisplayName = (staff) => {
+    if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    if (staff && staff.fullName) return staff.fullName;
+    return 'Unknown Staff';
+};
+
 export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig, leaveBalances }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
@@ -78,10 +85,12 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
 
         setIsSaving(true);
-        const selectedStaff = staffList.find(s => s.id === selectedStaffId);
+        
+        const staffForRequest = staffList.find(s => s.id === checkStaffId) || { ...user, id: user.uid };
+
         const requestData = {
             staffId: checkStaffId,
-            staffName: isManagerCreating ? selectedStaff.fullName : (existingRequest ? existingRequest.staffName : (user.displayName || user.email)),
+            staffName: getDisplayName(staffForRequest), // Use helper to get correct name
             leaveType, startDate, endDate, totalDays, reason,
             status: existingRequest ? existingRequest.status : 'pending',
         };
@@ -101,6 +110,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             onClose();
         } catch (err) {
             setError('Failed to submit request. Please try again.');
+            console.error(err);
         } finally {
             setIsSaving(false);
         }
@@ -117,7 +127,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     <label className="block text-sm font-medium text-gray-300 mb-1">Select Staff Member</label>
                     <select value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md">
                         <option value="">-- Choose an employee --</option>
-                        {staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.fullName}</option>)}
+                        {staffList.map(staff => <option key={staff.id} value={staff.id}>{getDisplayName(staff)}</option>)}
                     </select>
                 </div>
             )}

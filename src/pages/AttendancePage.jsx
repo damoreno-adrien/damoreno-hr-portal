@@ -6,6 +6,14 @@ import EditAttendanceModal from '../components/EditAttendanceModal';
 
 const getTodayString = () => new Date().toISOString().split('T')[0];
 
+// --- NEW HELPER FUNCTION ---
+const getDisplayName = (staff) => {
+    if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    if (staff && staff.fullName) return staff.fullName;
+    return 'Unknown Staff';
+};
+
 export default function AttendancePage({ db, staffList }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
@@ -45,9 +53,9 @@ export default function AttendancePage({ db, staffList }) {
         const recordForModal = {
             id: attendanceRecord ? attendanceRecord.id : `${staff.id}_${todayStr}`,
             staffId: staff.id,
-            staffName: staff.fullName,
+            staffName: getDisplayName(staff), // --- UPDATED ---
             date: todayStr,
-            fullRecord: attendanceRecord || null, // Pass full record if it exists
+            fullRecord: attendanceRecord || null,
         };
         setEditingRecord(recordForModal);
     };
@@ -90,18 +98,17 @@ export default function AttendancePage({ db, staffList }) {
             default: statusColor = 'bg-gray-900'; statusText = 'Unknown';
         }
 
-        // Make card a button if it's not an "Off Today" status
         const isClickable = staff.reason !== 'Off Today';
         const CardContent = () => (
             <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
                 <div className={`w-3 h-3 rounded-full ${statusColor} flex-shrink-0`}></div>
                 <div className="flex-1 overflow-hidden">
-                    <p className="font-bold text-white truncate">{staff.fullName}</p>
+                    <p className="font-bold text-white truncate">{getDisplayName(staff)}</p> {/* --- UPDATED --- */}
                     <p className="text-xs text-gray-400 truncate">{statusText}</p>
                 </div>
             </div>
         );
-        return isClickable ? <button onClick={onClick} className="w-full text-left">{CardContent()}</button> : CardContent();
+        return isClickable ? <button onClick={onClick} className="w-full text-left">{CardContent()}</button> : <CardContent />;
     };
 
     const StatusColumn = ({ title, staff }) => {
@@ -133,7 +140,7 @@ export default function AttendancePage({ db, staffList }) {
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
                 <p className="text-lg text-gray-300 hidden sm:block">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
-            <div className="space-y-6 md:space-y-0 md:flex md:space-x-6">
+            <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-3 md:gap-6">
                 <StatusColumn title="On Shift" staff={onShiftAndBreak} />
                 <StatusColumn title="Not Present" staff={notPresent} />
                 <StatusColumn title="Completed Shift" staff={completed} />

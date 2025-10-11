@@ -4,6 +4,14 @@ import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon, BriefcaseIcon, TrashIcon } from '../components/Icons';
 
+// Helper function to get the correct display name
+const getDisplayName = (staff) => {
+    if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    if (staff && staff.fullName) return staff.fullName;
+    return 'Unknown Staff';
+};
+
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
@@ -24,10 +32,20 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             requests.sort((a,b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
-            setAllLeaveRequests(requests);
+            
+            // For managers, find the latest display name for each request
+            if (userRole === 'manager') {
+                const hydratedRequests = requests.map(req => {
+                    const staffMember = staffList.find(s => s.id === req.staffId);
+                    return { ...req, displayStaffName: staffMember ? getDisplayName(staffMember) : req.staffName };
+                });
+                setAllLeaveRequests(hydratedRequests);
+            } else {
+                setAllLeaveRequests(requests);
+            }
         });
         return () => unsubscribe();
-    }, [db, userRole, user?.uid]);
+    }, [db, userRole, user?.uid, staffList]);
 
     useEffect(() => {
         if (userRole === 'staff' && allLeaveRequests.length > 0) {
@@ -114,7 +132,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                             <div key={req.id} className="p-4">
                                 <div className="flex flex-wrap justify-between items-center gap-4">
                                     <div className="flex-grow min-w-[200px]">
-                                        <p className="font-bold text-white">{req.staffName}</p>
+                                        <p className="font-bold text-white">{req.displayStaffName}</p>
                                         <p className="text-sm text-gray-400">{req.leaveType} | Requested: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p>
                                     </div>
                                     <div className="text-center"><p className="text-sm text-gray-300">Dates:</p><p className="font-medium text-white">{req.startDate} to {req.endDate}</p></div>
@@ -151,7 +169,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
-                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
+                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} />
             </Modal>
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>

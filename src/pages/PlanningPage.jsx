@@ -12,6 +12,14 @@ const formatDateToYYYYMMDD = (date) => {
     return `${year}-${month}-${day}`;
 };
 
+// --- NEW HELPER FUNCTION ---
+const getDisplayName = (staff) => {
+    if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    if (staff && staff.fullName) return staff.fullName;
+    return 'Unknown Staff';
+};
+
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
         return null;
@@ -33,7 +41,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     const [schedules, setSchedules] = useState({});
     const [approvedLeave, setApprovedLeave] = useState([]);
     const [selectedShift, setSelectedShift] = useState(null);
-    const [selectedLeave, setSelectedLeave] = useState(null); // For leave details modal
+    const [selectedLeave, setSelectedLeave] = useState(null);
 
     useEffect(() => {
         if (!db) return;
@@ -125,7 +133,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         return acc;
     }, {});
     
-    // Use the department list from props to maintain order
     const orderedDepartments = ['All Departments', ...departments].filter(dept => dept === 'All Departments' || groupedStaff[dept]);
 
     return (
@@ -180,7 +187,8 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                     <div className="col-span-8 bg-gray-900 text-amber-400 font-bold p-2 border-t border-b border-gray-700">{dept}</div>
                                     {groupedStaff[dept].map(staff => (
                                         <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
-                                            <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{staff.fullName}</div>
+                                            {/* --- UPDATED TO USE NICKNAME --- */}
+                                            <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{getDisplayName(staff)}</div>
                                             {days.map(day => {
                                                 const leaveDetails = getLeaveForStaffOnDate(staff.id, day);
                                                 if (leaveDetails) {

@@ -3,6 +3,14 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import EditAttendanceModal from '../components/EditAttendanceModal';
 
+// --- NEW HELPER FUNCTION ---
+const getDisplayName = (staff) => {
+    if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    if (staff && staff.fullName) return staff.fullName;
+    return 'Unknown Staff';
+};
+
 export default function AttendanceReportsPage({ db, staffList }) {
     const [reportData, setReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -68,8 +76,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
                         generatedData.push({
                             id: attendance ? attendance.id : key,
-                            staffId: staff.id, // Pass staffId for creation case
-                            staffName: staff.fullName,
+                            staffId: staff.id,
+                            staffName: getDisplayName(staff), // --- UPDATED ---
                             date: dateStr,
                             checkIn: checkInTime?.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) || '-',
                             checkOut: checkOutTime?.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) || '-',
@@ -116,7 +124,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     <label className="block text-sm font-medium text-gray-300 mb-1">Staff Member</label>
                     <select value={selectedStaffId} onChange={e => setSelectedStaffId(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md">
                         <option value="all">All Staff</option>
-                        {staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.fullName}</option>)}
+                        {/* --- UPDATED --- */}
+                        {staffList.map(staff => <option key={staff.id} value={staff.id}>{getDisplayName(staff)}</option>)}
                     </select>
                 </div>
                 <button onClick={handleGenerateReport} disabled={isLoading} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">
@@ -147,11 +156,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours > 0 ? row.workHours : '-'}</td>
                             </tr>
                         )) : (
-                            <tr>
-                                <td colSpan="6" className="px-6 py-10 text-center text-gray-500">
-                                    {isLoading ? 'Loading data...' : 'Select a date range and staff member to generate a report.'}
-                                </td>
-                            </tr>
+                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Loading data...' : 'Select a date range and staff member to generate a report.'}</td></tr>
                         )}
                     </tbody>
                 </table>
