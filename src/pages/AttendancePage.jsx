@@ -6,7 +6,6 @@ import EditAttendanceModal from '../components/EditAttendanceModal';
 
 const getTodayString = () => new Date().toISOString().split('T')[0];
 
-// --- NEW HELPER FUNCTION ---
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
@@ -18,6 +17,7 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
         const today = new Date();
+        today.setHours(0,0,0,0);
         const birthDate = new Date(staff.birthdate);
         
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
@@ -46,7 +46,7 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
                     upcomingBirthdays.map(staff => (
                         <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md">
                             <span className="text-white font-medium">{getDisplayName(staff)}</span>
-                            <span className="text-sm text-amber-400">{staff.nextBirthday.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} ({staff.daysUntil} days)</span>
+                            <span className="text-sm text-amber-400">{staff.nextBirthday.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})</span>
                         </div>
                     ))
                 ) : (
@@ -96,7 +96,7 @@ export default function AttendancePage({ db, staffList }) {
         const recordForModal = {
             id: attendanceRecord ? attendanceRecord.id : `${staff.id}_${todayStr}`,
             staffId: staff.id,
-            staffName: getDisplayName(staff), // --- UPDATED ---
+            staffName: getDisplayName(staff),
             date: todayStr,
             fullRecord: attendanceRecord || null,
         };
@@ -146,7 +146,7 @@ export default function AttendancePage({ db, staffList }) {
             <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
                 <div className={`w-3 h-3 rounded-full ${statusColor} flex-shrink-0`}></div>
                 <div className="flex-1 overflow-hidden">
-                    <p className="font-bold text-white truncate">{getDisplayName(staff)}</p> {/* --- UPDATED --- */}
+                    <p className="font-bold text-white truncate">{getDisplayName(staff)}</p>
                     <p className="text-xs text-gray-400 truncate">{statusText}</p>
                 </div>
             </div>
@@ -183,7 +183,6 @@ export default function AttendancePage({ db, staffList }) {
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
                 <p className="text-lg text-gray-300 hidden sm:block">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
-            {/* --- NEW BIRTHDAY CARD ADDED --- */}
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffList} />
             </div>
