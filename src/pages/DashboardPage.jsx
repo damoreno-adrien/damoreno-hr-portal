@@ -8,6 +8,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
+    const [todaysAttendance, setTodaysAttendance] = useState(null);
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -21,10 +22,12 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
+                setTodaysAttendance(data);
                 if (data.checkOutTime) setStatus('checked-out-final');
                 else if (data.breakStart && !data.breakEnd) setStatus('on-break');
                 else if (data.checkInTime) setStatus('checked-in');
             } else {
+                setTodaysAttendance(null);
                 setStatus('checked-out');
             }
         });
@@ -145,7 +148,24 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         switch (status) {
             case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
             case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
-            case 'on-break': return <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>;
+            case 'on-break': {
+                const breakStartTime = todaysAttendance?.breakStart?.toDate();
+                let minutesOnBreak = 0;
+                if (breakStartTime) {
+                    minutesOnBreak = (currentTime - breakStartTime) / 60000;
+                }
+                const canEndBreak = minutesOnBreak >= 50;
+                const remainingMinutes = Math.ceil(50 - minutesOnBreak);
+
+                return (
+                    <div>
+                        <button onClick={handleToggleBreak} disabled={!isWithinGeofence || !canEndBreak} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>
+                        {!canEndBreak && breakStartTime && (
+                            <p className="text-center text-xs text-yellow-400 mt-2">You can end your break in {remainingMinutes} minute(s).</p>
+                        )}
+                    </div>
+                );
+            }
             case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
             default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
         }
