@@ -116,17 +116,19 @@ export default function App() {
         return () => unsubscribe();
     }, [db]);
 
+    // --- CORRECTED: This listener now only runs WHEN A USER IS LOGGED IN ---
     useEffect(() => {
-        // This listener needs to run for both managers and staff to populate staffList
-        if (db) {
+        if (db && user) { // The 'user' check prevents this from running before login
             const staffCollectionRef = collection(db, 'staff_profiles');
             const unsubscribeStaff = onSnapshot(staffCollectionRef, (querySnapshot) => {
                 const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 setStaffList(list);
             });
             return () => unsubscribeStaff();
+        } else {
+            setStaffList([]); // Clear staff list on logout
         }
-    }, [db]);
+    }, [db, user]); // Dependency on 'user' is key
 
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
