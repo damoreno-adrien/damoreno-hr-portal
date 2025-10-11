@@ -10,6 +10,14 @@ const formatDateToYYYYMMDD = (date) => {
     return `${year}-${month}-${day}`;
 };
 
+// --- NEW HELPER FUNCTION ---
+const getDisplayName = (staff) => {
+    if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    if (staff && staff.fullName) return staff.fullName;
+    return 'Unknown Staff';
+};
+
 export default function TeamSchedulePage({ db, user }) {
     const [staffList, setStaffList] = useState([]);
     const [myDepartment, setMyDepartment] = useState('');
@@ -88,14 +96,14 @@ export default function TeamSchedulePage({ db, user }) {
                     const dailyEntries = departmentStaff.map(staff => {
                         const onLeave = leaves.some(leave => leave.staffId === staff.id && dateStr >= leave.startDate && dateStr <= leave.endDate);
                         if (onLeave) {
-                            return { name: staff.fullName, status: 'On Leave' };
+                            return { name: getDisplayName(staff), status: 'On Leave' }; // --- UPDATED ---
                         }
                         const shift = shiftsMap.get(`${staff.id}_${dateStr}`);
                         if (shift) {
-                            return { name: staff.fullName, status: `${shift.startTime} - ${shift.endTime}` };
+                            return { name: getDisplayName(staff), status: `${shift.startTime} - ${shift.endTime}` }; // --- UPDATED ---
                         }
                         return null;
-                    }).filter(Boolean); // Filter out nulls (staff not scheduled)
+                    }).filter(Boolean);
 
                     return { date, entries: dailyEntries };
                 });
