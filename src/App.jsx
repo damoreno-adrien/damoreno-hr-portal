@@ -168,7 +168,8 @@ export default function App() {
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
+            // --- UPDATED to pass staffList ---
+            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} />;
         }
         switch(currentPage) {
             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;

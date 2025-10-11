@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 
-export default function DashboardPage({ db, user, companyConfig, leaveBalances }) {
+export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList }) { // staffList is a new prop
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
@@ -9,6 +9,19 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
     const [todaysAttendance, setTodaysAttendance] = useState(null);
+    const today = new Date();
+    const todayMonth = today.getMonth() + 1;
+    const todayDay = today.getDate();
+
+    const checkBirthday = (birthdate) => {
+        if (!birthdate) return false;
+        const birthDateObj = new Date(birthdate);
+        return birthDateObj.getMonth() + 1 === todayMonth && birthDateObj.getDate() === todayDay;
+    };
+
+    const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
+    const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
+
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -33,7 +46,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         });
         return () => unsubscribe();
     }, [db, user]);
-    
+
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = new Date().toISOString().split('T')[0];
@@ -48,7 +61,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
             setIsOnLeaveToday(!snapshot.empty);
         });
     }, [db, user]);
-    
+
     useEffect(() => {
         if (!db || !user || !companyConfig?.attendanceBonus) return;
 
@@ -69,7 +82,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
 
             let lateCount = 0;
             let absenceCount = 0;
-            
+
             schedules.forEach(schedule => {
                 if (new Date(schedule.date) > new Date()) return;
                 const attendance = attendanceRecords.get(schedule.date);
@@ -134,7 +147,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     };
-    
+
     const getDocRef = () => { const todayStr = new Date().toISOString().split('T')[0]; return doc(db, 'attendance', `${user.uid}_${todayStr}`); };
     const handleCheckIn = async () => await setDoc(getDocRef(), { staffId: user.uid, staffName: user.displayName || user.email, date: new Date().toISOString().split('T')[0], checkInTime: serverTimestamp() });
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
@@ -148,7 +161,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
         switch (status) {
             case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
             case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
-            
+
             // --- UPDATED 'on-break' CASE ---
             case 'on-break': {
                 const breakStartTime = todaysAttendance?.breakStart?.toDate();
@@ -189,6 +202,18 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
 
     return (
         <div>
+            {/* --- NEW BIRTHDAY MESSAGES --- */}
+            {isMyBirthday && (
+                <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">
+                    🎉 Happy Birthday to you! We wish you all the best! 🎂
+                </div>
+            )}
+            {colleaguesWithBirthday.length > 0 && (
+                <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8">
+                    <p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p>
+                    <p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(s => s.nickname || s.firstName).join(', ')}!</p>
+                </div>
+            )}
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
@@ -215,7 +240,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Days available for the rest of the year.</p>
                     </DashboardCard>
-                    
+
                     <DashboardCard title="Public Holiday Credit">
                         <div className="flex justify-between items-center">
                             <span className="text-gray-300">Credits Remaining</span>
@@ -225,7 +250,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances }
                     </DashboardCard>
 
                     <DashboardCard title="Bonus Status">
-                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                        <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
                             <div className={`w-3 h-3 rounded-full ${bonusStatus.onTrack ? 'bg-green-500' : 'bg-red-500'}`}></div>
                         </div>

@@ -14,6 +14,49 @@ const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
+const UpcomingBirthdaysCard = ({ staffList }) => {
+    const upcomingBirthdays = staffList.map(staff => {
+        if (!staff.birthdate) return null;
+        const today = new Date();
+        const birthDate = new Date(staff.birthdate);
+        
+        let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
+        if (nextBirthday < today) {
+            nextBirthday.setFullYear(today.getFullYear() + 1);
+        }
+
+        const diffTime = nextBirthday - today;
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        if (diffDays <= 30) {
+            return {
+                ...staff,
+                nextBirthday,
+                daysUntil: diffDays,
+            };
+        }
+        return null;
+    }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil);
+
+    return (
+        <div className="bg-gray-800 rounded-lg p-4">
+            <h3 className="text-xl font-semibold text-white mb-4">Upcoming Birthdays (Next 30 Days)</h3>
+            <div className="space-y-3 max-h-60 overflow-y-auto">
+                {upcomingBirthdays.length > 0 ? (
+                    upcomingBirthdays.map(staff => (
+                        <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md">
+                            <span className="text-white font-medium">{getDisplayName(staff)}</span>
+                            <span className="text-sm text-amber-400">{staff.nextBirthday.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} ({staff.daysUntil} days)</span>
+                        </div>
+                    ))
+                ) : (
+                    <p className="text-sm text-gray-500">No upcoming birthdays in the next 30 days.</p>
+                )}
+            </div>
+        </div>
+    );
+};
+
 export default function AttendancePage({ db, staffList }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
@@ -139,6 +182,10 @@ export default function AttendancePage({ db, staffList }) {
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
                 <p className="text-lg text-gray-300 hidden sm:block">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            </div>
+            {/* --- NEW BIRTHDAY CARD ADDED --- */}
+            <div className="mb-6">
+                <UpcomingBirthdaysCard staffList={staffList} />
             </div>
             <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-3 md:gap-6">
                 <StatusColumn title="On Shift" staff={onShiftAndBreak} />
