@@ -117,6 +117,121 @@ exports.calculateBonus = https.onCall({ region: "us-central1" }, async (request)
     }
 });
 
+// --- NEW FUNCTION FOR FINANCIALS DASHBOARD ---
+exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
+    }
+    const staffId = request.auth.uid;
+
+    try {
+        // --- 1. Date Setup ---
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth(); // 0-indexed
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const daysPassed = today.getDate();
+        const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
+        const todayStr = today.toISOString().split('T')[0];
+
+        // --- 2. Parallel Data Fetching ---
+        const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
+        const configRef = db.collection("settings").doc("company_config").get();
+        const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("monthYear", "==", `${year}-${String(month + 1).padStart(2, '0')}`).where("status", "==", "approved").get();
+        const loansQuery = db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get();
+        const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
+        const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
+        const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr).get();
+
+        const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap] = await Promise.all([
+            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery
+        ]);
+
+        if (!staffProfileSnap.exists) throw new HttpsError("not-found", "Staff profile not found.");
+        if (!configSnap.exists) throw new HttpsError("not-found", "Company config not found.");
+        
+        // --- 3. Process Fetched Data ---
+        const staffProfile = staffProfileSnap.data();
+        const companyConfig = configSnap.data();
+        const latestJob = (staffProfile.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+        
+        if (!latestJob || latestJob.payType !== 'Monthly' || !latestJob.rate) {
+            throw new HttpsError("failed-precondition", "Pay estimation is only available for monthly salary staff.");
+        }
+
+        const baseSalary = latestJob.rate;
+        const dailyRate = baseSalary / daysInMonth;
+
+        const approvedAdvances = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
+        const activeLoans = loansSnap.docs.map(doc => doc.data());
+        const loanRepayment = activeLoans.reduce((sum, loan) => sum + loan.recurringPayment, 0);
+
+        // --- 4. Calculate Earnings ---
+        const baseSalaryEarned = dailyRate * daysPassed;
+
+        // --- 5. Calculate Potential Bonus ---
+        const bonusRules = companyConfig.attendanceBonus;
+        const schedules = schedulesSnap.docs.map(doc => doc.data());
+        const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
+        let lateCount = 0;
+        let absenceCount = 0;
+        schedules.forEach(schedule => {
+            const attendance = attendanceRecords.get(schedule.date);
+            if (!attendance) { absenceCount++; }
+            else if (new Date(`${schedule.date}T${schedule.startTime}`) < attendance.checkInTime.toDate()) { lateCount++; }
+        });
+        
+        let potentialBonus = 0;
+        const bonusOnTrack = absenceCount <= bonusRules.allowedAbsences && lateCount <= bonusRules.allowedLates;
+        if (bonusOnTrack) {
+            const currentStreak = staffProfile.bonusStreak || 0;
+            const projectedStreak = currentStreak + 1;
+            if (projectedStreak === 1) potentialBonus = bonusRules.month1;
+            else if (projectedStreak === 2) potentialBonus = bonusRules.month2;
+            else potentialBonus = bonusRules.month3;
+        }
+
+        // --- 6. Calculate Deductions ---
+        const approvedLeave = leaveSnap.docs.map(doc => doc.data());
+        let unpaidAbsencesCount = 0;
+        schedules.forEach(schedule => {
+            const isOnLeave = approvedLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
+            if (!attendanceRecords.has(schedule.date) && !isOnLeave) {
+                unpaidAbsencesCount++;
+            }
+        });
+        const absenceDeductions = unpaidAbsencesCount * dailyRate;
+
+        const ssoDeduction = Math.min(baseSalary * (companyConfig.ssoRate / 100), companyConfig.ssoMaxContribution);
+
+        const totalEarnings = baseSalaryEarned + potentialBonus;
+        const totalDeductions = absenceDeductions + ssoDeduction + approvedAdvances + loanRepayment;
+
+        // --- 7. Return Result ---
+        return {
+            baseSalaryEarned: baseSalaryEarned,
+            potentialBonus: {
+                amount: potentialBonus,
+                onTrack: bonusOnTrack,
+            },
+            deductions: {
+                absences: absenceDeductions,
+                socialSecurity: ssoDeduction,
+                salaryAdvances: approvedAdvances,
+                loanRepayment: loanRepayment,
+            },
+            activeLoans: activeLoans,
+            estimatedNetPay: totalEarnings - totalDeductions,
+        };
+
+    } catch (error) {
+        console.error("Error in calculateLivePayEstimate:", error);
+        if (error instanceof HttpsError) throw error;
+        throw new HttpsError("internal", "An unexpected error occurred while calculating your pay estimate.", error.message);
+    }
+});
+
+
 // --- REPLACED finalizePayrollStreaks WITH A NEW, MORE POWERFUL FUNCTION ---
 exports.finalizeAndStorePayslips = https.onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth || !request.data.payrollData || !request.data.payPeriod) {
