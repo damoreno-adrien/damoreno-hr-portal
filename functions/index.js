@@ -155,12 +155,15 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const companyConfig = configSnap.data();
         const latestJob = (staffProfile.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
         
-        if (!latestJob || latestJob.payType !== 'Monthly' || !latestJob.rate) {
+        if (!latestJob || latestJob.payType !== 'Monthly') { // FIX: Removed rate check here to allow default
             throw new HttpsError("failed-precondition", "Pay estimation is only available for monthly salary staff.");
         }
 
-        const baseSalary = latestJob.rate;
-        const dailyRate = baseSalary / daysInMonth;
+        // FIX: Default baseSalary to 0 if rate is missing
+        const baseSalary = latestJob.rate || 0;
+        
+        // FIX: Ensure daysInMonth is not zero to prevent division by zero, although very unlikely
+        const dailyRate = daysInMonth > 0 ? baseSalary / daysInMonth : 0;
 
         const approvedAdvances = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
         const activeLoans = loansSnap.docs.map(doc => doc.data());
@@ -170,7 +173,7 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const baseSalaryEarned = dailyRate * daysPassed;
 
         // --- 5. Calculate Potential Bonus ---
-        const bonusRules = companyConfig.attendanceBonus;
+        const bonusRules = companyConfig.attendanceBonus || {}; // FIX: Default bonusRules to empty object
         const schedules = schedulesSnap.docs.map(doc => doc.data());
         const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
         let lateCount = 0;
@@ -182,13 +185,14 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         });
         
         let potentialBonus = 0;
-        const bonusOnTrack = absenceCount <= bonusRules.allowedAbsences && lateCount <= bonusRules.allowedLates;
+        // FIX: Check for allowedAbsences/Lates existence before comparing
+        const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences || 0) && lateCount <= (bonusRules.allowedLates || 0);
         if (bonusOnTrack) {
             const currentStreak = staffProfile.bonusStreak || 0;
             const projectedStreak = currentStreak + 1;
-            if (projectedStreak === 1) potentialBonus = bonusRules.month1;
-            else if (projectedStreak === 2) potentialBonus = bonusRules.month2;
-            else potentialBonus = bonusRules.month3;
+            if (projectedStreak === 1) potentialBonus = bonusRules.month1 || 0;
+            else if (projectedStreak === 2) potentialBonus = bonusRules.month2 || 0;
+            else potentialBonus = bonusRules.month3 || 0;
         }
 
         // --- 6. Calculate Deductions ---
@@ -202,7 +206,10 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         });
         const absenceDeductions = unpaidAbsencesCount * dailyRate;
 
-        const ssoDeduction = Math.min(baseSalary * (companyConfig.ssoRate / 100), companyConfig.ssoMaxContribution);
+        // FIX: Default SSO values to 0 if they are missing from config
+        const ssoRate = companyConfig.ssoRate || 0;
+        const ssoMax = companyConfig.ssoMaxContribution || 0;
+        const ssoDeduction = Math.min(baseSalary * (ssoRate / 100), ssoMax);
 
         const totalEarnings = baseSalaryEarned + potentialBonus;
         const totalDeductions = absenceDeductions + ssoDeduction + approvedAdvances + loanRepayment;
