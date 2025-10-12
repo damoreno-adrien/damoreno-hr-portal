@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '../components/Icons'; // Assuming CheckCircleIcon and XCircleIcon exist or can be added
+import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '../components/Icons';
 import LoanModal from '../components/LoanModal';
 import AdvanceModal from '../components/AdvanceModal';
 import AdjustmentModal from '../components/AdjustmentModal';
@@ -22,8 +22,7 @@ const StatusBadge = ({ status }) => {
 export default function FinancialsPage({ staffList, db }) {
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
-    
-    // State for Pending Advances (All Staff)
+
     const [pendingAdvances, setPendingAdvances] = useState([]);
     const [isLoadingPending, setIsLoadingPending] = useState(true);
 
@@ -42,48 +41,36 @@ export default function FinancialsPage({ staffList, db }) {
     const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
     const [editingAdjustment, setEditingAdjustment] = useState(null);
 
-    // Fetch All Pending Advances
+    const getDisplayName = (staff) => staff?.nickname || staff?.firstName || staff?.fullName || 'Unknown';
+
     useEffect(() => {
         if (!db) return;
         setIsLoadingPending(true);
         const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
         const unsubscribe = onSnapshot(q, (snap) => {
             const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            // Add staff name to each request for easy display
-            const hydratedList = pendingList.map(req => ({...req, staffName: staffList.find(s => s.id === req.staffId)?.fullName || 'Unknown Staff'}));
+            const hydratedList = pendingList.map(req => ({ ...req, staffName: getDisplayName(staffList.find(s => s.id === req.staffId)) }));
             setPendingAdvances(hydratedList);
             setIsLoadingPending(false);
         }, (err) => { console.error(err); setIsLoadingPending(false); });
         return () => unsubscribe();
     }, [db, staffList]);
 
-    // Fetch data for selected staff member
     useEffect(() => {
         if (selectedStaffId && db) {
             setIsLoadingLoans(true);
             setIsLoadingAdvances(true);
             setIsLoadingAdjustments(true);
 
-            // Fetch Loans
             const loansQuery = query(collection(db, 'loans'), where('staffId', '==', selectedStaffId));
-            const unsubLoans = onSnapshot(loansQuery, (snap) => {
-                setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                setIsLoadingLoans(false);
-            }, (err) => { console.error(err); setIsLoadingLoans(false); });
+            const unsubLoans = onSnapshot(loansQuery, (snap) => { setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingLoans(false); }, (err) => { console.error(err); setIsLoadingLoans(false); });
 
-            // Fetch Advances for selected period
-            const advancesQuery = query(collection(db, 'salary_advances'), where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year));
-            const unsubAdvances = onSnapshot(advancesQuery, (snap) => {
-                setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                setIsLoadingAdvances(false);
-            }, (err) => { console.error(err); setIsLoadingAdvances(false); });
-            
-            // Fetch Adjustments for selected period
-            const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year));
-            const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => {
-                setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                setIsLoadingAdjustments(false);
-            }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
+            const commonQueries = [where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year)];
+            const advancesQuery = query(collection(db, 'salary_advances'), ...commonQueries);
+            const unsubAdvances = onSnapshot(advancesQuery, (snap) => { setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingAdvances(false); }, (err) => { console.error(err); setIsLoadingAdvances(false); });
+
+            const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), ...commonQueries);
+            const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => { setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingAdjustments(false); }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
 
             return () => { unsubLoans(); unsubAdvances(); unsubAdjustments(); };
         } else {
@@ -91,39 +78,25 @@ export default function FinancialsPage({ staffList, db }) {
         }
     }, [selectedStaffId, db, payPeriod]);
 
-    // Handlers
     const handlePeriodChange = (e) => setPayPeriod(p => ({ ...p, [e.target.name]: Number(e.target.value) }));
     const handleStaffChange = (e) => setSelectedStaffId(e.target.value);
-    
-    // Loan Handlers
+
     const handleOpenAddLoanModal = () => { setEditingLoan(null); setIsLoanModalOpen(true); };
     const handleOpenEditLoanModal = (loan) => { setEditingLoan(loan); setIsLoanModalOpen(true); };
     const handleDeleteLoan = async (id) => { if (window.confirm("Delete this loan record?")) await deleteDoc(doc(db, 'loans', id)); };
 
-    // Advance Handlers
     const handleOpenAddAdvanceModal = () => { setEditingAdvance(null); setIsAdvanceModalOpen(true); };
     const handleOpenEditAdvanceModal = (adv) => { setEditingAdvance(adv); setIsAdvanceModalOpen(true); };
     const handleDeleteAdvance = async (id) => { if (window.confirm("Delete this advance record?")) await deleteDoc(doc(db, 'salary_advances', id)); };
 
-    const handleApproveAdvance = async (id) => {
-        const advRef = doc(db, 'salary_advances', id);
-        await updateDoc(advRef, { status: 'approved', isReadByStaff: false });
-    };
+    const handleApproveAdvance = async (id) => { await updateDoc(doc(db, 'salary_advances', id), { status: 'approved', isReadByStaff: false }); };
+    const handleRejectAdvance = async (id) => { const reason = window.prompt("Reason for rejecting?"); if (reason) { await updateDoc(doc(db, 'salary_advances', id), { status: 'rejected', rejectionReason: reason, isReadByStaff: false }); } };
 
-    const handleRejectAdvance = async (id) => {
-        const reason = window.prompt("Please provide a reason for rejecting this request.");
-        if (reason) {
-            const advRef = doc(db, 'salary_advances', id);
-            await updateDoc(advRef, { status: 'rejected', rejectionReason: reason, isReadByStaff: false });
-        }
-    };
-    
-    // Adjustment Handlers
     const handleOpenAddAdjustmentModal = () => { setEditingAdjustment(null); setIsAdjustmentModalOpen(true); };
     const handleOpenEditAdjustmentModal = (adj) => { setEditingAdjustment(adj); setIsAdjustmentModalOpen(true); };
     const handleDeleteAdjustment = async (id) => { if (window.confirm("Delete this adjustment record?")) await deleteDoc(doc(db, 'monthly_adjustments', id)); };
-    
-    const selectedStaffName = staffList.find(s => s.id === selectedStaffId)?.fullName;
+
+    const selectedStaffName = getDisplayName(staffList.find(s => s.id === selectedStaffId));
 
     return (
         <div>
@@ -136,11 +109,21 @@ export default function FinancialsPage({ staffList, db }) {
                 <div className="flex flex-col sm:flex-row w-full md:w-auto gap-2">
                     <div className="flex-grow"><select name="month" value={payPeriod.month} onChange={handlePeriodChange} className="w-full p-2 bg-gray-700 rounded-md text-white">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
                     <div className="flex-grow"><select name="year" value={payPeriod.year} onChange={handlePeriodChange} className="w-full p-2 bg-gray-700 rounded-md text-white">{years.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
-                    <div className="flex-grow"><select value={selectedStaffId} onChange={handleStaffChange} className="w-full p-2 bg-gray-700 rounded-md text-white"><option value="">-- Select Staff --</option>{staffList.sort((a, b) => a.fullName.localeCompare(b.fullName)).map(s => (<option key={s.id} value={s.id}>{s.fullName}</option>))}</select></div>
+                    <div className="flex-grow">
+                        <select value={selectedStaffId} onChange={handleStaffChange} className="w-full p-2 bg-gray-700 rounded-md text-white">
+                            <option value="">-- Select Staff --</option>
+                            {staffList
+                                .sort((a, b) => {
+                                    const nameA = a.nickname || a.firstName || a.fullName || '';
+                                    const nameB = b.nickname || b.firstName || b.fullName || '';
+                                    return nameA.localeCompare(nameB);
+                                })
+                                .map(s => (<option key={s.id} value={s.id}>{getDisplayName(s)}</option>))}
+                        </select>
+                    </div>
                 </div>
             </div>
 
-            {/* NEW PENDING REQUESTS SECTION */}
             <section className="mb-10">
                 <h3 className="text-xl font-semibold text-white mb-4">Pending Salary Advance Requests</h3>
                 <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
