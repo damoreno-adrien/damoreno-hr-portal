@@ -297,22 +297,39 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
+        // NEW: Create monthYear string for querying salary advances
+        const monthYearStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile could not be found.");
+        
         const jobHistory = staffProfileDoc.data().jobHistory || [];
         const latestJob = jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
         if (!latestJob || latestJob.payType !== 'Monthly' || !latestJob.rate) { throw new HttpsError("failed-precondition", "This feature is only for monthly salary staff."); }
+        
         const baseSalary = latestJob.rate;
         const dailyRate = baseSalary / daysInMonth;
+        
         const configDoc = await db.collection("settings").doc("company_config").get();
         const publicHolidays = configDoc.exists ? configDoc.data().publicHolidays.map(h => h.date) : [];
+        
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr);
-        const [schedulesSnap, attendanceSnap, leaveSnap] = await Promise.all([schedulesQuery.get(), attendanceQuery.get(), leaveQuery.get()]);
+        // NEW: Add a query for existing advances this month
+        const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("monthYear", "==", monthYearStr).where("status", "==", "approved");
+
+        const [schedulesSnap, attendanceSnap, leaveSnap, advancesSnap] = await Promise.all([
+            schedulesQuery.get(), 
+            attendanceQuery.get(), 
+            leaveQuery.get(),
+            advancesQuery.get() // NEW: Execute the new query
+        ]);
+        
         const schedules = schedulesSnap.docs.map(doc => doc.data());
         const attendanceDates = new Set(attendanceSnap.docs.map(doc => doc.data().date));
         const approvedLeave = leaveSnap.docs.map(doc => doc.data());
+
         let unpaidAbsences = 0;
         schedules.forEach(schedule => {
             const isPublicHoliday = publicHolidays.includes(schedule.date);
@@ -320,10 +337,28 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
             const didAttend = attendanceDates.has(schedule.date);
             if (!didAttend && !isOnLeave && !isPublicHoliday) { unpaidAbsences++; }
         });
+        
         const absenceDeductions = dailyRate * unpaidAbsences;
         const currentSalaryDue = Math.max(0, baseSalary - absenceDeductions);
-        const maxAdvance = Math.floor(currentSalaryDue * 0.5);
-        return { maxAdvance, currentSalaryDue, baseSalary, absenceDeductions, unpaidAbsences };
+        const maxTheoreticalAdvance = Math.floor(currentSalaryDue * 0.5);
+
+        // NEW: Calculate total of advances already taken this month
+        const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
+
+        // NEW: Calculate the true available amount
+        const availableAdvance = Math.max(0, maxTheoreticalAdvance - advancesAlreadyTaken);
+        
+        // UPDATED: Return the new availableAdvance value
+        return { 
+            maxAdvance: availableAdvance, // This is now the true available amount
+            currentSalaryDue, 
+            baseSalary, 
+            absenceDeductions, 
+            unpaidAbsences,
+            // Also returning these for potential UI display
+            maxTheoreticalAdvance,
+            advancesAlreadyTaken
+        };
     } catch (error) {
         console.error("Error in calculateAdvanceEligibility:", error);
         if (error instanceof HttpsError) throw error;
