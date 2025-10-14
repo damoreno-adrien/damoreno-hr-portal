@@ -80,7 +80,7 @@ export default function SalaryAdvancePage({ db, user }) {
                 />
             )}
             <div className="flex justify-between items-center mb-8">
-                <h2 className="text-2xl md:text-3xl font-bold text-white">Salary Advance</h2>
+                <h2 className="text-2xl md:text-3xl font-bold text-white">Salary Advance TEST</h2>
                 <button 
                     onClick={() => setIsModalOpen(true)}
                     disabled={isLoadingEligibility || eligibility.maxAdvance <= 0}
