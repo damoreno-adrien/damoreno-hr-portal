@@ -24,6 +24,8 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     const [isLoadingHistory, setIsLoadingHistory] = useState(true);
     const [expandedRunId, setExpandedRunId] = useState(null);
 
+    const [selectedForPayroll, setSelectedForPayroll] = useState(new Set());
+
     const handleGeneratePayroll = async () => {
         if (!companyConfig) { setError("Company settings are not loaded yet. Please wait and try again."); return; }
         setIsLoading(true);
@@ -63,7 +65,6 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             
             const data = staffList.map(staff => {
                 const currentJob = getCurrentJob(staff);
-                // UPDATED: Create display name
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
 
                 let basePay = 0, autoDeductions = 0;
@@ -114,7 +115,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 return {
                     id: staff.id, 
                     name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName,
-                    displayName: displayName, // UPDATED: Add displayName for UI
+                    displayName: displayName,
                     payType: currentJob.position,
                     totalEarnings, totalDeductions, netPay,
                     bonusInfo: { newStreak: bonusInfo.newStreak },
@@ -127,11 +128,19 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         } finally { setIsLoading(false); }
     };
 
+    useEffect(() => {
+        if (payrollData.length > 0) {
+            const allIds = new Set(payrollData.map(p => p.id));
+            setSelectedForPayroll(allIds);
+        } else {
+            setSelectedForPayroll(new Set());
+        }
+    }, [payrollData]);
+
     const handleExportSummaryPDF = () => {
         const doc = new jsPDF();
         doc.text(`Payroll Summary - ${months[payPeriod.month - 1]} ${payPeriod.year}`, 14, 15);
         autoTable(doc, {
-            // UPDATED: PDF head and body to use displayName
             head: [['Staff', 'Total Earnings', 'Total Deductions', 'Net Pay']],
             body: payrollData.map(item => [item.displayName, formatCurrency(item.totalEarnings), formatCurrency(item.totalDeductions), formatCurrency(item.netPay)]),
             startY: 20,
@@ -140,7 +149,14 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     };
     
     const handleFinalizePayroll = async () => {
-        if (!window.confirm(`Are you sure you want to finalize the payroll for ${months[payPeriod.month - 1]} ${payPeriod.year}? This will save the payslips and make them visible to staff.`)) {
+        const dataToFinalize = payrollData.filter(p => selectedForPayroll.has(p.id));
+
+        if (dataToFinalize.length === 0) {
+            alert("Please select at least one employee to finalize.");
+            return;
+        }
+
+        if (!window.confirm(`Are you sure you want to finalize payroll for ${dataToFinalize.length} employee(s) for ${months[payPeriod.month - 1]} ${payPeriod.year}?`)) {
             return;
         }
 
@@ -148,9 +164,10 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         try {
             const functions = getFunctions();
             const finalizeAndStorePayslips = httpsCallable(functions, 'finalizeAndStorePayslips');
-            const result = await finalizeAndStorePayslips({ payrollData, payPeriod });
+            await finalizeAndStorePayslips({ payrollData: dataToFinalize, payPeriod });
 
             alert("Payroll finalized and payslips stored successfully!");
+            handleGeneratePayroll();
         } catch (error) {
             console.error("Error finalizing payroll:", error);
             alert(`Failed to finalize payroll: ${error.message}`);
@@ -200,6 +217,25 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         setExpandedRunId(prevId => (prevId === runId ? null : runId));
     };
 
+    const handleSelectOne = (staffId) => {
+        setSelectedForPayroll(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(staffId)) {
+                newSet.delete(staffId);
+            } else {
+                newSet.add(staffId);
+            }
+            return newSet;
+        });
+    };
+
+    const handleSelectAll = () => {
+        if (selectedForPayroll.size === payrollData.length) {
+            setSelectedForPayroll(new Set());
+        } else {
+            setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
+        }
+    };
 
     return (
         <div>
@@ -223,23 +259,52 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                     <table className="min-w-full">
                         <thead className="bg-gray-700">
-                            {/* UPDATED: Table header */}
-                            <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
+                            <tr>
+                                <th className="p-4 w-4">
+                                    <input 
+                                        type="checkbox" 
+                                        className="rounded"
+                                        checked={payrollData.length > 0 && selectedForPayroll.size === payrollData.length}
+                                        onChange={handleSelectAll}
+                                    />
+                                </th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th>
+                            </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
                             {payrollData.length > 0 ? payrollData.map(item => (
-                                <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
-                                    {/* UPDATED: Display Name */}
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.displayName}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
+                                <tr key={item.id} className="hover:bg-gray-700">
+                                    <td className="p-4">
+                                        <input 
+                                            type="checkbox" 
+                                            className="rounded"
+                                            checked={selectedForPayroll.has(item.id)}
+                                            onChange={() => handleSelectOne(item.id)}
+                                        />
+                                    </td>
+                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white cursor-pointer">{item.displayName}</td>
+                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
+                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
+                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400 cursor-pointer">{formatCurrency(item.netPay)}</td>
                                 </tr>
-                            )) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
+                            )) : ( <tr><td colSpan="5" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
                         </tbody>
                     </table>
                 </div>
-                {payrollData.length > 0 && (<div className="mt-8 flex justify-end"><button onClick={handleFinalizePayroll} disabled={isFinalizing} className="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold disabled:bg-gray-600">{isFinalizing ? 'Finalizing...' : `Finalize Payroll for ${months[payPeriod.month-1]}`}</button></div>)}
+                {payrollData.length > 0 && (
+                    <div className="mt-8 flex justify-end">
+                        <button 
+                            onClick={handleFinalizePayroll} 
+                            disabled={isFinalizing || selectedForPayroll.size === 0} 
+                            className="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold disabled:bg-gray-600"
+                        >
+                            {isFinalizing ? 'Finalizing...' : `Finalize Payroll for ${selectedForPayroll.size} Employee(s)`}
+                        </button>
+                    </div>
+                )}
             </section>
 
             <hr className="border-gray-700 my-12" />
@@ -265,14 +330,12 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                                         <table className="min-w-full">
                                             <thead className="bg-gray-700/50">
                                                 <tr>
-                                                    {/* UPDATED: History table header */}
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Staff</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Net Pay</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-700">
                                                 {run.payslips.sort((a,b) => a.name.localeCompare(b.name)).map(p => {
-                                                    // UPDATED: Look up staff details for display
                                                     const staffMember = staffList.find(s => s.id === p.staffId);
                                                     const displayName = staffMember ? `${staffMember.nickname || staffMember.firstName} (${getCurrentJob(staffMember).department || 'N/A'})` : p.name;
                                                     return (
