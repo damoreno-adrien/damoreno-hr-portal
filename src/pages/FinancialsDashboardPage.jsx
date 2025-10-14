@@ -16,6 +16,17 @@ const DashboardCard = ({ title, children, className = '' }) => (
     </div>
 );
 
+// NEW: StatusBadge component for consistent styling
+const StatusBadge = ({ status }) => {
+    const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full capitalize";
+    const statusMap = {
+        pending: "bg-yellow-500/20 text-yellow-300",
+        approved: "bg-green-500/20 text-green-300",
+        rejected: "bg-red-500/20 text-red-300",
+    };
+    return <span className={`${baseClasses} ${statusMap[status] || 'bg-gray-500/20 text-gray-300'}`}>{status}</span>;
+};
+
 // Helper to format numbers as currency
 const formatCurrency = (num) => num != null ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
@@ -40,7 +51,7 @@ export default function FinancialsDashboardPage() {
         };
 
         fetchPayEstimate();
-    }, []); // Empty array ensures this runs only once on mount
+    }, []);
 
     const renderContent = () => {
         if (isLoading) {
@@ -112,8 +123,24 @@ export default function FinancialsDashboardPage() {
                     </DashboardCard>
                 </div>
 
-                {/* Active Loans Card */}
+                {/* Side column for additional cards */}
                 <div className="space-y-8">
+                    {/* NEW: Current Salary Advance Card */}
+                    <DashboardCard title="Current Salary Advance">
+                        {estimate.currentAdvance ? (
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <p className="text-gray-400 text-sm">Amount</p>
+                                    <p className="text-xl font-bold text-amber-400">฿{formatCurrency(estimate.currentAdvance.amount)}</p>
+                                </div>
+                                <StatusBadge status={estimate.currentAdvance.status} />
+                            </div>
+                        ) : (
+                            <p className="text-gray-400 text-center py-4">No active advance this month.</p>
+                        )}
+                    </DashboardCard>
+                    
+                    {/* Active Loans Card */}
                     <DashboardCard title="Active Loans">
                         {estimate.activeLoans && estimate.activeLoans.length > 0 ? (
                             <div className="space-y-4">
