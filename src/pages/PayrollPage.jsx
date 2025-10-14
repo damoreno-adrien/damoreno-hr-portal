@@ -19,6 +19,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     const [isFinalizing, setIsFinalizing] = useState(false);
     const [error, setError] = useState('');
     const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
+    const [isMonthFullyFinalized, setIsMonthFullyFinalized] = useState(false);
 
     const [history, setHistory] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(true);
@@ -30,10 +31,28 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         if (!companyConfig) { setError("Company settings are not loaded yet. Please wait and try again."); return; }
         setIsLoading(true);
         setError('');
+        setIsMonthFullyFinalized(false);
         
         try {
             const year = payPeriod.year;
             const month = payPeriod.month - 1;
+
+            const finalizedPayslipsSnap = await getDocs(query(
+                collection(db, "payslips"),
+                where("payPeriodYear", "==", year),
+                where("payPeriodMonth", "==", month + 1)
+            ));
+            const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
+
+            const staffToProcess = staffList.filter(staff => !finalizedStaffIds.has(staff.id));
+            
+            if (staffToProcess.length === 0 && staffList.length > 0) {
+                setPayrollData([]);
+                setIsMonthFullyFinalized(true);
+                setIsLoading(false);
+                return;
+            }
+
             const startDate = new Date(year, month, 1);
             const endDate = new Date(year, month + 1, 0);
             const daysInMonth = endDate.getDate();
@@ -51,7 +70,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1))),
-                Promise.all(staffList.map(staff => calculateBonus({ staffId: staff.id, payPeriod: { year, month: month + 1 } }).then(result => ({ staffId: staff.id, ...result.data })).catch(err => ({ staffId: staff.id, bonusAmount: 0, newStreak: 0 }))))
+                Promise.all(staffToProcess.map(staff => calculateBonus({ staffId: staff.id, payPeriod: { year, month: month + 1 } }).then(result => ({ staffId: staff.id, ...result.data })).catch(err => ({ staffId: staff.id, bonusAmount: 0, newStreak: 0 }))))
             ]);
 
             const attendanceData = new Map(attendanceSnapshot.docs.map(doc => [`${doc.data().staffId}_${doc.data().date}`, doc.data()]));
@@ -63,7 +82,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             const bonusMap = new Map(bonusResults.map(res => [res.staffId, res]));
             const publicHolidays = companyConfig.publicHolidays.map(h => h.date);
             
-            const data = staffList.map(staff => {
+            const data = staffToProcess.map(staff => {
                 const currentJob = getCurrentJob(staff);
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
 
@@ -237,6 +256,29 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         }
     };
 
+    const renderPayrollContent = () => {
+        if (isLoading) {
+            return <tr><td colSpan="5" className="px-6 py-10 text-center text-gray-500">Calculating...</td></tr>;
+        }
+        if (isMonthFullyFinalized) {
+            return <tr><td colSpan="5" className="px-6 py-10 text-center text-green-400">Payroll for {months[payPeriod.month - 1]} {payPeriod.year} has been fully completed.</td></tr>;
+        }
+        if (payrollData.length > 0) {
+            return payrollData.map(item => (
+                <tr key={item.id} className="hover:bg-gray-700">
+                    <td className="p-4">
+                        <input type="checkbox" className="rounded" checked={selectedForPayroll.has(item.id)} onChange={() => handleSelectOne(item.id)} />
+                    </td>
+                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white cursor-pointer">{item.displayName}</td>
+                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
+                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
+                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400 cursor-pointer">{formatCurrency(item.netPay)}</td>
+                </tr>
+            ));
+        }
+        return <tr><td colSpan="5" className="px-6 py-10 text-center text-gray-500">Select a pay period and generate the payroll.</td></tr>;
+    };
+
     return (
         <div>
             {selectedStaffDetails && (
@@ -275,22 +317,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {payrollData.length > 0 ? payrollData.map(item => (
-                                <tr key={item.id} className="hover:bg-gray-700">
-                                    <td className="p-4">
-                                        <input 
-                                            type="checkbox" 
-                                            className="rounded"
-                                            checked={selectedForPayroll.has(item.id)}
-                                            onChange={() => handleSelectOne(item.id)}
-                                        />
-                                    </td>
-                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white cursor-pointer">{item.displayName}</td>
-                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
-                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
-                                    <td onClick={() => setSelectedStaffDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400 cursor-pointer">{formatCurrency(item.netPay)}</td>
-                                </tr>
-                            )) : ( <tr><td colSpan="5" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
+                            {renderPayrollContent()}
                         </tbody>
                     </table>
                 </div>
