@@ -18,7 +18,8 @@ export default function SettingsPage({ db, companyConfig }) {
         geofence: { latitude: 0, longitude: 0, radius: 100 },
         attendanceBonus: { month1: 400, month2: 800, month3: 1200, allowedAbsences: 0, allowedLates: 1 },
         ssoRate: 5,
-        ssoCap: 750
+        ssoCap: 750,
+        advanceEligibilityPercentage: 50,
     };
 
     const [config, setConfig] = useState(defaultConfig);
@@ -68,7 +69,7 @@ export default function SettingsPage({ db, companyConfig }) {
             let logoUrl = config.companyLogoUrl;
             if (logoFile) {
                 const storage = getStorage();
-                const storageRef = ref(storage, `company_assets/logo`); // Use a consistent name for easier management
+                const storageRef = ref(storage, `company_assets/logo`);
                 await uploadBytes(storageRef, logoFile);
                 logoUrl = await getDownloadURL(storageRef);
             }
@@ -83,7 +84,8 @@ export default function SettingsPage({ db, companyConfig }) {
                 geofence: { latitude: Number(config.geofence.latitude), longitude: Number(config.geofence.longitude), radius: Number(config.geofence.radius) },
                 attendanceBonus: { month1: Number(config.attendanceBonus.month1), month2: Number(config.attendanceBonus.month2), month3: Number(config.attendanceBonus.month3), allowedAbsences: Number(config.attendanceBonus.allowedAbsences), allowedLates: Number(config.attendanceBonus.allowedLates) },
                 ssoRate: Number(config.ssoRate),
-                ssoCap: Number(config.ssoCap)
+                ssoCap: Number(config.ssoCap),
+                advanceEligibilityPercentage: Number(config.advanceEligibilityPercentage),
             };
             await updateDoc(configDocRef, configToSave);
             alert('Settings saved successfully!');
@@ -126,6 +128,25 @@ export default function SettingsPage({ db, companyConfig }) {
                     <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div><label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences Allowed</label><input type="number" id="allowedAbsences" value={config.attendanceBonus?.allowedAbsences ?? ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                         <div><label htmlFor="allowedLates" className="block text-sm font-medium text-gray-300 mb-1">Max Late Arrivals Allowed</label><input type="number" id="allowedLates" value={config.attendanceBonus?.allowedLates ?? ''} onChange={(e) => handleConfigChange(e, 'attendanceBonus')} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
+                    </div>
+                </div>
+
+                <div className="bg-gray-800 rounded-lg shadow-lg p-6">
+                    <h3 className="text-xl font-semibold text-white">Financial & Payroll Rules</h3>
+                    <p className="text-gray-400 mt-2">Set percentages and caps for various financial calculations.</p>
+                    <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div>
+                            <label htmlFor="advanceEligibilityPercentage" className="block text-sm font-medium text-gray-300 mb-1">Advance Eligibility (% of salary)</label>
+                            <input type="number" id="advanceEligibilityPercentage" value={config.advanceEligibilityPercentage || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="ssoRate" className="block text-sm font-medium text-gray-300 mb-1">Social Security Rate (%)</label>
+                            <input type="number" id="ssoRate" value={config.ssoRate || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="ssoCap" className="block text-sm font-medium text-gray-300 mb-1">SSO Max Contribution (THB)</label>
+                            <input type="number" id="ssoCap" value={config.ssoCap || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        </div>
                     </div>
                 </div>
 

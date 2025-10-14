@@ -293,10 +293,11 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
     try {
         const today = new Date();
         const year = today.getFullYear();
-        const month = today.getMonth(); // 0-indexed for JS (e.g., 9 for October)
+        const month = today.getMonth();
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
+        const monthYearStr = `${year}-${String(month + 1).padStart(2, '0')}`;
 
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile could not be found.");
@@ -309,17 +310,17 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const dailyRate = baseSalary / daysInMonth;
         
         const configDoc = await db.collection("settings").doc("company_config").get();
-        const publicHolidays = configDoc.exists ? configDoc.data().publicHolidays.map(h => h.date) : [];
+        const companyConfig = configDoc.exists ? configDoc.data() : {};
+        const publicHolidays = companyConfig.publicHolidays ? companyConfig.publicHolidays.map(h => h.date) : [];
         
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr);
         
-        // FINAL FIX: Query using the correct payPeriodYear and payPeriodMonth fields.
         const advancesQuery = db.collection("salary_advances")
             .where("staffId", "==", staffId)
-            .where("payPeriodYear", "==", year)           // e.g., 2025
-            .where("payPeriodMonth", "==", month + 1)       // e.g., 10 for October
+            .where("payPeriodYear", "==", year)
+            .where("payPeriodMonth", "==", month + 1)
             .where("status", "in", ["approved", "pending"]);
 
         const [schedulesSnap, attendanceSnap, leaveSnap, advancesSnap] = await Promise.all([
@@ -343,7 +344,12 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         
         const absenceDeductions = dailyRate * unpaidAbsences;
         const currentSalaryDue = Math.max(0, baseSalary - absenceDeductions);
-        const maxTheoreticalAdvance = Math.floor(currentSalaryDue * 0.5);
+        
+        // --- KEY CHANGE ---
+        // Read the percentage from config, with a fallback to 50
+        const advancePercentage = companyConfig.advanceEligibilityPercentage || 50;
+        // Use the dynamic percentage in the calculation
+        const maxTheoreticalAdvance = Math.floor(currentSalaryDue * (advancePercentage / 100));
 
         const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
         const availableAdvance = Math.max(0, maxTheoreticalAdvance - advancesAlreadyTaken);
