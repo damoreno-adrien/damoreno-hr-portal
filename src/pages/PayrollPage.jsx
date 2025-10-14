@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, onSnapshot, orderBy } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import jsPDF from 'jspdf';
@@ -85,7 +85,6 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             const data = staffToProcess.map(staff => {
                 const currentJob = getCurrentJob(staff);
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
-
                 let basePay = 0, autoDeductions = 0;
                 
                 if (currentJob.payType === 'Monthly') {
@@ -255,6 +254,12 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
         }
     };
+    
+    const totalSelectedNetPay = useMemo(() => {
+        return payrollData
+            .filter(p => selectedForPayroll.has(p.id))
+            .reduce((sum, p) => sum + p.netPay, 0);
+    }, [payrollData, selectedForPayroll]);
 
     const renderPayrollContent = () => {
         if (isLoading) {
@@ -322,7 +327,11 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     </table>
                 </div>
                 {payrollData.length > 0 && (
-                    <div className="mt-8 flex justify-end">
+                    <div className="mt-8 flex justify-between items-center">
+                        <div>
+                            <span className="text-gray-400">Total for Selected: </span>
+                            <span className="text-2xl font-bold text-amber-400">{formatCurrency(totalSelectedNetPay)} THB</span>
+                        </div>
                         <button 
                             onClick={handleFinalizePayroll} 
                             disabled={isFinalizing || selectedForPayroll.size === 0} 
