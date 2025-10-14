@@ -4,6 +4,9 @@ import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from '
 import { PlusIcon } from '../components/Icons';
 import RequestAdvanceModal from '../components/RequestAdvanceModal';
 
+// Helper to format numbers as currency
+const formatCurrency = (num) => num != null ? num.toLocaleString('en-US') : '0';
+
 const StatusBadge = ({ status }) => {
     const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
     const statusMap = {
@@ -16,7 +19,7 @@ const StatusBadge = ({ status }) => {
 };
 
 export default function SalaryAdvancePage({ db, user }) {
-    const [eligibility, setEligibility] = useState({ maxAdvance: 0, currentSalaryDue: 0 });
+    const [eligibility, setEligibility] = useState({ maxAdvance: 0, maxTheoreticalAdvance: 0 });
     const [isLoadingEligibility, setIsLoadingEligibility] = useState(true);
     const [requests, setRequests] = useState([]);
     const [isLoadingRequests, setIsLoadingRequests] = useState(true);
@@ -97,7 +100,14 @@ export default function SalaryAdvancePage({ db, user }) {
                 ) : (
                     <div>
                         <p className="text-gray-300">You are eligible for a salary advance of up to:</p>
-                        <p className="text-4xl font-bold text-amber-400 mt-1">{eligibility.maxAdvance.toLocaleString()} THB</p>
+                        {/* --- UPDATED DISPLAY LOGIC --- */}
+                        <p className="text-4xl font-bold text-amber-400 mt-1">{formatCurrency(eligibility.maxAdvance)} THB</p>
+                        {eligibility.maxTheoreticalAdvance > eligibility.maxAdvance && (
+                             <p className="text-sm text-gray-400 mt-1">
+                                on a total of {formatCurrency(eligibility.maxTheoreticalAdvance)} THB this month
+                            </p>
+                        )}
+                         {/* --- END OF UPDATE --- */}
                     </div>
                 )}
             </div>
@@ -121,7 +131,7 @@ export default function SalaryAdvancePage({ db, user }) {
                             requests.map(req => (
                                 <tr key={req.id}>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()} THB</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{formatCurrency(req.amount)} THB</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm capitalize"><StatusBadge status={req.status} /></td>
                                 </tr>
                             ))
