@@ -6,6 +6,7 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
     const [formData, setFormData] = useState({
         amount: '',
         date: new Date().toISOString().split('T')[0],
+        status: 'pending', // NEW: Add status to form state
     });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -17,11 +18,13 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
             setFormData({
                 amount: existingAdvance.amount || '',
                 date: existingAdvance.date || new Date().toISOString().split('T')[0],
+                status: existingAdvance.status || 'pending', // UPDATED: Populate status in edit mode
             });
         } else {
             setFormData({
                 amount: '',
                 date: new Date().toISOString().split('T')[0],
+                status: 'pending', // Reset for new entries
             });
         }
     }, [existingAdvance, isEditMode, isOpen]);
@@ -33,7 +36,7 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
 
     const handleSave = async (e) => {
         e.preventDefault();
-        const { amount, date } = formData;
+        const { amount, date, status } = formData;
 
         if (!amount || !date) {
             setError('Please fill in all fields.');
@@ -53,15 +56,15 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
             date,
             payPeriodMonth,
             payPeriodYear,
-            isRepaid: false,
         };
 
         try {
             if (isEditMode) {
+                // UPDATED: Add status to the data being saved in edit mode
+                const updateData = { ...advanceData, status: status, isReadByStaff: false };
                 const advanceDocRef = doc(db, 'salary_advances', existingAdvance.id);
-                await updateDoc(advanceDocRef, advanceData);
+                await updateDoc(advanceDocRef, updateData);
             } else {
-                // --- KEY CHANGE: Added status and requestedBy for new advances ---
                 await addDoc(collection(db, 'salary_advances'), { 
                     ...advanceData, 
                     status: 'approved',
@@ -90,12 +93,29 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
                     <input type="date" id="date" value={formData.date} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md" />
                 </div>
                 
+                {/* NEW: Status dropdown, only shown in edit mode */}
+                {isEditMode && (
+                    <div>
+                        <label htmlFor="status" className="block text-sm font-medium text-gray-300">Status</label>
+                        <select
+                            id="status"
+                            value={formData.status}
+                            onChange={handleInputChange}
+                            className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"
+                        >
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                    </div>
+                )}
+                
                 {error && <p className="text-red-400 text-sm">{error}</p>}
                 
                 <div className="flex justify-end pt-4 space-x-4">
                     <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
                     <button type="submit" disabled={isSaving} className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500">
-                        {isSaving ? 'Saving...' : 'Save Advance'}
+                        {isSaving ? 'Saving...' : 'Save Changes'}
                     </button>
                 </div>
             </form>
