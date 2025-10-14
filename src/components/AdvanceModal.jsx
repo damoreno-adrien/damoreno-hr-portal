@@ -53,7 +53,7 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
             date,
             payPeriodMonth,
             payPeriodYear,
-            isRepaid: false, // Default value for new advances
+            isRepaid: false,
         };
 
         try {
@@ -61,7 +61,13 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
                 const advanceDocRef = doc(db, 'salary_advances', existingAdvance.id);
                 await updateDoc(advanceDocRef, advanceData);
             } else {
-                await addDoc(collection(db, 'salary_advances'), { ...advanceData, createdAt: serverTimestamp() });
+                // --- KEY CHANGE: Added status and requestedBy for new advances ---
+                await addDoc(collection(db, 'salary_advances'), { 
+                    ...advanceData, 
+                    status: 'approved',
+                    requestedBy: 'manager',
+                    createdAt: serverTimestamp() 
+                });
             }
             onClose();
         } catch (err) {
