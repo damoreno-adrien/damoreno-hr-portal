@@ -297,7 +297,6 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
-        // NEW: Create monthYear string for querying salary advances
         const monthYearStr = `${year}-${String(month + 1).padStart(2, '0')}`;
 
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
@@ -316,14 +315,18 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr);
-        // NEW: Add a query for existing advances this month
-        const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("monthYear", "==", monthYearStr).where("status", "==", "approved");
+        
+        // UPDATED: Use the 'in' operator to find advances that are 'approved' OR 'pending'.
+        const advancesQuery = db.collection("salary_advances")
+            .where("staffId", "==", staffId)
+            .where("monthYear", "==", monthYearStr)
+            .where("status", "in", ["approved", "pending"]);
 
         const [schedulesSnap, attendanceSnap, leaveSnap, advancesSnap] = await Promise.all([
             schedulesQuery.get(), 
             attendanceQuery.get(), 
             leaveQuery.get(),
-            advancesQuery.get() // NEW: Execute the new query
+            advancesQuery.get()
         ]);
         
         const schedules = schedulesSnap.docs.map(doc => doc.data());
@@ -342,20 +345,15 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const currentSalaryDue = Math.max(0, baseSalary - absenceDeductions);
         const maxTheoreticalAdvance = Math.floor(currentSalaryDue * 0.5);
 
-        // NEW: Calculate total of advances already taken this month
         const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
-
-        // NEW: Calculate the true available amount
         const availableAdvance = Math.max(0, maxTheoreticalAdvance - advancesAlreadyTaken);
         
-        // UPDATED: Return the new availableAdvance value
         return { 
-            maxAdvance: availableAdvance, // This is now the true available amount
+            maxAdvance: availableAdvance,
             currentSalaryDue, 
             baseSalary, 
             absenceDeductions, 
             unpaidAbsences,
-            // Also returning these for potential UI display
             maxTheoreticalAdvance,
             advancesAlreadyTaken
         };
