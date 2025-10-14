@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { collection, query, where, getDocs, onSnapshot, orderBy } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Modal from '../components/Modal';
-import PayslipDetailView from '../components/PayslipDetailView'; // New Import
+import PayslipDetailView from '../components/PayslipDetailView';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -19,6 +19,11 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     const [isFinalizing, setIsFinalizing] = useState(false);
     const [error, setError] = useState('');
     const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
+
+    // --- NEW: State for Payroll History ---
+    const [history, setHistory] = useState([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+    const [expandedRunId, setExpandedRunId] = useState(null);
 
     const handleGeneratePayroll = async () => {
         if (!companyConfig) { setError("Company settings are not loaded yet. Please wait and try again."); return; }
@@ -151,6 +156,47 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     };
     const years = [new Date().getFullYear(), new Date().getFullYear() - 1];
 
+    useEffect(() => {
+        if (!db) return;
+        setIsLoadingHistory(true);
+        const q = query(collection(db, 'payslips'), orderBy('generatedAt', 'desc'));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const payslips = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            const grouped = payslips.reduce((acc, payslip) => {
+                const key = `${payslip.payPeriodYear}-${payslip.payPeriodMonth}`;
+                if (!acc[key]) {
+                    acc[key] = {
+                        id: key,
+                        year: payslip.payPeriodYear,
+                        month: payslip.payPeriodMonth,
+                        payslips: [],
+                        totalAmount: 0,
+                    };
+                }
+                acc[key].payslips.push(payslip);
+                acc[key].totalAmount += payslip.netPay;
+                return acc;
+            }, {});
+
+            const historyArray = Object.values(grouped).sort((a, b) => {
+                if (a.year !== b.year) return b.year - a.year;
+                return b.month - a.month;
+            });
+            
+            setHistory(historyArray);
+            setIsLoadingHistory(false);
+        });
+
+        return () => unsubscribe();
+    }, [db]);
+    
+    const handleToggleExpand = (runId) => {
+        setExpandedRunId(prevId => (prevId === runId ? null : runId));
+    };
+
+
     return (
         <div>
             {selectedStaffDetails && (
@@ -159,39 +205,86 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 </Modal>
             )}
 
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Payroll Generation</h2>
-            <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col sm:flex-row sm:items-end gap-4">
-                <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">Pay Period</label><select value={payPeriod.month} onChange={e => setPayPeriod(p => ({ ...p, month: e.target.value }))} className="w-full p-2 bg-gray-700 rounded-md">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
-                <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1 invisible">Year</label><select value={payPeriod.year} onChange={e => setPayPeriod(p => ({ ...p, year: e.target.value }))} className="w-full p-2 bg-gray-700 rounded-md">{years.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
-                <button onClick={handleGeneratePayroll} disabled={isLoading} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">{isLoading ? 'Generating...' : 'Generate'}</button>
-                <button onClick={handleExportSummaryPDF} disabled={payrollData.length === 0} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 flex-shrink-0">Export Summary</button>
-            </div>
-            
-            {error && <p className="text-red-400 text-center mb-4">{error}</p>}
+            <section className="mb-12">
+                <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Run New Payroll</h2>
+                <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col sm:flex-row sm:items-end gap-4">
+                    <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">Pay Period</label><select value={payPeriod.month} onChange={e => setPayPeriod(p => ({ ...p, month: e.target.value }))} className="w-full p-2 bg-gray-700 rounded-md">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
+                    <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1 invisible">Year</label><select value={payPeriod.year} onChange={e => setPayPeriod(p => ({ ...p, year: e.target.value }))} className="w-full p-2 bg-gray-700 rounded-md">{years.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
+                    <button onClick={handleGeneratePayroll} disabled={isLoading} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">{isLoading ? 'Generating...' : 'Generate'}</button>
+                    <button onClick={handleExportSummaryPDF} disabled={payrollData.length === 0} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 flex-shrink-0">Export Summary</button>
+                </div>
+                
+                {error && <p className="text-red-400 text-center mb-4">{error}</p>}
 
-            <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
-                <table className="min-w-full">
-                    <thead className="bg-gray-700">
-                        <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Display Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-700">
-                        {payrollData.length > 0 ? payrollData.map(item => {
-                            const staffMember = staffList.find(s => s.id === item.id);
-                            const displayName = staffMember?.nickname || item.name;
+                <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
+                    <table className="min-w-full">
+                        <thead className="bg-gray-700">
+                            <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Display Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700">
+                            {payrollData.length > 0 ? payrollData.map(item => {
+                                const staffMember = staffList.find(s => s.id === item.id);
+                                const displayName = staffMember?.nickname || item.name;
 
-                            return (
-                                <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{displayName}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
-                                </tr>
-                            )
-                        }) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
-                    </tbody>
-                </table>
-            </div>
-            {payrollData.length > 0 && (<div className="mt-8 flex justify-end"><button onClick={handleFinalizePayroll} disabled={isFinalizing} className="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold disabled:bg-gray-600">{isFinalizing ? 'Finalizing...' : `Finalize Payroll for ${months[payPeriod.month-1]}`}</button></div>)}
+                                return (
+                                    <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{displayName}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
+                                    </tr>
+                                )
+                            }) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
+                        </tbody>
+                    </table>
+                </div>
+                {payrollData.length > 0 && (<div className="mt-8 flex justify-end"><button onClick={handleFinalizePayroll} disabled={isFinalizing} className="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold disabled:bg-gray-600">{isFinalizing ? 'Finalizing...' : `Finalize Payroll for ${months[payPeriod.month-1]}`}</button></div>)}
+            </section>
+
+            <hr className="border-gray-700 my-12" />
+
+            <section>
+                <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Finalized Payroll History</h2>
+                <div className="space-y-4">
+                    {isLoadingHistory ? (
+                        <p className="text-center text-gray-500">Loading history...</p>
+                    ) : history.length === 0 ? (
+                        <p className="text-center text-gray-500">No finalized payrolls found.</p>
+                    ) : (
+                        history.map(run => (
+                            <div key={run.id} className="bg-gray-800 rounded-lg shadow-lg">
+                                <div onClick={() => handleToggleExpand(run.id)} className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-700">
+                                    <div>
+                                        <p className="font-bold text-lg text-white">{months[run.month - 1]} {run.year}</p>
+                                        <p className="text-sm text-gray-400">{run.payslips.length} employees paid • Total: {formatCurrency(run.totalAmount)} THB</p>
+                                    </div>
+                                    {/* TODO: Add chevron icon for expand/collapse indicator */}
+                                </div>
+                                {expandedRunId === run.id && (
+                                    <div className="p-4 border-t border-gray-700">
+                                        <table className="min-w-full">
+                                            <thead className="bg-gray-700/50">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Employee</th>
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Net Pay</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-700">
+                                                {run.payslips.sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                                                    <tr key={p.id}>
+                                                        <td className="px-4 py-2 text-sm text-white">{p.name}</td>
+                                                        <td className="px-4 py-2 text-sm text-amber-400 font-semibold">{formatCurrency(p.netPay)} THB</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </div>
+            </section>
         </div>
     );
 };
