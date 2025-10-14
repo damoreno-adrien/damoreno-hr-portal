@@ -293,11 +293,10 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
     try {
         const today = new Date();
         const year = today.getFullYear();
-        const month = today.getMonth();
+        const month = today.getMonth(); // 0-indexed for JS (e.g., 9 for October)
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
-        const monthYearStr = `${year}-${String(month + 1).padStart(2, '0')}`;
 
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile could not be found.");
@@ -316,10 +315,11 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr);
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr);
         
-        // UPDATED: Use the 'in' operator to find advances that are 'approved' OR 'pending'.
+        // FINAL FIX: Query using the correct payPeriodYear and payPeriodMonth fields.
         const advancesQuery = db.collection("salary_advances")
             .where("staffId", "==", staffId)
-            .where("monthYear", "==", monthYearStr)
+            .where("payPeriodYear", "==", year)           // e.g., 2025
+            .where("payPeriodMonth", "==", month + 1)       // e.g., 10 for October
             .where("status", "in", ["approved", "pending"]);
 
         const [schedulesSnap, attendanceSnap, leaveSnap, advancesSnap] = await Promise.all([
