@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Modal from '../components/Modal';
 import PayslipDetailView from '../components/PayslipDetailView';
+import { TrashIcon } from '../components/Icons';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -24,6 +25,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     const [history, setHistory] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(true);
     const [expandedRunId, setExpandedRunId] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(null);
 
     const [selectedForPayroll, setSelectedForPayroll] = useState(new Set());
 
@@ -254,6 +256,25 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
         }
     };
+
+    const handleDeletePayrollRun = async (run) => {
+        if (!window.confirm(`Are you sure you want to delete the entire payroll for ${months[run.month - 1]} ${run.year}? This action cannot be undone.`)) {
+            return;
+        }
+
+        setIsDeleting(run.id);
+        try {
+            const functions = getFunctions();
+            const deletePayrollRun = httpsCallable(functions, 'deletePayrollRun');
+            const result = await deletePayrollRun({ payPeriod: { year: run.year, month: run.month } });
+            alert(result.data.result);
+        } catch (error) {
+            console.error("Error deleting payroll run:", error);
+            alert(`Failed to delete payroll run: ${error.message}`);
+        } finally {
+            setIsDeleting(null);
+        }
+    };
     
     const totalSelectedNetPay = useMemo(() => {
         return payrollData
@@ -355,10 +376,23 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     ) : (
                         history.map(run => (
                             <div key={run.id} className="bg-gray-800 rounded-lg shadow-lg">
-                                <div onClick={() => handleToggleExpand(run.id)} className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-700">
-                                    <div>
+                                <div className="p-4 flex justify-between items-center">
+                                    <div onClick={() => handleToggleExpand(run.id)} className="flex-grow cursor-pointer hover:bg-gray-700/50 -m-4 p-4 rounded-l-lg">
                                         <p className="font-bold text-lg text-white">{months[run.month - 1]} {run.year}</p>
                                         <p className="text-sm text-gray-400">{run.payslips.length} employees paid • Total: {formatCurrency(run.totalAmount)} THB</p>
+                                    </div>
+                                    <div className="flex-shrink-0 ml-4">
+                                        {isDeleting === run.id ? (
+                                            <div className="w-6 h-6 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); handleDeletePayrollRun(run); }}
+                                                className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
+                                                title="Delete this payroll run"
+                                            >
+                                                <TrashIcon className="h-5 w-5" />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                                 {expandedRunId === run.id && (
