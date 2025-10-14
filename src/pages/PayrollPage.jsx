@@ -8,7 +8,7 @@ import PayslipDetailView from '../components/PayslipDetailView';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { rate: 0, payType: 'Monthly' }; } const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) { return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' }; } return latestJob; };
+const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { rate: 0, payType: 'Monthly', department: 'N/A' }; } const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) { return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' }; } return latestJob; };
 const calculateHours = (start, end) => { if (!start?.toDate || !end?.toDate) return 0; const diffMillis = end.toDate() - start.toDate(); return diffMillis / (1000 * 60 * 60); };
 const formatTime = (timestamp) => timestamp ? timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'N/A';
 
@@ -20,7 +20,6 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
     const [error, setError] = useState('');
     const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
 
-    // --- NEW: State for Payroll History ---
     const [history, setHistory] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(true);
     const [expandedRunId, setExpandedRunId] = useState(null);
@@ -64,6 +63,9 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             
             const data = staffList.map(staff => {
                 const currentJob = getCurrentJob(staff);
+                // UPDATED: Create display name
+                const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
+
                 let basePay = 0, autoDeductions = 0;
                 
                 if (currentJob.payType === 'Monthly') {
@@ -112,6 +114,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 return {
                     id: staff.id, 
                     name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName,
+                    displayName: displayName, // UPDATED: Add displayName for UI
                     payType: currentJob.position,
                     totalEarnings, totalDeductions, netPay,
                     bonusInfo: { newStreak: bonusInfo.newStreak },
@@ -128,8 +131,9 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
         const doc = new jsPDF();
         doc.text(`Payroll Summary - ${months[payPeriod.month - 1]} ${payPeriod.year}`, 14, 15);
         autoTable(doc, {
-            head: [['Staff Name', 'Total Earnings', 'Total Deductions', 'Net Pay']],
-            body: payrollData.map(item => [item.name, formatCurrency(item.totalEarnings), formatCurrency(item.totalDeductions), formatCurrency(item.netPay)]),
+            // UPDATED: PDF head and body to use displayName
+            head: [['Staff', 'Total Earnings', 'Total Deductions', 'Net Pay']],
+            body: payrollData.map(item => [item.displayName, formatCurrency(item.totalEarnings), formatCurrency(item.totalDeductions), formatCurrency(item.netPay)]),
             startY: 20,
         });
         doc.save(`payroll_summary_${payPeriod.year}_${payPeriod.month}.pdf`);
@@ -208,8 +212,8 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             <section className="mb-12">
                 <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Run New Payroll</h2>
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col sm:flex-row sm:items-end gap-4">
-                    <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">Pay Period</label><select value={payPeriod.month} onChange={e => setPayPeriod(p => ({ ...p, month: e.target.value }))} className="w-full p-2 bg-gray-700 rounded-md">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
-                    <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1 invisible">Year</label><select value={payPeriod.year} onChange={e => setPayPeriod(p => ({ ...p, year: e.target.value }))} className="w-full p-2 bg-gray-700 rounded-md">{years.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
+                    <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">Pay Period</label><select value={payPeriod.month} onChange={e => setPayPeriod(p => ({ ...p, month: Number(e.target.value) }))} className="w-full p-2 bg-gray-700 rounded-md">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
+                    <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1 invisible">Year</label><select value={payPeriod.year} onChange={e => setPayPeriod(p => ({ ...p, year: Number(e.target.value) }))} className="w-full p-2 bg-gray-700 rounded-md">{years.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
                     <button onClick={handleGeneratePayroll} disabled={isLoading} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0">{isLoading ? 'Generating...' : 'Generate'}</button>
                     <button onClick={handleExportSummaryPDF} disabled={payrollData.length === 0} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 flex-shrink-0">Export Summary</button>
                 </div>
@@ -219,22 +223,19 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                     <table className="min-w-full">
                         <thead className="bg-gray-700">
-                            <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Display Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
+                            {/* UPDATED: Table header */}
+                            <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Earnings (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total Deductions (THB)</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Net Pay (THB)</th></tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {payrollData.length > 0 ? payrollData.map(item => {
-                                const staffMember = staffList.find(s => s.id === item.id);
-                                const displayName = staffMember?.nickname || item.name;
-
-                                return (
-                                    <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{displayName}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
-                                    </tr>
-                                )
-                            }) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
+                            {payrollData.length > 0 ? payrollData.map(item => (
+                                <tr key={item.id} onClick={() => setSelectedStaffDetails(item)} className="hover:bg-gray-700 cursor-pointer">
+                                    {/* UPDATED: Display Name */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.displayName}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalEarnings)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatCurrency(item.totalDeductions)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">{formatCurrency(item.netPay)}</td>
+                                </tr>
+                            )) : ( <tr><td colSpan="4" className="px-6 py-10 text-center text-gray-500">{isLoading ? 'Calculating...' : 'Select a pay period and generate the payroll.'}</td></tr>)}
                         </tbody>
                     </table>
                 </div>
@@ -258,24 +259,29 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                                         <p className="font-bold text-lg text-white">{months[run.month - 1]} {run.year}</p>
                                         <p className="text-sm text-gray-400">{run.payslips.length} employees paid • Total: {formatCurrency(run.totalAmount)} THB</p>
                                     </div>
-                                    {/* TODO: Add chevron icon for expand/collapse indicator */}
                                 </div>
                                 {expandedRunId === run.id && (
                                     <div className="p-4 border-t border-gray-700">
                                         <table className="min-w-full">
                                             <thead className="bg-gray-700/50">
                                                 <tr>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Employee</th>
+                                                    {/* UPDATED: History table header */}
+                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Staff</th>
                                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Net Pay</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-700">
-                                                {run.payslips.sort((a,b) => a.name.localeCompare(b.name)).map(p => (
-                                                    <tr key={p.id}>
-                                                        <td className="px-4 py-2 text-sm text-white">{p.name}</td>
-                                                        <td className="px-4 py-2 text-sm text-amber-400 font-semibold">{formatCurrency(p.netPay)} THB</td>
-                                                    </tr>
-                                                ))}
+                                                {run.payslips.sort((a,b) => a.name.localeCompare(b.name)).map(p => {
+                                                    // UPDATED: Look up staff details for display
+                                                    const staffMember = staffList.find(s => s.id === p.staffId);
+                                                    const displayName = staffMember ? `${staffMember.nickname || staffMember.firstName} (${getCurrentJob(staffMember).department || 'N/A'})` : p.name;
+                                                    return (
+                                                        <tr key={p.id}>
+                                                            <td className="px-4 py-2 text-sm text-white">{displayName}</td>
+                                                            <td className="px-4 py-2 text-sm text-amber-400 font-semibold">{formatCurrency(p.netPay)} THB</td>
+                                                        </tr>
+                                                    )
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>
