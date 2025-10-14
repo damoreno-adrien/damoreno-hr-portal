@@ -6,6 +6,7 @@ const cors = require("cors")({ origin: true });
 
 admin.initializeApp();
 const db = getFirestore();
+const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 exports.createUser = https.onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
@@ -465,6 +466,7 @@ exports.deletePayrollRun = https.onCall({ region: "us-central1" }, async (reques
 
     } catch (error) {
         console.error("Error deleting payroll run:", error);
+        // CORRECTED: Added the 'new' keyword
         throw new HttpsError("internal", "An unexpected error occurred while deleting the payroll run.", error.message);
     }
 });
