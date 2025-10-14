@@ -1,13 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { InfoIcon } from './Icons'; // Import an InfoIcon
 
 // Helper to format currency
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export default function PayslipDetailView({ details, companyConfig, payPeriod }) {
+    const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false); // State for the tooltip
+
     if (!details) return null;
+
+    const hasAbsenceDates = details.deductions.absenceDates && details.deductions.absenceDates.length > 0;
 
     const handleExportIndividualPDF = async () => {
         const doc = new jsPDF();
@@ -53,8 +58,14 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             ['Social Security Allowance', formatCurrency(details.earnings.ssoAllowance)],
             ...details.earnings.others.map(e => [e.description, formatCurrency(e.amount)])
         ];
+        
+        // UPDATED: Include absence dates in PDF
+        const absenceLabel = hasAbsenceDates
+            ? `Absences (${details.deductions.absenceDates.join(', ')})`
+            : 'Absences';
+            
         const deductionsBody = [
-            ['Absences', formatCurrency(details.deductions.absences)],
+            [absenceLabel, formatCurrency(details.deductions.absences)],
             ['Social Security', formatCurrency(details.deductions.sso)],
             ['Salary Advance', formatCurrency(details.deductions.advance)],
             ['Loan Repayment', formatCurrency(details.deductions.loan)],
@@ -88,7 +99,28 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                  <div>
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Deductions</h4>
                     <div className="space-y-1 text-sm">
-                        <div className="flex justify-between"><p>Absences:</p> <p>{formatCurrency(details.deductions.absences)}</p></div>
+                        {/* UPDATED: Absences line with info icon and tooltip */}
+                        <div className="flex justify-between relative">
+                            <div className="flex items-center gap-2">
+                                <p>Absences:</p>
+                                {hasAbsenceDates && (
+                                    <button onClick={() => setShowAbsenceTooltip(true)} className="text-gray-400 hover:text-white">
+                                        <InfoIcon className="h-4 w-4" />
+                                    </button>
+                                )}
+                            </div>
+                            <p>{formatCurrency(details.deductions.absences)}</p>
+                            
+                            {showAbsenceTooltip && (
+                                <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
+                                    <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
+                                    <ul className="list-disc list-inside text-xs text-gray-300">
+                                        {details.deductions.absenceDates.map(date => <li key={date}>{date}</li>)}
+                                    </ul>
+                                    <button onClick={() => setShowAbsenceTooltip(false)} className="mt-2 text-xs text-blue-400 hover:underline">Close</button>
+                                </div>
+                            )}
+                        </div>
                         <div className="flex justify-between"><p>Social Security:</p> <p>{formatCurrency(details.deductions.sso)}</p></div>
                         <div className="flex justify-between"><p>Salary Advance:</p> <p>{formatCurrency(details.deductions.advance)}</p></div>
                         <div className="flex justify-between"><p>Loan Repayment:</p> <p>{formatCurrency(details.deductions.loan)}</p></div>
