@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
 import { PlusIcon } from '../components/Icons';
@@ -26,8 +26,9 @@ export default function SalaryAdvancePage({ db, user }) {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        // Call the cloud function to get eligibility
+    // --- Refactored eligibility fetching into its own function ---
+    const fetchEligibility = useCallback(() => {
+        setIsLoadingEligibility(true);
         const functions = getFunctions();
         const calculateEligibility = httpsCallable(functions, 'calculateAdvanceEligibility');
         
@@ -38,6 +39,11 @@ export default function SalaryAdvancePage({ db, user }) {
                 setError("Could not determine eligibility. " + err.message);
             })
             .finally(() => setIsLoadingEligibility(false));
+    }, []); // useCallback ensures the function reference is stable
+
+    useEffect(() => {
+        // Call the new fetch function on initial load
+        fetchEligibility();
 
         // Listen for changes to salary advance requests
         const q = query(
@@ -50,7 +56,6 @@ export default function SalaryAdvancePage({ db, user }) {
             setRequests(requestData);
             setIsLoadingRequests(false);
 
-            // --- NEW: LOGIC TO CLEAR NOTIFICATIONS ---
             const unreadDocs = snapshot.docs.filter(doc => doc.data().isReadByStaff === false);
             if (unreadDocs.length > 0) {
                 const batch = writeBatch(db);
@@ -66,7 +71,7 @@ export default function SalaryAdvancePage({ db, user }) {
         });
 
         return () => unsubscribe();
-    }, [db, user]);
+    }, [db, user, fetchEligibility]);
 
     return (
         <div>
@@ -77,6 +82,7 @@ export default function SalaryAdvancePage({ db, user }) {
                     db={db}
                     user={user}
                     maxAdvance={eligibility.maxAdvance}
+                    onSuccess={fetchEligibility}
                 />
             )}
             <div className="flex justify-between items-center mb-8">
@@ -100,14 +106,12 @@ export default function SalaryAdvancePage({ db, user }) {
                 ) : (
                     <div>
                         <p className="text-gray-300">You are eligible for a salary advance of up to:</p>
-                        {/* --- UPDATED DISPLAY LOGIC --- */}
                         <p className="text-4xl font-bold text-amber-400 mt-1">{formatCurrency(eligibility.maxAdvance)} THB</p>
                         {eligibility.maxTheoreticalAdvance > eligibility.maxAdvance && (
                              <p className="text-sm text-gray-400 mt-1">
                                 on a total of {formatCurrency(eligibility.maxTheoreticalAdvance)} THB this month
                             </p>
                         )}
-                         {/* --- END OF UPDATE --- */}
                     </div>
                 )}
             </div>

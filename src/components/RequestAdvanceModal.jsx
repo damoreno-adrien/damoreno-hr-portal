@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import Modal from './Modal';
 
-export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdvance }) {
+export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdvance, onSuccess }) {
     const [amount, setAmount] = useState('');
     const [error, setError] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -40,10 +40,16 @@ export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdva
                 date: today.toISOString().split('T')[0],
                 payPeriodMonth: today.getMonth() + 1,
                 payPeriodYear: today.getFullYear(),
-                status: 'pending', // All staff requests start as pending
+                status: 'pending', // All staff requests start as pending 
                 requestedBy: 'staff',
                 createdAt: serverTimestamp(),
             });
+
+            // --- KEY CHANGE: Call the onSuccess function to trigger a refresh ---
+            if (onSuccess) {
+                onSuccess();
+            }
+            
             onClose();
         } catch (err) {
             console.error("Error submitting advance request:", err);
