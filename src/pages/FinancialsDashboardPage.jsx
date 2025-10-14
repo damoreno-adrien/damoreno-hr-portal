@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import Modal from '../components/Modal';
+import PayslipDetailView from '../components/PayslipDetailView';
 
 // Helper component for loading state
 const Spinner = () => (
@@ -8,15 +10,15 @@ const Spinner = () => (
     </div>
 );
 
-// A reusable card component, similar to the one in DashboardPage.jsx
-const DashboardCard = ({ title, children, className = '' }) => (
-    <div className={`bg-gray-800 rounded-lg shadow-lg ${className}`}>
+// A reusable card component, now with onClick support
+const DashboardCard = ({ title, children, className = '', onClick }) => (
+    <div className={`bg-gray-800 rounded-lg shadow-lg ${className} ${onClick ? 'cursor-pointer hover:bg-gray-700 transition-colors' : ''}`} onClick={onClick}>
         {title && <h3 className="text-lg font-semibold text-white mb-4 px-4 pt-4">{title}</h3>}
         <div className="p-4">{children}</div>
     </div>
 );
 
-// NEW: StatusBadge component for consistent styling
+// StatusBadge component for consistent styling
 const StatusBadge = ({ status }) => {
     const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full capitalize";
     const statusMap = {
@@ -30,10 +32,18 @@ const StatusBadge = ({ status }) => {
 // Helper to format numbers as currency
 const formatCurrency = (num) => num != null ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
-export default function FinancialsDashboardPage() {
+// Helper to format month and year from payslip data
+const formatMonthYear = (payslip) => {
+    if (!payslip || !payslip.payPeriodYear || !payslip.payPeriodMonth) return "Invalid Date";
+    const date = new Date(payslip.payPeriodYear, payslip.payPeriodMonth - 1);
+    return date.toLocaleString('default', { month: 'long', year: 'numeric' });
+};
+
+export default function FinancialsDashboardPage({ companyConfig }) {
     const [estimate, setEstimate] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [selectedPayslip, setSelectedPayslip] = useState(null);
 
     useEffect(() => {
         const fetchPayEstimate = async () => {
@@ -125,7 +135,20 @@ export default function FinancialsDashboardPage() {
 
                 {/* Side column for additional cards */}
                 <div className="space-y-8">
-                    {/* NEW: Current Salary Advance Card */}
+                    {/* Latest Payslip Card */}
+                    {estimate.latestPayslip && (
+                        <DashboardCard title="Latest Payslip" onClick={() => setSelectedPayslip(estimate.latestPayslip)}>
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <p className="text-gray-400 text-sm">{formatMonthYear(estimate.latestPayslip)}</p>
+                                    <p className="text-xl font-bold text-amber-400">฿{formatCurrency(estimate.latestPayslip.netPay)}</p>
+                                </div>
+                                <div className="text-blue-400 text-xs font-semibold">VIEW DETAILS</div>
+                            </div>
+                        </DashboardCard>
+                    )}
+
+                    {/* Current Salary Advance Card */}
                     <DashboardCard title="Current Salary Advance">
                         {estimate.currentAdvance ? (
                             <div className="flex justify-between items-center">
@@ -162,6 +185,20 @@ export default function FinancialsDashboardPage() {
 
     return (
         <div>
+            {selectedPayslip && (
+                <Modal 
+                    isOpen={true} 
+                    onClose={() => setSelectedPayslip(null)} 
+                    title={`Payslip for ${formatMonthYear(selectedPayslip)}`}
+                >
+                    <PayslipDetailView 
+                        details={selectedPayslip} 
+                        companyConfig={companyConfig} 
+                        payPeriod={{ month: selectedPayslip.payPeriodMonth, year: selectedPayslip.payPeriodYear }} 
+                    />
+                </Modal>
+            )}
+
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Financials Dashboard</h2>
             {renderContent()}
         </div>

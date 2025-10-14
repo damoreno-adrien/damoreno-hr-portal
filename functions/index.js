@@ -139,14 +139,17 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr).get();
+        const latestPayslipQuery = db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get();
 
-        const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap] = await Promise.all([
-            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery
+
+        const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([
+            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipQuery
         ]);
 
         if (!staffProfileSnap.exists) throw new HttpsError("not-found", "Staff profile not found.");
         if (!configSnap.exists) throw new HttpsError("not-found", "Company config not found.");
         
+        // --- 3. Process Fetched Data ---
         const staffProfile = staffProfileSnap.data();
         const companyConfig = configSnap.data();
         const latestJob = (staffProfile.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
@@ -158,27 +161,46 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const baseSalary = latestJob.rate || 0;
         const dailyRate = daysInMonth > 0 ? baseSalary / daysInMonth : 0;
 
-        // UPDATED: Get both the total amount and the first document's data
         const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
         const currentAdvance = advancesSnap.docs.length > 0 ? advancesSnap.docs[0].data() : null;
         
         const activeLoans = loansSnap.docs.map(doc => doc.data());
         const loanRepayment = activeLoans.reduce((sum, loan) => sum + loan.recurringPayment, 0);
+
+        // --- 4. Calculate Earnings ---
         const baseSalaryEarned = dailyRate * daysPassed;
+
+        // --- 5. Calculate Potential Bonus ---
         const bonusRules = companyConfig.attendanceBonus || {};
         const schedules = schedulesSnap.docs.map(doc => doc.data());
         const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
         let lateCount = 0;
         let absenceCount = 0;
-        schedules.forEach(schedule => { /* ... (bonus calculation logic unchanged) */ });
+        schedules.forEach(schedule => {
+            const attendance = attendanceRecords.get(schedule.date);
+            if (!attendance) { absenceCount++; }
+            else if (new Date(`${schedule.date}T${schedule.startTime}`) < attendance.checkInTime.toDate()) { lateCount++; }
+        });
         
         let potentialBonus = 0;
         const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences || 0) && lateCount <= (bonusRules.allowedLates || 0);
-        if (bonusOnTrack) { /* ... (bonus calculation logic unchanged) */ }
+        if (bonusOnTrack) {
+            const currentStreak = staffProfile.bonusStreak || 0;
+            const projectedStreak = currentStreak + 1;
+            if (projectedStreak === 1) potentialBonus = bonusRules.month1 || 0;
+            else if (projectedStreak === 2) potentialBonus = bonusRules.month2 || 0;
+            else potentialBonus = bonusRules.month3 || 0;
+        }
 
+        // --- 6. Calculate Deductions ---
         const approvedLeave = leaveSnap.docs.map(doc => doc.data());
         let unpaidAbsencesCount = 0;
-        schedules.forEach(schedule => { /* ... (absence calculation logic unchanged) */ });
+        schedules.forEach(schedule => {
+            const isOnLeave = approvedLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
+            if (!attendanceRecords.has(schedule.date) && !isOnLeave) {
+                unpaidAbsencesCount++;
+            }
+        });
         const absenceDeductions = unpaidAbsencesCount * dailyRate;
 
         const ssoRate = companyConfig.ssoRate || 0;
@@ -188,9 +210,16 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const totalEarnings = baseSalaryEarned + potentialBonus;
         const totalDeductions = absenceDeductions + ssoDeduction + advancesAlreadyTaken + loanRepayment;
 
+        // NEW: Extract the latest payslip data
+        const latestPayslip = latestPayslipSnap.docs.length > 0 ? { id: latestPayslipSnap.docs[0].id, ...latestPayslipSnap.docs[0].data() } : null;
+
+        // --- 7. Return Result ---
         return {
             baseSalaryEarned: baseSalaryEarned,
-            potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
+            potentialBonus: {
+                amount: potentialBonus,
+                onTrack: bonusOnTrack,
+            },
             deductions: {
                 absences: absenceDeductions,
                 socialSecurity: ssoDeduction,
@@ -199,7 +228,8 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
             },
             activeLoans: activeLoans,
             estimatedNetPay: totalEarnings - totalDeductions,
-            currentAdvance: currentAdvance, // NEW: Add the current advance details to the return object
+            currentAdvance: currentAdvance,
+            latestPayslip: latestPayslip, // Add the latest payslip to the return object
         };
 
     } catch (error) {
