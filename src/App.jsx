@@ -202,7 +202,7 @@ export default function App() {
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
             <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
                 <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4"><div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}><h1 className="text-2xl font-bold text-white whitespace-nowrap">Da Moreno HR</h1><p className="text-sm text-amber-400 capitalize">{userRole} Portal</p></div><button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white"><XIcon className="h-6 w-6"/></button></div>
-                <nav className="flex-1 space-y-2 px-4">
+                <nav className="flex-1 space-y-2 px-4 overflow-y-auto">
                     {userRole === 'manager' && (
                         <>
                            <NavLink page="dashboard" label="Dashboard" icon={<UserIcon className="h-5 w-5"/>} />
