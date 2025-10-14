@@ -22,6 +22,16 @@ import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIco
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
+const settingsSections = [
+    { id: 'company-info', title: 'Company Information' },
+    { id: 'attendance-bonus', title: 'Attendance Bonus' },
+    { id: 'financial-rules', title: 'Financial & Payroll Rules' },
+    { id: 'leave-entitlements', title: 'Leave Entitlements' },
+    { id: 'public-holidays', title: 'Public Holidays' },
+    { id: 'geofence-config', title: 'Geofence Configuration' },
+    { id: 'manage-departments', title: 'Manage Departments' },
+];
+
 export default function App() {
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
@@ -44,6 +54,7 @@ export default function App() {
     const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
     const [unreadAdvanceUpdatesCount, setUnreadAdvanceUpdatesCount] = useState(0);
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
+    const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
     useEffect(() => {
         try {
@@ -174,7 +185,7 @@ export default function App() {
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
-            case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} staffList={staffList} />;
+            case 'financials-dashboard': return <FinancialsDashboardPage companyConfig={companyConfig} />;
             case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
             case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
@@ -201,7 +212,40 @@ export default function App() {
                            <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5"/>} />
                            <NavLink page="financials" label="Financials" icon={<DollarSignIcon className="h-5 w-5"/>} badgeCount={pendingAdvanceCount} />
                            <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5"/>} />
-                           <NavLink page="settings" label="Settings" icon={<SettingsIcon className="h-5 w-5"/>} />
+                           
+                           <div>
+                                <button 
+                                    onClick={() => setIsSettingsMenuOpen(!isSettingsMenuOpen)}
+                                    className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === 'settings' ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}
+                                >
+                                    <div className="flex items-center">
+                                        <SettingsIcon className="h-5 w-5"/>
+                                        <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Settings</span>
+                                    </div>
+                                    {!isSidebarCollapsed && ((isSettingsMenuOpen || currentPage === 'settings') ? <ChevronUpIcon className="h-5 w-5"/> : <ChevronDownIcon className="h-5 w-5"/>)}
+                                </button>
+                                {(isSettingsMenuOpen || currentPage === 'settings') && !isSidebarCollapsed && (
+                                    <div className="py-2 pl-8 space-y-1">
+                                        {settingsSections.map(section => (
+                                            <a 
+                                                key={section.id}
+                                                href={`#${section.id}`}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    setCurrentPage('settings');
+                                                    setIsMobileMenuOpen(false);
+                                                    setTimeout(() => {
+                                                        document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth' });
+                                                    }, 50);
+                                                }}
+                                                className="block text-sm text-gray-400 hover:text-white p-2 rounded-lg"
+                                            >
+                                                {section.title}
+                                            </a>
+                                        ))}
+                                    </div>
+                                )}
+                           </div>
                         </>
                     )}
                      {userRole === 'staff' && (
@@ -220,9 +264,9 @@ export default function App() {
                                         <DollarSignIcon className="h-5 w-5"/>
                                         <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Financials</span>
                                     </div>
-                                    {!isSidebarCollapsed && (isFinancialsMenuOpen ? <ChevronUpIcon className="h-5 w-5"/> : <ChevronDownIcon className="h-5 w-5"/>)}
+                                    {!isSidebarCollapsed && ((isFinancialsMenuOpen || ['financials-dashboard', 'salary-advance', 'my-payslips'].includes(currentPage)) ? <ChevronUpIcon className="h-5 w-5"/> : <ChevronDownIcon className="h-5 w-5"/>)}
                                 </button>
-                                {isFinancialsMenuOpen && !isSidebarCollapsed && (
+                                {(isFinancialsMenuOpen || ['financials-dashboard', 'salary-advance', 'my-payslips'].includes(currentPage)) && !isSidebarCollapsed && (
                                     <div className="py-2 pl-8 space-y-2">
                                         <NavLink page="financials-dashboard" label="Dashboard" icon={<BarChartIcon className="h-5 w-5"/>} />
                                         <NavLink page="salary-advance" label="Salary Advance" icon={<SendIcon className="h-5 w-5"/>} badgeCount={unreadAdvanceUpdatesCount} />
