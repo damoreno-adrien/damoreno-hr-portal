@@ -1,90 +1,101 @@
-import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { doc, addDoc, updateDoc, collection, serverTimestamp } from 'firebase/firestore';
 import Modal from './Modal';
 
-export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdvance, onSuccess }) {
-    const [amount, setAmount] = useState('');
-    const [error, setError] = useState('');
+export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdvance }) {
+    const [formData, setFormData] = useState({
+        amount: '',
+        date: new Date().toISOString().split('T')[0],
+    });
     const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
 
-    const handleAmountChange = (e) => {
-        const value = e.target.value;
-        if (value > maxAdvance) {
-            setError(`Amount cannot exceed the maximum of ${maxAdvance.toLocaleString()} THB.`);
+    const isEditMode = Boolean(existingAdvance);
+
+    useEffect(() => {
+        if (isEditMode) {
+            setFormData({
+                amount: existingAdvance.amount || '',
+                date: existingAdvance.date || new Date().toISOString().split('T')[0],
+            });
         } else {
-            setError('');
+            setFormData({
+                amount: '',
+                date: new Date().toISOString().split('T')[0],
+            });
         }
-        setAmount(value);
+    }, [existingAdvance, isEditMode, isOpen]);
+
+    const handleInputChange = (e) => {
+        const { id, value } = e.target;
+        setFormData(prev => ({ ...prev, [id]: value }));
     };
 
-    const handleSubmit = async (e) => {
+    const handleSave = async (e) => {
         e.preventDefault();
-        const requestedAmount = Number(amount);
-        if (!requestedAmount || requestedAmount <= 0) {
-            setError("Please enter a valid amount.");
-            return;
-        }
-        if (requestedAmount > maxAdvance) {
-            setError(`Amount cannot exceed the maximum of ${maxAdvance.toLocaleString()} THB.`);
+        const { amount, date } = formData;
+
+        if (!amount || !date) {
+            setError('Please fill in all fields.');
             return;
         }
 
         setIsSaving(true);
         setError('');
 
-        try {
-            const today = new Date();
-            await addDoc(collection(db, 'salary_advances'), {
-                staffId: user.uid,
-                amount: requestedAmount,
-                date: today.toISOString().split('T')[0],
-                payPeriodMonth: today.getMonth() + 1,
-                payPeriodYear: today.getFullYear(),
-                status: 'pending', // All staff requests start as pending 
-                requestedBy: 'staff',
-                createdAt: serverTimestamp(),
-            });
+        const selectedDate = new Date(date);
+        const payPeriodMonth = selectedDate.getMonth() + 1;
+        const payPeriodYear = selectedDate.getFullYear();
 
-            // --- KEY CHANGE: Call the onSuccess function to trigger a refresh ---
-            if (onSuccess) {
-                onSuccess();
+        const advanceData = {
+            staffId: staffId,
+            amount: Number(amount),
+            date,
+            payPeriodMonth,
+            payPeriodYear,
+            isRepaid: false,
+        };
+
+        try {
+            if (isEditMode) {
+                const advanceDocRef = doc(db, 'salary_advances', existingAdvance.id);
+                await updateDoc(advanceDocRef, advanceData);
+            } else {
+                // --- KEY CHANGE: Added status and requestedBy for new advances ---
+                await addDoc(collection(db, 'salary_advances'), { 
+                    ...advanceData, 
+                    status: 'approved',
+                    requestedBy: 'manager',
+                    createdAt: serverTimestamp() 
+                });
             }
-            
             onClose();
         } catch (err) {
-            console.error("Error submitting advance request:", err);
-            setError("Could not submit request. Please try again later.");
+            console.error(err);
+            setError('Failed to save the salary advance. Please try again.');
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Request Salary Advance">
-            <form onSubmit={handleSubmit} className="space-y-4">
+        <Modal isOpen={isOpen} onClose={onClose} title={isEditMode ? 'Edit Salary Advance' : 'Add Salary Advance'}>
+            <form onSubmit={handleSave} className="space-y-4">
                 <div>
-                    <p className="text-sm text-gray-400">You are eligible for an advance up to:</p>
-                    <p className="text-3xl font-bold text-amber-400 mb-4">{maxAdvance.toLocaleString()} THB</p>
-                    
-                    <label htmlFor="amount" className="block text-sm font-medium text-gray-300">Requested Amount (THB)</label>
-                    <input 
-                        type="number" 
-                        id="amount" 
-                        value={amount} 
-                        onChange={handleAmountChange}
-                        className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"
-                        placeholder="Enter amount"
-                        max={maxAdvance}
-                        required
-                    />
+                    <label htmlFor="amount" className="block text-sm font-medium text-gray-300">Amount (THB)</label>
+                    <input type="number" id="amount" value={formData.amount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md" />
+                </div>
+                <div>
+                    <label htmlFor="date" className="block text-sm font-medium text-gray-300">Date of Advance</label>
+                    <input type="date" id="date" value={formData.date} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md" />
                 </div>
                 
                 {error && <p className="text-red-400 text-sm">{error}</p>}
-
+                
                 <div className="flex justify-end pt-4 space-x-4">
                     <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
-                    <button type="submit" disabled={isSaving || error} className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500">
-                        {isSaving ? 'Submitting...' : 'Submit Request'}
+                    <button type="submit" disabled={isSaving} className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500">
+                        {isSaving ? 'Saving...' : 'Save Advance'}
                     </button>
                 </div>
             </form>
