@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon, BriefcaseIcon, TrashIcon } from '../components/Icons';
 
-// Helper function to get the correct display name
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
@@ -33,7 +32,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
             const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             requests.sort((a,b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
             
-            // For managers, find the latest display name for each request
             if (userRole === 'manager') {
                 const hydratedRequests = requests.map(req => {
                     const staffMember = staffList.find(s => s.id === req.staffId);
@@ -65,12 +63,26 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
 
     useEffect(() => {
         if (userRole === 'manager') {
-            const filtered = allLeaveRequests.filter(req => req.status === filter);
+            const filtered = allLeaveRequests.filter(req => {
+                if (req.status !== filter) return false;
+                
+                // For pending requests, only show them if the staff member is still active
+                if (filter === 'pending') {
+                    const staffMember = staffList.find(s => s.id === req.staffId);
+                    // If we can't find the staff member, or they are inactive, hide the pending request.
+                    if (!staffMember || staffMember.status === 'inactive') {
+                        return false;
+                    }
+                }
+                
+                // For approved/rejected, show all for historical context
+                return true; 
+            });
             setFilteredLeaveRequests(filtered);
         } else {
             setFilteredLeaveRequests(allLeaveRequests);
         }
-    }, [filter, allLeaveRequests, userRole]);
+    }, [filter, allLeaveRequests, userRole, staffList]);
 
 
     const handleUpdateRequest = async (id, newStatus) => {
@@ -102,6 +114,9 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     const openNewRequestModal = () => { setRequestToEdit(null); setIsModalOpen(true); };
     const closeModal = () => { setIsModalOpen(false); setRequestToEdit(null); };
     
+    // Create a filtered list of only active staff for the "New Request" modal
+    const activeStaffList = useMemo(() => staffList.filter(s => s.status !== 'inactive'), [staffList]);
+
     const StatusBadge = ({ status }) => {
         const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
         if (status === 'approved') return <span className={`${baseClasses} bg-green-600 text-green-100`}>Approved</span>;
@@ -113,7 +128,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         return (
             <div>
                 <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
-                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={staffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
+                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={activeStaffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
                 </Modal>
                 <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-8">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Leave Management</h2>
