@@ -18,7 +18,7 @@ import FinancialsPage from './pages/FinancialsPage';
 import SalaryAdvancePage from './pages/SalaryAdvancePage';
 import FinancialsDashboardPage from './pages/FinancialsDashboardPage';
 import MyPayslipsPage from './pages/MyPayslipsPage';
-import Sidebar from './components/Sidebar'; // NEW: Import Sidebar
+import Sidebar from './components/Sidebar';
 import { LogInIcon } from './components/Icons';
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
@@ -187,7 +187,8 @@ export default function App() {
     };
 
     return (
-        <div className="relative min-h-screen md:flex bg-gray-900 text-white font-sans">
+        // UPDATED: Changed min-h-screen to h-screen and added overflow-hidden for desktop layout
+        <div className="relative h-screen md:flex overflow-hidden bg-gray-900 text-white font-sans">
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
             
             <Sidebar 
@@ -211,8 +212,16 @@ export default function App() {
             />
 
             <div className="flex-1 flex flex-col overflow-hidden">
-                <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center"><button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white"><HamburgerIcon className="h-6 w-6" /></button><h1 className="text-lg font-bold text-white">Da Moreno HR</h1></header>
-                <main className="flex-1 p-6 md:p-10 overflow-auto">{renderPageContent()}</main>
+                {/* UPDATED: Added sticky, top-0, and z-10 for mobile header */}
+                <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center sticky top-0 z-10">
+                    <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white">
+                        <HamburgerIcon className="h-6 w-6" />
+                    </button>
+                    <h1 className="text-lg font-bold text-white">Da Moreno HR</h1>
+                </header>
+                <main className="flex-1 p-6 md:p-10 overflow-auto">
+                    {renderPageContent()}
+                </main>
             </div>
         </div>
     );
