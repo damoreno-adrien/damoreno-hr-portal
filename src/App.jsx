@@ -5,6 +5,7 @@ import { getFirestore, doc, onSnapshot, collection, query, where } from 'firebas
 import { getFunctions } from "firebase/functions";
 import useAuth from './hooks/useAuth';
 import useCompanyConfig from './hooks/useCompanyConfig';
+import useStaffList from './hooks/useStaffList'; // NEW: Import hook
 
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
@@ -30,7 +31,6 @@ export default function App() {
     const [db, setDb] = useState(null);
     const [loginError, setLoginError] = useState('');
     const [currentPage, setCurrentPage] = useState('dashboard');
-    const [staffList, setStaffList] = useState([]);
     const [staffProfile, setStaffProfile] = useState(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -45,6 +45,7 @@ export default function App() {
 
     const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db);
     const companyConfig = useCompanyConfig(db);
+    const staffList = useStaffList(db, user); // NEW: Use the hook
 
     useEffect(() => {
         try {
@@ -64,7 +65,7 @@ export default function App() {
             console.error("Firebase Initialization Error:", error);
         }
     }, []);
-
+    
     useEffect(() => {
         if (userRole === 'staff' && db && user) {
             const staffProfileRef = doc(db, 'staff_profiles', user.uid);
@@ -108,18 +109,7 @@ export default function App() {
         }
     }, [userRole, db, user]);
 
-    useEffect(() => {
-        if (db && user) {
-            const staffCollectionRef = collection(db, 'staff_profiles');
-            const unsubscribeStaff = onSnapshot(staffCollectionRef, (querySnapshot) => {
-                const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                setStaffList(list);
-            });
-            return () => unsubscribeStaff();
-        } else {
-            setStaffList([]);
-        }
-    }, [db, user]);
+    // REMOVED: The useEffect for staffList is now in the hook.
 
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
