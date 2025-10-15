@@ -39,11 +39,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             const year = payPeriod.year;
             const month = payPeriod.month - 1;
 
-            const finalizedPayslipsSnap = await getDocs(query(
-                collection(db, "payslips"),
-                where("payPeriodYear", "==", year),
-                where("payPeriodMonth", "==", month + 1)
-            ));
+            const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
             const staffToProcess = staffList.filter(staff => !finalizedStaffIds.has(staff.id));
@@ -68,7 +64,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             ] = await Promise.all([
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]))),
                 getDocs(query(collection(db, "schedules"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]))),
-                getDocs(query(collection(db, "leave_requests"), where("status", "==", "approved"), where("startDate", ">=", `${year}-01-01`), where("endDate", "<=", `${year}-12-31`))),
+                getDocs(query(collection(db, "leave_requests"), where("status", "==", "approved"))), // Fetch all approved leave
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1))),
@@ -87,41 +83,82 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
             const data = staffToProcess.map(staff => {
                 const currentJob = getCurrentJob(staff);
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
-                let basePay = 0, autoDeductions = 0;
-                let unpaidAbsenceDates = []; // NEW: Array to store absence dates
-                
+                let basePay = 0;
+                let autoDeductions = 0;
+                let leavePayout = 0;
+                let unpaidAbsenceDates = [];
+
+                const staffEndDate = staff.endDate ? new Date(staff.endDate + 'T00:00:00') : null;
+                const isLastMonth = staffEndDate && staffEndDate.getFullYear() === year && staffEndDate.getMonth() === month;
+
                 if (currentJob.payType === 'Monthly') {
-                    basePay = currentJob.rate || 0;
-                    const dailyRate = basePay / daysInMonth;
+                    const fullMonthSalary = currentJob.rate || 0;
+                    const dailyRate = fullMonthSalary / daysInMonth;
+
+                    if (isLastMonth) {
+                        // --- FINAL PAY LOGIC ---
+                        const daysWorked = staffEndDate.getDate();
+                        basePay = dailyRate * daysWorked;
+
+                        const hireDate = new Date(staff.startDate);
+                        const yearsOfService = (staffEndDate - hireDate) / (1000 * 60 * 60 * 24 * 365);
+                        let annualLeaveEntitlement = 0;
+                        if (yearsOfService >= 1) { annualLeaveEntitlement = companyConfig.annualLeaveDays; }
+                        else if (hireDate.getFullYear() === year) { const monthsWorked = staffEndDate.getMonth() - hireDate.getMonth() + 1; annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked); }
+
+                        const pastHolidays = companyConfig.publicHolidays.filter(h => new Date(h.date) <= staffEndDate && new Date(h.date).getFullYear() === year);
+                        const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
+
+                        const staffLeaveTaken = allLeaveData.filter(l => l.staffId === staff.id);
+                        let usedAnnual = 0, usedPublicHoliday = 0;
+                        staffLeaveTaken.forEach(l => {
+                            if (new Date(l.startDate) <= staffEndDate) {
+                                if (l.leaveType === 'Annual Leave') usedAnnual += l.totalDays;
+                                if (l.leaveType === 'Public Holiday (In Lieu)') usedPublicHoliday += l.totalDays;
+                            }
+                        });
+
+                        const finalAnnualBalance = Math.max(0, annualLeaveEntitlement - usedAnnual);
+                        const finalHolidayCredit = Math.max(0, earnedCredits - usedPublicHoliday);
+                        leavePayout = (finalAnnualBalance + finalHolidayCredit) * dailyRate;
+                    } else {
+                        // --- NORMAL MONTH LOGIC ---
+                        basePay = fullMonthSalary;
+                    }
+
                     const monthLeave = allLeaveData.filter(l => l.staffId === staff.id && new Date(l.startDate) <= endDate && new Date(l.endDate) >= startDate);
                     const staffSchedules = scheduleData.filter(s => s.staffId === staff.id);
-
                     staffSchedules.forEach(schedule => {
+                        const scheduleDate = new Date(schedule.date + 'T00:00:00');
+                        // Only count absences if it's before or on their end date
+                        if (isLastMonth && scheduleDate > staffEndDate) return;
+                        
                         const wasOnLeave = monthLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
                         const didAttend = attendanceData.has(`${staff.id}_${schedule.date}`);
                         if (!didAttend && !wasOnLeave && !publicHolidays.includes(schedule.date)) {
-                            unpaidAbsenceDates.push(schedule.date); // NEW: Add date to the list
+                            unpaidAbsenceDates.push(schedule.date);
                         }
                     });
                     autoDeductions = dailyRate * unpaidAbsenceDates.length;
-                } else if (currentJob.payType === 'Hourly') { 
-                    // ... (hourly logic is unchanged)
                 }
-
+                
+                // ... (rest of earnings/deductions calculation is mostly unchanged)
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
                 const otherEarnings = staffAdjustments.filter(a => a.type === 'Earning').reduce((sum, item) => sum + item.amount, 0);
                 const otherDeductions = staffAdjustments.filter(a => a.type === 'Deduction').reduce((sum, item) => sum + item.amount, 0);
 
                 const bonusInfo = bonusMap.get(staff.id) || { bonusAmount: 0, newStreak: 0 };
-                const attendanceBonus = bonusInfo.bonusAmount;
-                const grossPayForSSO = basePay + otherEarnings;
+                const attendanceBonus = isLastMonth ? 0 : bonusInfo.bonusAmount; // No bonus on final pay
+                
+                // On final pay, SSO is calculated on pro-rated salary + other earnings. Otherwise, full salary.
+                const grossPayForSSO = (isLastMonth ? basePay : (currentJob.rate || 0)) + otherEarnings + leavePayout;
 
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
                 const ssoCap = companyConfig.ssoCap || 750;
                 const ssoDeduction = Math.min(grossPayForSSO * ssoRate, ssoCap);
                 const ssoAllowance = ssoDeduction;
 
-                const totalEarnings = basePay + attendanceBonus + otherEarnings + ssoAllowance;
+                const totalEarnings = basePay + attendanceBonus + otherEarnings + ssoAllowance + leavePayout;
                 
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
@@ -135,11 +172,11 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                     displayName: displayName,
                     payType: currentJob.position,
                     totalEarnings, totalDeductions, netPay,
-                    bonusInfo: { newStreak: bonusInfo.newStreak },
-                    earnings: { basePay, attendanceBonus, ssoAllowance, others: staffAdjustments.filter(a => a.type === 'Earning') },
+                    bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak },
+                    earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout, others: staffAdjustments.filter(a => a.type === 'Earning') },
                     deductions: { 
                         absences: autoDeductions, 
-                        absenceDates: unpaidAbsenceDates, // NEW: Add dates to payslip data
+                        absenceDates: unpaidAbsenceDates,
                         sso: ssoDeduction, 
                         advance: advanceDeduction, 
                         loan: loanDeduction, 
