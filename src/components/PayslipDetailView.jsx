@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { InfoIcon } from './Icons'; // Import an InfoIcon
+import { InfoIcon } from './Icons';
 
-// Helper to format currency
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export default function PayslipDetailView({ details, companyConfig, payPeriod }) {
-    const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false); // State for the tooltip
+    const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false);
+    const [showLeaveTooltip, setShowLeaveTooltip] = useState(false);
 
     if (!details) return null;
 
     const hasAbsenceDates = details.deductions.absenceDates && details.deductions.absenceDates.length > 0;
+    const hasLeavePayout = details.earnings.leavePayout > 0 && details.earnings.leavePayoutDetails;
 
     const handleExportIndividualPDF = async () => {
         const doc = new jsPDF();
@@ -52,14 +53,17 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             styles: { fontSize: 10 },
         });
 
-        const earningsBody = [
+        let earningsBody = [
             ['Base Pay', formatCurrency(details.earnings.basePay)],
             ['Attendance Bonus', formatCurrency(details.earnings.attendanceBonus)],
             ['Social Security Allowance', formatCurrency(details.earnings.ssoAllowance)],
             ...details.earnings.others.map(e => [e.description, formatCurrency(e.amount)])
         ];
+
+        if (hasLeavePayout) {
+            earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
+        }
         
-        // UPDATED: Include absence dates in PDF
         const absenceLabel = hasAbsenceDates
             ? `Absences (${details.deductions.absenceDates.join(', ')})`
             : 'Absences';
@@ -90,6 +94,31 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Earnings</h4>
                     <div className="space-y-1 text-sm">
                         <div className="flex justify-between"><p>Base Pay:</p> <p>{formatCurrency(details.earnings.basePay)}</p></div>
+                        
+                        {hasLeavePayout && (
+                             <div className="flex justify-between relative">
+                                <div className="flex items-center gap-2">
+                                    <p>Leave Payout:</p>
+                                    <button onClick={() => setShowLeaveTooltip(true)} className="text-gray-400 hover:text-white">
+                                        <InfoIcon className="h-4 w-4" />
+                                    </button>
+                                </div>
+                                <p>{formatCurrency(details.earnings.leavePayout)}</p>
+                                
+                                {showLeaveTooltip && (
+                                    <div className="absolute top-6 left-0 z-20 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-56">
+                                        <p className="font-bold text-xs mb-2">Leave Payout Details</p>
+                                        <div className="text-xs text-gray-300 space-y-1">
+                                            <p>Annual Leave: {details.earnings.leavePayoutDetails.annualDays} days</p>
+                                            <p>Holiday Credits: {details.earnings.leavePayoutDetails.holidayCredits} days</p>
+                                            <p className="border-t border-gray-700 mt-1 pt-1">@ {formatCurrency(details.earnings.leavePayoutDetails.dailyRate)} / day</p>
+                                        </div>
+                                        <button onClick={() => setShowLeaveTooltip(false)} className="mt-2 text-xs text-blue-400 hover:underline">Close</button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <div className="flex justify-between"><p>Attendance Bonus:</p> <p>{formatCurrency(details.earnings.attendanceBonus)}</p></div>
                         <div className="flex justify-between"><p>SSO Allowance:</p> <p>{formatCurrency(details.earnings.ssoAllowance)}</p></div>
                         {details.earnings.others.map((e, i) => <div key={i} className="flex justify-between"><p>{e.description}:</p> <p>{formatCurrency(e.amount)}</p></div>)}
@@ -99,7 +128,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                  <div>
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Deductions</h4>
                     <div className="space-y-1 text-sm">
-                        {/* UPDATED: Absences line with info icon and tooltip */}
                         <div className="flex justify-between relative">
                             <div className="flex items-center gap-2">
                                 <p>Absences:</p>
