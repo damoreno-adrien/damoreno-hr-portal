@@ -4,7 +4,6 @@ import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
 import { PlusIcon } from '../components/Icons';
 
-// NEW: A StatusBadge component for consistent styling
 const StatusBadge = ({ status }) => {
     const statusClass = status === 'inactive'
         ? "bg-red-500/20 text-red-300"
@@ -20,7 +19,7 @@ const StatusBadge = ({ status }) => {
 export default function StaffManagementPage({ auth, db, staffList, departments, userRole }) {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(null);
-    const [showArchived, setShowArchived] = useState(false); // NEW: State for filtering
+    const [showArchived, setShowArchived] = useState(false);
 
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
@@ -31,23 +30,39 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return staff.fullName;
     };
 
-    const getCurrentPosition = (staff) => {
+    const getCurrentJob = (staff) => {
         if (staff.jobHistory && staff.jobHistory.length > 0) {
-            return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0].position;
+            return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
         }
-        return 'N/A';
+        return { position: 'N/A', department: 'Unassigned' };
     };
     
-    // NEW: Memoized and filtered list of staff to display
-    const staffToDisplay = useMemo(() => {
-        return staffList
-            .filter(staff => {
-                // If showArchived is true, show everyone. Otherwise, only show staff who are NOT inactive.
-                if (showArchived) return true;
-                return staff.status !== 'inactive';
-            })
-            .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
+    // UPDATED: Memoized and GROUPED list of staff to display
+    const groupedStaff = useMemo(() => {
+        const filteredList = staffList.filter(staff => {
+            if (showArchived) return true;
+            return staff.status !== 'inactive';
+        });
+
+        const grouped = filteredList.reduce((acc, staff) => {
+            const department = getCurrentJob(staff).department;
+            if (!acc[department]) {
+                acc[department] = [];
+            }
+            acc[department].push(staff);
+            return acc;
+        }, {});
+
+        // Sort staff within each department
+        Object.keys(grouped).forEach(dept => {
+            grouped[dept].sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
+        });
+
+        return grouped;
     }, [staffList, showArchived]);
+    
+    // Create a sorted list of departments for rendering
+    const sortedDepartments = useMemo(() => Object.keys(groupedStaff).sort(), [groupedStaff]);
     
     useEffect(() => {
         if (selectedStaff) {
@@ -71,7 +86,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
                 <div className="flex items-center space-x-4">
-                    {/* NEW: Toggle to show archived staff */}
                     <div className="flex items-center">
                         <input
                             id="showArchived"
@@ -99,20 +113,26 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-700">
-                        {/* UPDATED: Map over the filtered/sorted list */}
-                        {staffToDisplay.map(staff => (
-                            <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{getCurrentPosition(staff)}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.startDate}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                    {/* UPDATED: Dynamically show status */}
-                                    <StatusBadge status={staff.status} />
-                                </td>
+                    {/* UPDATED: Map over departments and then staff */}
+                    {sortedDepartments.map(department => (
+                        <tbody key={department} className="divide-y divide-gray-700">
+                            <tr className="bg-gray-900">
+                                <th colSpan="4" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
+                                    {department}
+                                </th>
                             </tr>
-                        ))}
-                    </tbody>
+                            {groupedStaff[department].map(staff => (
+                                <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{getCurrentJob(staff).position}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{staff.startDate}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                        <StatusBadge status={staff.status} />
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    ))}
                 </table>
             </div>
         </div>
