@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/Modal';
 import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
-import { PlusIcon } from '../components/Icons';
+import { PlusIcon, DownloadIcon } from '../components/Icons'; // Assuming DownloadIcon exists
 
 const StatusBadge = ({ status }) => {
     const statusClass = status === 'inactive'
@@ -20,6 +21,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
+    const [isExporting, setIsExporting] = useState(false); // NEW state for export
 
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
@@ -37,7 +39,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return { position: 'N/A', department: 'Unassigned' };
     };
     
-    // UPDATED: Memoized and GROUPED list of staff to display
     const groupedStaff = useMemo(() => {
         const filteredList = staffList.filter(staff => {
             if (showArchived) return true;
@@ -53,7 +54,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             return acc;
         }, {});
 
-        // Sort staff within each department
         Object.keys(grouped).forEach(dept => {
             grouped[dept].sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
         });
@@ -61,7 +61,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return grouped;
     }, [staffList, showArchived]);
     
-    // Create a sorted list of departments for rendering
     const sortedDepartments = useMemo(() => Object.keys(groupedStaff).sort(), [groupedStaff]);
     
     useEffect(() => {
@@ -70,6 +69,39 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             if (updatedStaff) { setSelectedStaff(updatedStaff); }
         }
     }, [staffList, selectedStaff?.id]);
+    
+    // NEW: Handler for exporting data
+    const handleExport = async () => {
+        setIsExporting(true);
+        try {
+            const functions = getFunctions();
+            const exportStaffData = httpsCallable(functions, 'exportStaffData');
+            const result = await exportStaffData();
+            const csvData = result.data.csvData;
+
+            if (!csvData) {
+                alert("No staff data to export.");
+                return;
+            }
+
+            const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            const today = new Date().toISOString().split('T')[0];
+            link.setAttribute("download", `staff_export_${today}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+        } catch (error) {
+            console.error("Error exporting data:", error);
+            alert("Failed to export staff data. Please try again.");
+        } finally {
+            setIsExporting(false);
+        }
+    };
 
     return (
         <div>
@@ -96,6 +128,11 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
+                    {/* NEW: Export Button */}
+                    <button onClick={handleExport} disabled={isExporting} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
+                        <DownloadIcon className="h-5 w-5 mr-2" />
+                        {isExporting ? 'Exporting...' : 'Export to CSV'}
+                    </button>
                     <button onClick={() => setIsAddModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0">
                         <PlusIcon className="h-5 w-5 mr-2" />
                         Invite New Staff
@@ -113,7 +150,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
                         </tr>
                     </thead>
-                    {/* UPDATED: Map over departments and then staff */}
                     {sortedDepartments.map(department => (
                         <tbody key={department} className="divide-y divide-gray-700">
                             <tr className="bg-gray-900">
