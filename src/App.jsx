@@ -187,8 +187,8 @@ export default function App() {
     };
 
     return (
-        // UPDATED: Changed min-h-screen to h-screen and added overflow-hidden for desktop layout
-        <div className="relative h-screen md:flex overflow-hidden bg-gray-900 text-white font-sans">
+        // FINAL FIX: Use min-h-screen for mobile, but h-screen and overflow-hidden for desktop
+        <div className="relative min-h-screen md:h-screen bg-gray-900 text-white font-sans md:flex md:overflow-hidden">
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
             
             <Sidebar 
@@ -211,8 +211,7 @@ export default function App() {
                 setIsSettingsMenuOpen={setIsSettingsMenuOpen}
             />
 
-            <div className="flex-1 flex flex-col overflow-hidden">
-                {/* UPDATED: Added sticky, top-0, and z-10 for mobile header */}
+            <div className="flex-1 flex flex-col md:overflow-hidden">
                 <header className="md:hidden bg-gray-800 p-4 shadow-md flex justify-between items-center sticky top-0 z-10">
                     <button onClick={() => setIsMobileMenuOpen(true)} className="text-gray-300 hover:text-white">
                         <HamburgerIcon className="h-6 w-6" />
