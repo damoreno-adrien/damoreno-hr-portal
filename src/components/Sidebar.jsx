@@ -29,6 +29,16 @@ export default function Sidebar({
     pendingLeaveCount, pendingAdvanceCount, unreadLeaveUpdatesCount, unreadAdvanceUpdatesCount,
     isFinancialsMenuOpen, setIsFinancialsMenuOpen, isSettingsMenuOpen, setIsSettingsMenuOpen
 }) {
+    // NEW: Smarter click handler for the Settings menu
+    const handleSettingsClick = () => {
+        if (isSidebarCollapsed) {
+            setIsSidebarCollapsed(false); // First, expand the sidebar
+            setIsSettingsMenuOpen(true);  // Then, open the sub-menu
+        } else {
+            setIsSettingsMenuOpen(!isSettingsMenuOpen); // Otherwise, just toggle
+        }
+    };
+
     return (
         <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
             <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4">
@@ -53,7 +63,8 @@ export default function Sidebar({
 
                         <div>
                             <button
-                                onClick={() => setIsSettingsMenuOpen(!isSettingsMenuOpen)}
+                                // UPDATED: Use the new handler
+                                onClick={handleSettingsClick}
                                 className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === 'settings' ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}
                             >
                                 <div className="flex items-center">
