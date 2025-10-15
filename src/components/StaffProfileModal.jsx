@@ -37,6 +37,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isArchiving, setIsArchiving] = useState(false);
     const [error, setError] = useState('');
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
 
@@ -85,6 +86,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
         } catch (err) { setError("Failed to add new job role."); } finally { setIsSaving(false); }
     };
+
     const handleDeleteJob = async (jobToDelete) => {
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}"?`)) {
             try {
@@ -93,8 +95,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             } catch (err) { alert("Failed to delete job history entry."); }
         }
     };
+
     const handleDeleteStaff = async () => {
-        if (window.confirm(`Are you sure you want to permanently delete ${displayName}?`) && window.confirm("This action is permanent. Confirm one last time.")) {
+        if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This action is for correcting mistakes only and will erase all their data.`) && window.confirm("This action CANNOT be undone. Please confirm one last time.")) {
             setIsDeleting(true);
             try {
                 const functions = getFunctions();
@@ -104,6 +107,24 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             } catch (err) { alert(`Error deleting staff: ${err.message}`); } finally { setIsDeleting(false); }
         }
     };
+
+    const handleArchiveStaff = async (newStatus) => {
+        const action = newStatus === 'inactive' ? 'Archive' : 'Set as Active';
+        if (window.confirm(`Are you sure you want to ${action} ${displayName}?`)) {
+            setIsArchiving(true);
+            try {
+                const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                await updateDoc(staffDocRef, { status: newStatus });
+                onClose();
+            } catch (err) {
+                alert(`Failed to ${action}. Please try again.`);
+                console.error(err);
+            } finally {
+                setIsArchiving(false);
+            }
+        }
+    };
+
     const handleSetBonusStreak = async () => {
         const staffDocRef = doc(db, 'staff_profiles', staff.id);
         try {
@@ -179,7 +200,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                 </>
                             )}
                         </div>
-                        {userRole === 'manager' && !isEditing && (<div className="ml-6 flex-shrink-0"><button onClick={handleDeleteStaff} disabled={isDeleting} className="flex items-center text-sm text-red-400 hover:text-red-300 disabled:text-gray-500"><TrashIcon className="h-4 w-4 mr-1"/>{isDeleting ? 'Deleting...' : 'Delete Staff'}</button></div>)}
                     </div>
                     <h4 className="text-lg font-semibold text-white">Job & Salary History</h4>
                     {isAddingJob ? (
@@ -212,18 +232,33 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 </div>
             )}
 
-            <div className="flex justify-end pt-4 space-x-4 border-t border-gray-700 mt-6">
-                 <button onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Close</button>
-                 {activeTab === 'details' && (
-                    isEditing ? (
-                        <>
-                            <button onClick={() => { setIsEditing(false); setError(''); }} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
-                            <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button>
-                        </>
-                    ) : (
-                        <button onClick={() => setIsEditing(true)} className="px-6 py-2 rounded-lg bg-blue-600">Edit Basic Info</button>
-                    )
-                 )}
+            <div className="flex justify-between items-center pt-4 border-t border-gray-700 mt-6">
+                <div>
+                     <button onClick={handleDeleteStaff} disabled={isDeleting} className="text-sm text-red-500 hover:text-red-400 disabled:text-gray-500">
+                        {isDeleting ? 'Deleting...' : 'Delete Staff Permanently'}
+                    </button>
+                </div>
+
+                <div className="flex space-x-4">
+                    {activeTab === 'details' && (
+                        isEditing ? (
+                            <>
+                                <button onClick={() => { setIsEditing(false); setError(''); }} className="px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
+                                <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save Changes'}</button>
+                            </>
+                        ) : (
+                            <>
+                                {staff.status === 'inactive' ? (
+                                    <button onClick={() => handleArchiveStaff('active')} disabled={isArchiving} className="px-6 py-2 rounded-lg bg-green-600">{isArchiving ? 'Saving...' : 'Set as Active'}</button>
+                                ) : (
+                                    <button onClick={() => handleArchiveStaff('inactive')} disabled={isArchiving} className="px-6 py-2 rounded-lg bg-yellow-600">{isArchiving ? 'Archiving...' : 'Archive Staff'}</button>
+                                )}
+                                <button onClick={() => setIsEditing(true)} className="px-6 py-2 rounded-lg bg-blue-600">Edit Basic Info</button>
+                            </>
+                        )
+                    )}
+                    <button onClick={onClose} className="px-6 py-2 rounded-lg bg-gray-600">Close</button>
+                </div>
             </div>
         </div>
     );
