@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ChevronUpIcon, ChevronDownIcon } from '../components/Icons';
 import Modal from '../components/Modal';
@@ -62,6 +62,7 @@ export default function AttendancePage({ db, staffList }) {
     const [checkIns, setCheckIns] = useState({});
     const [todaysLeave, setTodaysLeave] = useState([]);
     const [editingRecord, setEditingRecord] = useState(null);
+    const [showArchived, setShowArchived] = useState(false); // NEW state
 
     useEffect(() => {
         if (!db) return;
@@ -103,7 +104,14 @@ export default function AttendancePage({ db, staffList }) {
         setEditingRecord(recordForModal);
     };
 
-    const staffWithStatus = staffList.map(staff => {
+    // NEW: Memoized list of staff to display
+    const staffToDisplay = useMemo(() => {
+        if (showArchived) return staffList;
+        return staffList.filter(staff => staff.status !== 'inactive');
+    }, [staffList, showArchived]);
+
+    // UPDATED: Use the filtered list
+    const staffWithStatus = staffToDisplay.map(staff => {
         const checkIn = checkIns[staff.id];
         const shift = todaysShifts.find(s => s.staffId === staff.id);
         const leave = todaysLeave.find(l => l.staffId === staff.id);
@@ -180,11 +188,17 @@ export default function AttendancePage({ db, staffList }) {
                 </Modal>
             )}
             <div className="flex justify-between items-center mb-8">
-                <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
+                <div className="flex items-center space-x-4">
+                    <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
+                    <div className="flex items-center">
+                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
+                        <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
+                    </div>
+                </div>
                 <p className="text-lg text-gray-300 hidden sm:block">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
             <div className="mb-6">
-                <UpcomingBirthdaysCard staffList={staffList} />
+                <UpcomingBirthdaysCard staffList={staffToDisplay} />
             </div>
             <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-3 md:gap-6">
                 <StatusColumn title="On Shift" staff={onShiftAndBreak} />

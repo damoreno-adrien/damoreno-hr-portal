@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '../components/Icons';
 import LoanModal from '../components/LoanModal';
@@ -22,6 +22,7 @@ const StatusBadge = ({ status }) => {
 export default function FinancialsPage({ staffList, db }) {
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
+    const [showArchived, setShowArchived] = useState(false); // NEW state
 
     const [pendingAdvances, setPendingAdvances] = useState([]);
     const [isLoadingPending, setIsLoadingPending] = useState(true);
@@ -49,7 +50,16 @@ export default function FinancialsPage({ staffList, db }) {
         const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
         const unsubscribe = onSnapshot(q, (snap) => {
             const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            const hydratedList = pendingList.map(req => ({ ...req, staffName: getDisplayName(staffList.find(s => s.id === req.staffId)) }));
+            
+            // UPDATED: Filter out requests from inactive staff
+            const hydratedList = pendingList
+                .map(req => {
+                    const staffMember = staffList.find(s => s.id === req.staffId);
+                    return { ...req, staff: staffMember };
+                })
+                .filter(req => req.staff && req.staff.status !== 'inactive')
+                .map(req => ({ ...req, staffName: getDisplayName(req.staff) }));
+
             setPendingAdvances(hydratedList);
             setIsLoadingPending(false);
         }, (err) => { console.error(err); setIsLoadingPending(false); });
@@ -98,6 +108,18 @@ export default function FinancialsPage({ staffList, db }) {
 
     const selectedStaffName = getDisplayName(staffList.find(s => s.id === selectedStaffId));
 
+    // NEW: Memoized list for the dropdown
+    const staffForDropdown = useMemo(() => {
+        const sortedList = [...staffList].sort((a, b) => {
+            const nameA = getDisplayName(a);
+            const nameB = getDisplayName(b);
+            return nameA.localeCompare(nameB);
+        });
+        if (showArchived) return sortedList;
+        return sortedList.filter(s => s.status !== 'inactive');
+    }, [staffList, showArchived]);
+
+
     return (
         <div>
             <LoanModal isOpen={isLoanModalOpen} onClose={() => setIsLoanModalOpen(false)} db={db} staffId={selectedStaffId} existingLoan={editingLoan} />
@@ -112,14 +134,14 @@ export default function FinancialsPage({ staffList, db }) {
                     <div className="flex-grow">
                         <select value={selectedStaffId} onChange={handleStaffChange} className="w-full p-2 bg-gray-700 rounded-md text-white">
                             <option value="">-- Select Staff --</option>
-                            {staffList
-                                .sort((a, b) => {
-                                    const nameA = a.nickname || a.firstName || a.fullName || '';
-                                    const nameB = b.nickname || b.firstName || b.fullName || '';
-                                    return nameA.localeCompare(nameB);
-                                })
-                                .map(s => (<option key={s.id} value={s.id}>{getDisplayName(s)}</option>))}
+                            {/* UPDATED: Use the filtered list */}
+                            {staffForDropdown.map(s => (<option key={s.id} value={s.id}>{getDisplayName(s)}</option>))}
                         </select>
+                    </div>
+                    {/* NEW: Toggle to show archived staff in dropdown */}
+                    <div className="flex items-center flex-shrink-0 pl-2">
+                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
+                        <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
                 </div>
             </div>
