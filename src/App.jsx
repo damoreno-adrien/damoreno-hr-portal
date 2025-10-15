@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDoc, collection, onSnapshot, setDoc, query, where } from 'firebase/firestore';
+import { getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, query, where } from 'firebase/firestore';
 import { getFunctions } from "firebase/functions";
+import useAuth from './hooks/useAuth'; // NEW: Import the custom hook
 
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
@@ -19,16 +20,13 @@ import SalaryAdvancePage from './pages/SalaryAdvancePage';
 import FinancialsDashboardPage from './pages/FinancialsDashboardPage';
 import MyPayslipsPage from './pages/MyPayslipsPage';
 import Sidebar from './components/Sidebar';
-import LoginPage from './pages/LoginPage'; // NEW: Import LoginPage
+import LoginPage from './pages/LoginPage';
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
 export default function App() {
     const [auth, setAuth] = useState(null);
     const [db, setDb] = useState(null);
-    const [user, setUser] = useState(null);
-    const [userRole, setUserRole] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
     const [loginError, setLoginError] = useState('');
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffList, setStaffList] = useState([]);
@@ -45,42 +43,42 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
+    // NEW: Authentication logic is now handled by the useAuth hook
+    const { user, userRole, isLoading } = useAuth(auth, db);
+
     useEffect(() => {
         try {
             const firebaseConfigString = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_FIREBASE_CONFIG : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
             const firebaseConfig = JSON.parse(firebaseConfigString);
             if (!firebaseConfig.apiKey) {
-                 console.error("Firebase config is missing or invalid!"); setIsLoading(false); return;
+                 console.error("Firebase config is missing or invalid!");
+                 return;
             }
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             const dbInstance = getFirestore(app);
             getFunctions(app);
-            setAuth(authInstance); setDb(dbInstance);
-            const unsubscribeAuth = onAuthStateChanged(authInstance, async (currentUser) => {
-                if (currentUser) {
-                    const userDocRef = doc(dbInstance, 'users', currentUser.uid);
-                    const userDocSnap = await getDoc(userDocRef);
-                    const role = userDocSnap.exists() ? userDocSnap.data().role : null;
-                    setUser(currentUser); setUserRole(role);
-                    if (role === 'staff') {
-                        const staffProfileRef = doc(dbInstance, 'staff_profiles', currentUser.uid);
-                        onSnapshot(staffProfileRef, (staffProfileSnap) => {
-                            if (staffProfileSnap.exists()) {
-                                setStaffProfile({ id: staffProfileSnap.id, ...staffProfileSnap.data() });
-                            }
-                        });
-                    }
-                } else {
-                    setUser(null); setUserRole(null); setStaffProfile(null);
-                }
-                setIsLoading(false);
-            });
-            return () => unsubscribeAuth();
+            setAuth(authInstance);
+            setDb(dbInstance);
         } catch (error) {
-            console.error("Firebase Initialization Error:", error); setIsLoading(false);
+            console.error("Firebase Initialization Error:", error);
         }
     }, []);
+
+    // This useEffect for the staff's own profile still needs direct access
+    useEffect(() => {
+        if (userRole === 'staff' && db && user) {
+            const staffProfileRef = collection(db, 'staff_profiles', user.uid);
+            const unsubscribe = onSnapshot(staffProfileRef, (staffProfileSnap) => {
+                if (staffProfileSnap.exists()) {
+                    setStaffProfile({ id: staffProfileSnap.id, ...staffProfileSnap.data() });
+                }
+            });
+            return () => unsubscribe();
+        } else {
+            setStaffProfile(null);
+        }
+    }, [db, user, userRole]);
 
     useEffect(() => {
         if (!db) return;
@@ -157,7 +155,7 @@ export default function App() {
         } else { setLeaveBalances({ annual: 0, publicHoliday: 0 }); }
     }, [db, user, userRole, companyConfig, staffProfile]);
 
-    const handleLogin = async (email, password) => { // UPDATED: Receives email/password as arguments
+    const handleLogin = async (email, password) => {
         setLoginError('');
         if (!auth) return;
         try {
@@ -170,7 +168,6 @@ export default function App() {
 
     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
     
-    // UPDATED: The !user condition is now much simpler
     if (!user) {
         return (
             <LoginPage 
