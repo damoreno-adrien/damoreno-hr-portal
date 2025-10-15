@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import ShiftModal from '../components/ShiftModal';
@@ -12,7 +12,6 @@ const formatDateToYYYYMMDD = (date) => {
     return `${year}-${month}-${day}`;
 };
 
-// --- NEW HELPER FUNCTION ---
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
@@ -29,6 +28,8 @@ const getCurrentJob = (staff) => {
 
 export default function PlanningPage({ db, staffList, userRole, departments }) {
     const [departmentFilter, setDepartmentFilter] = useState('All Departments');
+    const [showArchived, setShowArchived] = useState(false); // NEW: State for filter
+
     const getStartOfWeek = (date) => {
         const d = new Date(date);
         d.setHours(0, 0, 0, 0);
@@ -117,23 +118,24 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     const weekRangeString = `${startOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${endOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
     const isManager = userRole === 'manager';
 
-    const filteredStaffList = staffList.filter(staff => {
+    const filteredStaffList = useMemo(() => staffList.filter(staff => {
+        // UPDATED: Filter logic
+        if (!showArchived && staff.status === 'inactive') return false;
+
         if (departmentFilter === 'All Departments') return true;
         const currentJob = getCurrentJob(staff);
         return currentJob?.department === departmentFilter;
-    });
+    }), [staffList, showArchived, departmentFilter]);
 
-    const groupedStaff = filteredStaffList.reduce((acc, staff) => {
+    const groupedStaff = useMemo(() => filteredStaffList.reduce((acc, staff) => {
         const job = getCurrentJob(staff);
         const dept = job?.department || 'Unassigned';
-        if (!acc[dept]) {
-            acc[dept] = [];
-        }
+        if (!acc[dept]) acc[dept] = [];
         acc[dept].push(staff);
         return acc;
-    }, {});
+    }, {}), [filteredStaffList]);
     
-    const orderedDepartments = ['All Departments', ...departments].filter(dept => dept === 'All Departments' || groupedStaff[dept]);
+    const orderedDepartments = Object.keys(groupedStaff).sort();
 
     return (
         <div>
@@ -152,7 +154,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             {selectedLeave && (
                 <Modal isOpen={true} onClose={() => setSelectedLeave(null)} title="Leave Request Details">
                     <div className="space-y-3 text-white">
-                        <p><span className="font-semibold text-gray-400">Employee:</span> {selectedLeave.staffName}</p>
+                        <p><span className="font-semibold text-gray-400">Employee:</span> {getDisplayName(staffList.find(s => s.id === selectedLeave.staffId))}</p>
                         <p><span className="font-semibold text-gray-400">Leave Type:</span> {selectedLeave.leaveType}</p>
                         <p><span className="font-semibold text-gray-400">Dates:</span> {selectedLeave.startDate} to {selectedLeave.endDate} ({selectedLeave.totalDays} days)</p>
                         {selectedLeave.reason && <p><span className="font-semibold text-gray-400">Reason:</span> {selectedLeave.reason}</p>}
@@ -167,6 +169,11 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         <option>All Departments</option>
                         {departments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
                     </select>
+                    {/* NEW: Toggle to show archived staff */}
+                    <div className="flex items-center">
+                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
+                        <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
+                    </div>
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-4">
                     <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronLeftIcon className="h-6 w-6" /></button>
@@ -182,50 +189,48 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         {days.map(day => (<div key={day.toISOString()}>{formatDateHeader(day)}</div>))}
                         
                         {orderedDepartments.map(dept => (
-                            (departmentFilter === 'All Departments' || departmentFilter === dept) && groupedStaff[dept] && (
-                                <React.Fragment key={dept}>
-                                    <div className="col-span-8 bg-gray-900 text-amber-400 font-bold p-2 border-t border-b border-gray-700">{dept}</div>
-                                    {groupedStaff[dept].map(staff => (
-                                        <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
-                                            {/* --- UPDATED TO USE NICKNAME --- */}
-                                            <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{getDisplayName(staff)}</div>
-                                            {days.map(day => {
-                                                const leaveDetails = getLeaveForStaffOnDate(staff.id, day);
-                                                if (leaveDetails) {
-                                                    return (
-                                                        <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
-                                                            <button onClick={() => setSelectedLeave(leaveDetails)} className="bg-blue-600 text-white font-bold p-2 rounded-md w-full h-full flex items-center justify-center text-center text-sm hover:bg-blue-500">
-                                                                On Leave
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                }
-                                                const dayStr = formatDateToYYYYMMDD(day);
-                                                const shiftKey = `${staff.id}_${dayStr}`;
-                                                const shift = schedules[shiftKey];
+                            <React.Fragment key={dept}>
+                                <div className="col-span-8 bg-gray-900 text-amber-400 font-bold p-2 border-t border-b border-gray-700">{dept}</div>
+                                {groupedStaff[dept].sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => (
+                                    <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
+                                        <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{getDisplayName(staff)}</div>
+                                        {days.map(day => {
+                                            const leaveDetails = getLeaveForStaffOnDate(staff.id, day);
+                                            if (leaveDetails) {
+                                                const staffForLeave = staffList.find(s => s.id === leaveDetails.staffId);
                                                 return (
                                                     <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
-                                                        <button 
-                                                            onClick={() => isManager && setSelectedShift({ staff, date: day, existingShift: shift })} 
-                                                            disabled={!isManager}
-                                                            className={`w-full h-full rounded-md flex items-center justify-center text-xs transition-colors ${isManager ? 'hover:bg-gray-700' : 'cursor-default'}`}
-                                                        >
-                                                            {shift ? (
-                                                                <div className="bg-amber-600 text-white font-bold p-2 rounded-md w-full h-full flex flex-col justify-center text-center">
-                                                                    <span>{shift.startTime}</span>
-                                                                    <span>{shift.endTime}</span>
-                                                                </div>
-                                                            ) : (
-                                                                isManager && <PlusIcon className="h-6 w-6 text-gray-500"/>
-                                                            )}
+                                                        <button onClick={() => setSelectedLeave({ ...leaveDetails, staffName: getDisplayName(staffForLeave) })} className="bg-blue-600 text-white font-bold p-2 rounded-md w-full h-full flex items-center justify-center text-center text-sm hover:bg-blue-500">
+                                                            On Leave
                                                         </button>
                                                     </div>
-                                                )
-                                            })}
-                                        </div>
-                                    ))}
-                                </React.Fragment>
-                            )
+                                                );
+                                            }
+                                            const dayStr = formatDateToYYYYMMDD(day);
+                                            const shiftKey = `${staff.id}_${dayStr}`;
+                                            const shift = schedules[shiftKey];
+                                            return (
+                                                <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
+                                                    <button 
+                                                        onClick={() => isManager && setSelectedShift({ staff, date: day, existingShift: shift })} 
+                                                        disabled={!isManager}
+                                                        className={`w-full h-full rounded-md flex items-center justify-center text-xs transition-colors ${isManager ? 'hover:bg-gray-700' : 'cursor-default'}`}
+                                                    >
+                                                        {shift ? (
+                                                            <div className="bg-amber-600 text-white font-bold p-2 rounded-md w-full h-full flex flex-col justify-center text-center">
+                                                                <span>{shift.startTime}</span>
+                                                                <span>{shift.endTime}</span>
+                                                            </div>
+                                                        ) : (
+                                                            isManager && <PlusIcon className="h-6 w-6 text-gray-500"/>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                ))}
+                            </React.Fragment>
                         ))}
                     </div>
                 </div>
