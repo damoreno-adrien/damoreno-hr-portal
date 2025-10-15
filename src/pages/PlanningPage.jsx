@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import React, { useState, useMemo } from 'react';
 import Modal from '../components/Modal';
 import ShiftModal from '../components/ShiftModal';
+import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData'; // NEW: Import hook
 import { PlusIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/Icons';
 
 const formatDateToYYYYMMDD = (date) => {
@@ -28,7 +28,7 @@ const getCurrentJob = (staff) => {
 
 export default function PlanningPage({ db, staffList, userRole, departments }) {
     const [departmentFilter, setDepartmentFilter] = useState('All Departments');
-    const [showArchived, setShowArchived] = useState(false); // NEW: State for filter
+    const [showArchived, setShowArchived] = useState(false);
 
     const getStartOfWeek = (date) => {
         const d = new Date(date);
@@ -39,44 +39,11 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     };
 
     const [startOfWeek, setStartOfWeek] = useState(getStartOfWeek(new Date()));
-    const [schedules, setSchedules] = useState({});
-    const [approvedLeave, setApprovedLeave] = useState([]);
     const [selectedShift, setSelectedShift] = useState(null);
     const [selectedLeave, setSelectedLeave] = useState(null);
-
-    useEffect(() => {
-        if (!db) return;
-        
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(endOfWeek.getDate() + 6);
-        
-        const startStr = formatDateToYYYYMMDD(startOfWeek);
-        const endStr = formatDateToYYYYMMDD(endOfWeek);
-
-        const shiftsQuery = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
-        const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
-            const newSchedules = {};
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                const key = `${data.staffId}_${data.date}`;
-                newSchedules[key] = { id: doc.id, ...data };
-            });
-            setSchedules(newSchedules);
-        });
-
-        const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("endDate", ">=", startStr));
-        const unsubscribeLeave = onSnapshot(leaveQuery, (snapshot) => {
-            const leaveRequests = snapshot.docs
-                .map(doc => ({ id: doc.id, ...doc.data() }))
-                .filter(req => req.startDate <= endStr);
-            setApprovedLeave(leaveRequests);
-        });
-
-        return () => {
-            unsubscribeShifts();
-            unsubscribeLeave();
-        };
-    }, [db, startOfWeek]);
+    
+    // NEW: All data fetching is now handled by the hook
+    const { schedules, approvedLeave, isLoading } = useWeeklyPlannerData(db, startOfWeek);
     
     const getLeaveForStaffOnDate = (staffId, date) => {
         const dateStr = formatDateToYYYYMMDD(date);
@@ -119,7 +86,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     const isManager = userRole === 'manager';
 
     const filteredStaffList = useMemo(() => staffList.filter(staff => {
-        // UPDATED: Filter logic
         if (!showArchived && staff.status === 'inactive') return false;
 
         if (departmentFilter === 'All Departments') return true;
@@ -169,7 +135,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         <option>All Departments</option>
                         {departments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
                     </select>
-                    {/* NEW: Toggle to show archived staff */}
                     <div className="flex items-center">
                         <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
@@ -188,50 +153,54 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         <div className="px-4 py-3 font-medium text-white border-b-2 border-r border-gray-700 flex items-center">STAFF</div>
                         {days.map(day => (<div key={day.toISOString()}>{formatDateHeader(day)}</div>))}
                         
-                        {orderedDepartments.map(dept => (
-                            <React.Fragment key={dept}>
-                                <div className="col-span-8 bg-gray-900 text-amber-400 font-bold p-2 border-t border-b border-gray-700">{dept}</div>
-                                {groupedStaff[dept].sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => (
-                                    <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
-                                        <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{getDisplayName(staff)}</div>
-                                        {days.map(day => {
-                                            const leaveDetails = getLeaveForStaffOnDate(staff.id, day);
-                                            if (leaveDetails) {
-                                                const staffForLeave = staffList.find(s => s.id === leaveDetails.staffId);
+                        {isLoading ? (
+                            <div className="col-span-8 text-center py-10 text-gray-500">Loading schedule...</div>
+                        ) : (
+                            orderedDepartments.map(dept => (
+                                <React.Fragment key={dept}>
+                                    <div className="col-span-8 bg-gray-900 text-amber-400 font-bold p-2 border-t border-b border-gray-700">{dept}</div>
+                                    {groupedStaff[dept].sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => (
+                                        <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
+                                            <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{getDisplayName(staff)}</div>
+                                            {days.map(day => {
+                                                const leaveDetails = getLeaveForStaffOnDate(staff.id, day);
+                                                if (leaveDetails) {
+                                                    const staffForLeave = staffList.find(s => s.id === leaveDetails.staffId);
+                                                    return (
+                                                        <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
+                                                            <button onClick={() => setSelectedLeave({ ...leaveDetails, staffName: getDisplayName(staffForLeave) })} className="bg-blue-600 text-white font-bold p-2 rounded-md w-full h-full flex items-center justify-center text-center text-sm hover:bg-blue-500">
+                                                                On Leave
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                }
+                                                const dayStr = formatDateToYYYYMMDD(day);
+                                                const shiftKey = `${staff.id}_${dayStr}`;
+                                                const shift = schedules[shiftKey];
                                                 return (
                                                     <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
-                                                        <button onClick={() => setSelectedLeave({ ...leaveDetails, staffName: getDisplayName(staffForLeave) })} className="bg-blue-600 text-white font-bold p-2 rounded-md w-full h-full flex items-center justify-center text-center text-sm hover:bg-blue-500">
-                                                            On Leave
+                                                        <button 
+                                                            onClick={() => isManager && setSelectedShift({ staff, date: day, existingShift: shift })} 
+                                                            disabled={!isManager}
+                                                            className={`w-full h-full rounded-md flex items-center justify-center text-xs transition-colors ${isManager ? 'hover:bg-gray-700' : 'cursor-default'}`}
+                                                        >
+                                                            {shift ? (
+                                                                <div className="bg-amber-600 text-white font-bold p-2 rounded-md w-full h-full flex flex-col justify-center text-center">
+                                                                    <span>{shift.startTime}</span>
+                                                                    <span>{shift.endTime}</span>
+                                                                </div>
+                                                            ) : (
+                                                                isManager && <PlusIcon className="h-6 w-6 text-gray-500"/>
+                                                            )}
                                                         </button>
                                                     </div>
-                                                );
-                                            }
-                                            const dayStr = formatDateToYYYYMMDD(day);
-                                            const shiftKey = `${staff.id}_${dayStr}`;
-                                            const shift = schedules[shiftKey];
-                                            return (
-                                                <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
-                                                    <button 
-                                                        onClick={() => isManager && setSelectedShift({ staff, date: day, existingShift: shift })} 
-                                                        disabled={!isManager}
-                                                        className={`w-full h-full rounded-md flex items-center justify-center text-xs transition-colors ${isManager ? 'hover:bg-gray-700' : 'cursor-default'}`}
-                                                    >
-                                                        {shift ? (
-                                                            <div className="bg-amber-600 text-white font-bold p-2 rounded-md w-full h-full flex flex-col justify-center text-center">
-                                                                <span>{shift.startTime}</span>
-                                                                <span>{shift.endTime}</span>
-                                                            </div>
-                                                        ) : (
-                                                            isManager && <PlusIcon className="h-6 w-6 text-gray-500"/>
-                                                        )}
-                                                    </button>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                ))}
-                            </React.Fragment>
-                        ))}
+                                                )
+                                            })}
+                                        </div>
+                                    ))}
+                                </React.Fragment>
+                            ))
+                        )}
                     </div>
                 </div>
             </div>
