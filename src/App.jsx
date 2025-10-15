@@ -19,7 +19,7 @@ import SalaryAdvancePage from './pages/SalaryAdvancePage';
 import FinancialsDashboardPage from './pages/FinancialsDashboardPage';
 import MyPayslipsPage from './pages/MyPayslipsPage';
 import Sidebar from './components/Sidebar';
-import { LogInIcon } from './components/Icons';
+import LoginPage from './pages/LoginPage'; // NEW: Import LoginPage
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
@@ -33,8 +33,6 @@ export default function App() {
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffList, setStaffList] = useState([]);
     const [staffProfile, setStaffProfile] = useState(null);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
     const [companyConfig, setCompanyConfig] = useState(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -159,11 +157,28 @@ export default function App() {
         } else { setLeaveBalances({ annual: 0, publicHoliday: 0 }); }
     }, [db, user, userRole, companyConfig, staffProfile]);
 
-    const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); if (!auth) return; try { await signInWithEmailAndPassword(auth, email, password); } catch (error) { setLoginError('Invalid email or password. Please try again.'); } };
+    const handleLogin = async (email, password) => { // UPDATED: Receives email/password as arguments
+        setLoginError('');
+        if (!auth) return;
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            setLoginError('Invalid email or password. Please try again.');
+        }
+    };
     const handleLogout = async () => { if (!auth) return; await signOut(auth); setCurrentPage('dashboard'); };
 
     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
-    if (!user) { return ( <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900"><div className="w-full max-w-md p-8 space-y-8 bg-white rounded-2xl shadow-lg dark:bg-gray-800"> <div className="text-center"> <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Da Moreno At Town</h1> <p className="mt-2 text-gray-600 dark:text-gray-300">HR Management Portal</p></div> <form className="mt-8 space-y-6" onSubmit={handleLogin}> <div className="rounded-md shadow-sm"> <div> <input id="email-address" name="email" type="email" autoComplete="email" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} /> </div> <div className="-mt-px"> <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} /> </div></div> {loginError && (<p className="mt-2 text-center text-sm text-red-600 dark:text-red-400">{loginError}</p>)} <div> <button type="submit" className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"> <span className="absolute left-0 inset-y-0 flex items-center pl-3"><LogInIcon className="h-5 w-5 text-amber-500 group-hover:text-amber-400" /></span> Sign in </button> </div> </form> </div></div> ); }
+    
+    // UPDATED: The !user condition is now much simpler
+    if (!user) {
+        return (
+            <LoginPage 
+                handleLogin={handleLogin}
+                loginError={loginError}
+            />
+        );
+    }
 
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
@@ -187,7 +202,6 @@ export default function App() {
     };
 
     return (
-        // FINAL FIX: Use min-h-screen for mobile, but h-screen and overflow-hidden for desktop
         <div className="relative min-h-screen md:h-screen bg-gray-900 text-white font-sans md:flex md:overflow-hidden">
             {isMobileMenuOpen && ( <div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" aria-hidden="true"></div> )}
             
