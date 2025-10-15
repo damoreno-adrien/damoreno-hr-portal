@@ -15,7 +15,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             bankAccount: staff.bankAccount || '',
         };
 
-        if (staff.firstName || staff.lastName) { // New format exists
+        if (staff.firstName || staff.lastName) {
             return {
                 ...initialData,
                 firstName: staff.firstName || '',
@@ -24,7 +24,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             };
         }
         
-        // Old format: Split fullName as a starting suggestion
         const nameParts = (staff.fullName || '').split(' ');
         const firstName = nameParts[0] || '';
         const lastName = nameParts.slice(1).join(' ') || '';
@@ -69,7 +68,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 phoneNumber: formData.phoneNumber,
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
-                fullName: null // Set old field to null to complete migration for this user
+                fullName: null 
             });
             setIsEditing(false);
         } catch (err) { setError("Failed to save changes."); console.error(err); } finally { setIsSaving(false); }
@@ -113,8 +112,21 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         if (window.confirm(`Are you sure you want to ${action} ${displayName}?`)) {
             setIsArchiving(true);
             try {
+                const functions = getFunctions();
+                const setStaffAuthStatus = httpsCallable(functions, 'setStaffAuthStatus');
                 const staffDocRef = doc(db, 'staff_profiles', staff.id);
-                await updateDoc(staffDocRef, { status: newStatus });
+
+                // Perform both operations at the same time
+                await Promise.all([
+                    // 1. Update the status in the Firestore database
+                    updateDoc(staffDocRef, { status: newStatus }),
+                    // 2. Call the cloud function to disable/enable the user's login
+                    setStaffAuthStatus({ 
+                        staffId: staff.id, 
+                        disabled: newStatus === 'inactive' 
+                    })
+                ]);
+
                 onClose();
             } catch (err) {
                 alert(`Failed to ${action}. Please try again.`);
