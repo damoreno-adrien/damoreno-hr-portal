@@ -68,7 +68,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 phoneNumber: formData.phoneNumber,
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
-                fullName: null 
+                fullName: null
             });
             setIsEditing(false);
         } catch (err) { setError("Failed to save changes."); console.error(err); } finally { setIsSaving(false); }
@@ -85,7 +85,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
         } catch (err) { setError("Failed to add new job role."); } finally { setIsSaving(false); }
     };
-
     const handleDeleteJob = async (jobToDelete) => {
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}"?`)) {
             try {
@@ -94,7 +93,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             } catch (err) { alert("Failed to delete job history entry."); }
         }
     };
-
     const handleDeleteStaff = async () => {
         if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This action is for correcting mistakes only and will erase all their data.`) && window.confirm("This action CANNOT be undone. Please confirm one last time.")) {
             setIsDeleting(true);
@@ -106,34 +104,49 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             } catch (err) { alert(`Error deleting staff: ${err.message}`); } finally { setIsDeleting(false); }
         }
     };
-
     const handleArchiveStaff = async (newStatus) => {
-        const action = newStatus === 'inactive' ? 'Archive' : 'Set as Active';
-        if (window.confirm(`Are you sure you want to ${action} ${displayName}?`)) {
-            setIsArchiving(true);
-            try {
-                const functions = getFunctions();
-                const setStaffAuthStatus = httpsCallable(functions, 'setStaffAuthStatus');
-                const staffDocRef = doc(db, 'staff_profiles', staff.id);
+        setIsArchiving(true);
+        try {
+            const functions = getFunctions();
+            const setStaffAuthStatus = httpsCallable(functions, 'setStaffAuthStatus');
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
 
-                // Perform both operations at the same time
+            if (newStatus === 'inactive') {
+                const endDate = window.prompt(`To archive ${displayName}, please enter their last day of employment (YYYY-MM-DD):`, new Date().toISOString().split('T')[0]);
+                
+                if (!endDate) {
+                    setIsArchiving(false);
+                    return;
+                }
+                
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+                    alert("Invalid date format. Please use YYYY-MM-DD.");
+                    setIsArchiving(false);
+                    return;
+                }
+
                 await Promise.all([
-                    // 1. Update the status in the Firestore database
-                    updateDoc(staffDocRef, { status: newStatus }),
-                    // 2. Call the cloud function to disable/enable the user's login
-                    setStaffAuthStatus({ 
-                        staffId: staff.id, 
-                        disabled: newStatus === 'inactive' 
-                    })
+                    updateDoc(staffDocRef, { status: 'inactive', endDate: endDate }),
+                    setStaffAuthStatus({ staffId: staff.id, disabled: true })
                 ]);
-
-                onClose();
-            } catch (err) {
-                alert(`Failed to ${action}. Please try again.`);
-                console.error(err);
-            } finally {
-                setIsArchiving(false);
+            } else {
+                 if (window.confirm(`Are you sure you want to set ${displayName} as Active? This will clear their end date.`)) {
+                    await Promise.all([
+                        updateDoc(staffDocRef, { status: 'active', endDate: null }),
+                        setStaffAuthStatus({ staffId: staff.id, disabled: false })
+                    ]);
+                 } else {
+                     setIsArchiving(false);
+                     return;
+                 }
             }
+            onClose();
+        } catch (err) {
+            const action = newStatus === 'inactive' ? 'Archive' : 'Set as Active';
+            alert(`Failed to ${action}. Please try again.`);
+            console.error(err);
+        } finally {
+            setIsArchiving(false);
         }
     };
 
@@ -172,7 +185,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         } catch (error) { console.error("File deletion error:", error); alert("Failed to delete file."); }
     };
 
-    const InfoRow = ({ label, value }) => (<div><p className="text-sm text-gray-400">{label}</p><p className="text-white text-lg">{value || '-'}</p></div>);
+    const InfoRow = ({ label, value, className = '' }) => (<div className={className}><p className="text-sm text-gray-400">{label}</p><p className="text-white text-lg">{value || '-'}</p></div>);
     const formatRate = (job) => { if (typeof job.rate !== 'number') return 'N/A'; const rateString = job.rate.toLocaleString(); return job.payType === 'Hourly' ? `${rateString} / hr` : `${rateString} / mo`; };
 
     return (
@@ -200,6 +213,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                 </>
                             ) : (
                                 <>
+                                    {staff.status === 'inactive' && <InfoRow label="Last Day of Employment" value={staff.endDate} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
                                     <InfoRow label="Legal Name" value={displayName} />
                                     <InfoRow label="Nickname" value={staff.nickname} />
                                     <InfoRow label="Email Address" value={staff.email} />
@@ -261,7 +275,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                         ) : (
                             <>
                                 {staff.status === 'inactive' ? (
-                                    <button onClick={() => handleArchiveStaff('active')} disabled={isArchiving} className="px-6 py-2 rounded-lg bg-green-600">{isArchiving ? 'Saving...' : 'Set as Active'}</button>
+                                    <button onClick={() => handleArchiveStaff('active')} disabled={isArchiving} className="px-6 py-2 rounded-lg bg-green-600">{isArchiving ? 'Activating...' : 'Set as Active'}</button>
                                 ) : (
                                     <button onClick={() => handleArchiveStaff('inactive')} disabled={isArchiving} className="px-6 py-2 rounded-lg bg-yellow-600">{isArchiving ? 'Archiving...' : 'Archive Staff'}</button>
                                 )}
