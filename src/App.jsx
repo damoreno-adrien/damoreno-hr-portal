@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, query, where } from 'firebase/firestore';
+import { getFirestore, doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { getFunctions } from "firebase/functions";
-import useAuth from './hooks/useAuth'; // NEW: Import the custom hook
+import useAuth from './hooks/useAuth';
+import useCompanyConfig from './hooks/useCompanyConfig';
 
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
@@ -31,7 +32,6 @@ export default function App() {
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffList, setStaffList] = useState([]);
     const [staffProfile, setStaffProfile] = useState(null);
-    const [companyConfig, setCompanyConfig] = useState(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0 });
@@ -43,8 +43,8 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
-    // NEW: Authentication logic is now handled by the useAuth hook
-    const { user, userRole, isLoading } = useAuth(auth, db);
+    const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db);
+    const companyConfig = useCompanyConfig(db);
 
     useEffect(() => {
         try {
@@ -65,10 +65,9 @@ export default function App() {
         }
     }, []);
 
-    // This useEffect for the staff's own profile still needs direct access
     useEffect(() => {
         if (userRole === 'staff' && db && user) {
-            const staffProfileRef = collection(db, 'staff_profiles', user.uid);
+            const staffProfileRef = doc(db, 'staff_profiles', user.uid);
             const unsubscribe = onSnapshot(staffProfileRef, (staffProfileSnap) => {
                 if (staffProfileSnap.exists()) {
                     setStaffProfile({ id: staffProfileSnap.id, ...staffProfileSnap.data() });
@@ -79,6 +78,7 @@ export default function App() {
             setStaffProfile(null);
         }
     }, [db, user, userRole]);
+
 
     useEffect(() => {
         if (!db) return;
@@ -107,15 +107,6 @@ export default function App() {
             return () => unsubscribe();
         }
     }, [userRole, db, user]);
-
-    useEffect(() => {
-        if (!db) return;
-        const configDocRef = doc(db, 'settings', 'company_config');
-        const unsubscribe = onSnapshot(configDocRef, (docSnap) => {
-            if (docSnap.exists()) { setCompanyConfig(docSnap.data()); }
-        });
-        return () => unsubscribe();
-    }, [db]);
 
     useEffect(() => {
         if (db && user) {
@@ -166,6 +157,7 @@ export default function App() {
     };
     const handleLogout = async () => { if (!auth) return; await signOut(auth); setCurrentPage('dashboard'); };
 
+    const isLoading = isAuthLoading || companyConfig === null;
     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
     
     if (!user) {
