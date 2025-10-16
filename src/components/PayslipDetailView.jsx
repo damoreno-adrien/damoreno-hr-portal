@@ -5,6 +5,13 @@ import { InfoIcon } from './Icons';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// --- NEW: Helper function to format hours into a string ---
+const formatHours = (hours) => {
+    if (!hours || hours <= 0) return '';
+    const h = Math.floor(hours);
+    const m = Math.round((hours % 1) * 60);
+    return `(${h}h ${m}m)`;
+};
 
 export default function PayslipDetailView({ details, companyConfig, payPeriod }) {
     const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false);
@@ -12,14 +19,10 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
     if (!details) return null;
 
-    const hasAbsenceDates = details.deductions.absenceDates && details.deductions.absenceDates.length > 0;
+    const hasAbsences = details.deductions.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
     const hasLeavePayout = details.earnings.leavePayout > 0 && details.earnings.leavePayoutDetails;
     
-    // --- NEW: Helper to display absence hours ---
-    const absenceSummary = details.deductions.totalAbsenceHours > 0 
-        ? `(${Math.floor(details.deductions.totalAbsenceHours)}h ${Math.round((details.deductions.totalAbsenceHours % 1) * 60)}m)`
-        : '';
-
+    const absenceSummary = formatHours(details.deductions.totalAbsenceHours);
 
     const handleExportIndividualPDF = async () => {
         const doc = new jsPDF();
@@ -43,7 +46,10 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                 const pdfLogoWidth = 30; 
                 const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; 
                 
-                doc.addImage(base64Image, 'PNG', 14, 10, pdfLogoWidth, pdfLogoHeight);
+                // --- MODIFIED: Moved logo to the top-right corner ---
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const rightMargin = 14;
+                doc.addImage(base64Image, 'PNG', pageWidth - pdfLogoWidth - rightMargin, 10, pdfLogoWidth, pdfLogoHeight);
 
             } catch (error) {
                 console.error("Error loading company logo for PDF:", error);
@@ -66,10 +72,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             startY: 30,
             theme: 'plain',
             styles: { fontSize: 10 },
-            // --- NEW: Added columnStyles to fix logo overlap ---
-            columnStyles: {
-                0: { cellWidth: 35 }, // Sets a fixed width for the first column
-            },
         });
 
         let earningsBody = [
@@ -83,7 +85,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
         }
         
-        // --- NEW: Updated label to use hour summary ---
         const absenceLabel = `Absences ${absenceSummary}`;
             
         const deductionsBody = [
@@ -147,9 +148,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     <div className="space-y-1 text-sm">
                         <div className="flex justify-between relative">
                             <div className="flex items-center gap-2">
-                                {/* --- NEW: Updated UI to show hour summary --- */}
                                 <p>Absences {absenceSummary}:</p>
-                                {hasAbsenceDates && (
+                                {hasAbsences && (
                                     <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white">
                                         <InfoIcon className="h-4 w-4" />
                                     </button>
@@ -160,8 +160,13 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                             {showAbsenceTooltip && (
                                 <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
                                     <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
+                                    {/* --- MODIFIED: Updated tooltip to show daily hours --- */}
                                     <ul className="list-disc list-inside text-xs text-gray-300">
-                                        {details.deductions.absenceDates.map(date => <li key={date}>{date}</li>)}
+                                        {details.deductions.unpaidAbsences.map(abs => 
+                                            <li key={abs.date}>
+                                                {abs.date} <span className="text-gray-400">{formatHours(abs.hours)}</span>
+                                            </li>
+                                        )}
                                     </ul>
                                 </div>
                             )}

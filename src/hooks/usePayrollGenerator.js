@@ -70,8 +70,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 let basePay = 0;
                 let autoDeductions = 0;
                 let leavePayout = null;
-                let unpaidAbsenceDates = [];
-                // --- NEW: Initialize total absence hours ---
+                // --- MODIFIED: Changed from a simple array to an array of objects ---
+                let unpaidAbsences = [];
                 let totalAbsenceHours = 0;
 
                 const staffEndDate = staff.endDate ? new Date(staff.endDate + 'T00:00:00') : null;
@@ -126,21 +126,23 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         const wasOnLeave = monthLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
                         const didAttend = attendanceData.has(`${staff.id}_${schedule.date}`);
                         if (!didAttend && !wasOnLeave && !publicHolidays.includes(schedule.date)) {
-                            unpaidAbsenceDates.push(schedule.date);
                             
-                            // --- NEW: Calculate hours for the missed shift and add to total ---
+                            let durationHours = 0;
                             if (schedule.startTime && schedule.endTime) {
                                 const start = new Date(`1970-01-01T${schedule.startTime}:00`);
                                 const end = new Date(`1970-01-01T${schedule.endTime}:00`);
-                                let durationHours = (end - start) / (1000 * 60 * 60);
-                                if (durationHours > 5) { // Assuming 1-hour break for shifts longer than 5 hours
+                                durationHours = (end - start) / (1000 * 60 * 60);
+                                if (durationHours > 5) {
                                     durationHours -= 1;
                                 }
-                                totalAbsenceHours += durationHours > 0 ? durationHours : 0;
+                                durationHours = durationHours > 0 ? durationHours : 0;
+                                totalAbsenceHours += durationHours;
                             }
+                            // --- MODIFIED: Push an object with date and hours ---
+                            unpaidAbsences.push({ date: schedule.date, hours: durationHours });
                         }
                     });
-                    autoDeductions = dailyRate * unpaidAbsenceDates.length;
+                    autoDeductions = dailyRate * unpaidAbsences.length;
                 }
                 
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
@@ -166,8 +168,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
 
-                // --- NEW: Pass totalAbsenceHours into the deductions object ---
-                return { id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, displayName: displayName, payType: currentJob.position, totalEarnings, totalDeductions, netPay, bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak }, earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: staffAdjustments.filter(a => a.type === 'Earning') }, deductions: { absences: autoDeductions, absenceDates: unpaidAbsenceDates, totalAbsenceHours: totalAbsenceHours, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: staffAdjustments.filter(a => a.type === 'Deduction') } };
+                // --- MODIFIED: Pass the new unpaidAbsences array instead of absenceDates ---
+                return { id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, displayName: displayName, payType: currentJob.position, totalEarnings, totalDeductions, netPay, bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak }, earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: staffAdjustments.filter(a => a.type === 'Earning') }, deductions: { absences: autoDeductions, unpaidAbsences: unpaidAbsences, totalAbsenceHours: totalAbsenceHours, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: staffAdjustments.filter(a => a.type === 'Deduction') } };
             });
             setPayrollData(data);
         } catch (err) { setError('Failed to generate payroll. Check browser console (F12) for details.'); console.error(err);
