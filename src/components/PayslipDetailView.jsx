@@ -14,6 +14,12 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
     const hasAbsenceDates = details.deductions.absenceDates && details.deductions.absenceDates.length > 0;
     const hasLeavePayout = details.earnings.leavePayout > 0 && details.earnings.leavePayoutDetails;
+    
+    // --- NEW: Helper to display absence hours ---
+    const absenceSummary = details.deductions.totalAbsenceHours > 0 
+        ? `(${Math.floor(details.deductions.totalAbsenceHours)}h ${Math.round((details.deductions.totalAbsenceHours % 1) * 60)}m)`
+        : '';
+
 
     const handleExportIndividualPDF = async () => {
         const doc = new jsPDF();
@@ -30,13 +36,12 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     reader.readAsDataURL(blob);
                 });
 
-                // --- NEW: Calculate logo dimensions to maintain aspect ratio ---
                 const img = new Image();
                 img.src = base64Image;
                 await new Promise(resolve => { img.onload = resolve; });
 
-                const pdfLogoWidth = 30; // Set a fixed width for the logo
-                const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; // Calculate height based on aspect ratio
+                const pdfLogoWidth = 30; 
+                const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; 
                 
                 doc.addImage(base64Image, 'PNG', 14, 10, pdfLogoWidth, pdfLogoHeight);
 
@@ -61,6 +66,10 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             startY: 30,
             theme: 'plain',
             styles: { fontSize: 10 },
+            // --- NEW: Added columnStyles to fix logo overlap ---
+            columnStyles: {
+                0: { cellWidth: 35 }, // Sets a fixed width for the first column
+            },
         });
 
         let earningsBody = [
@@ -74,10 +83,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
         }
         
-        // --- NEW: Use a summarized absence count for the PDF ---
-        const absenceLabel = hasAbsenceDates
-            ? `Absences (${details.deductions.absenceDates.length} days)`
-            : 'Absences';
+        // --- NEW: Updated label to use hour summary ---
+        const absenceLabel = `Absences ${absenceSummary}`;
             
         const deductionsBody = [
             [absenceLabel, formatCurrency(details.deductions.absences)],
@@ -140,7 +147,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     <div className="space-y-1 text-sm">
                         <div className="flex justify-between relative">
                             <div className="flex items-center gap-2">
-                                <p>Absences:</p>
+                                {/* --- NEW: Updated UI to show hour summary --- */}
+                                <p>Absences {absenceSummary}:</p>
                                 {hasAbsenceDates && (
                                     <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white">
                                         <InfoIcon className="h-4 w-4" />
