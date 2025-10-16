@@ -400,9 +400,8 @@ exports.autoCheckout = onSchedule({ region: "us-central1", schedule: "every day 
         const attendanceData = doc.data();
         const staffSchedule = schedulesMap.get(attendanceData.staffId);
         if (staffSchedule && staffSchedule.endTime) {
-            const [hours, minutes] = staffSchedule.endTime.split(':');
-            const checkoutDate = new Date(yesterday);
-            checkoutDate.setHours(hours, minutes, 0, 0);
+            const checkoutTimestampString = `${yesterdayStr}T${staffSchedule.endTime}:00.000+07:00`;
+            const checkoutDate = new Date(checkoutTimestampString);
             batch.update(doc.ref, { checkOutTime: checkoutDate });
             updatedCount++;
             console.log(`Scheduling update for ${attendanceData.staffName} with checkout time ${checkoutDate.toISOString()}`);

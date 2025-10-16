@@ -101,7 +101,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     };
     
     const getDocRef = () => doc(db, 'attendance', `${user.uid}_${new Date().toISOString().split('T')[0]}`);
-    const handleCheckIn = async () => await setDoc(getDocRef(), { staffId: user.uid, staffName: user.displayName || user.email, date: new Date().toISOString().split('T')[0], checkInTime: serverTimestamp() });
+    const handleCheckIn = async () => await setDoc(getDocRef(), { staffId: user.uid, staffName: user.displayName || user.email, date: new Date().toISOString().split('T')[0], checkInTime: serverTimestamp(), checkOutTime: null });
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
     const handleCheckOut = async () => await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
 
