@@ -5,17 +5,39 @@ import PayrollHistory from '../components/PayrollHistory';
 import PayrollGenerator from '../components/PayrollGenerator';
 
 export default function PayrollPage({ db, staffList, companyConfig }) {
+    // State for the Payroll Generator's "view details" modal
     const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
 
+    // --- NEW: State for the Payroll History's "view details" modal ---
+    const [selectedHistoryDetails, setSelectedHistoryDetails] = useState(null);
+    const [historyPayPeriod, setHistoryPayPeriod] = useState(null);
+
+    const handleViewHistoryDetails = (payslip, period) => {
+        setSelectedHistoryDetails(payslip);
+        setHistoryPayPeriod(period);
+    };
+
     return (
         <div>
+            {/* Modal for the Payroll GENERATOR */}
             {selectedStaffDetails && (
                 <Modal isOpen={true} onClose={() => setSelectedStaffDetails(null)} title={`Payslip Details for ${selectedStaffDetails.name}`}>
                     <PayslipDetailView 
                         details={selectedStaffDetails} 
                         companyConfig={companyConfig} 
                         payPeriod={payPeriod} 
+                    />
+                </Modal>
+            )}
+
+            {/* --- NEW: Modal for the Payroll HISTORY --- */}
+            {selectedHistoryDetails && historyPayPeriod && (
+                <Modal isOpen={true} onClose={() => setSelectedHistoryDetails(null)} title={`Payslip for ${selectedHistoryDetails.name} (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}>
+                     <PayslipDetailView 
+                        details={selectedHistoryDetails} 
+                        companyConfig={companyConfig} 
+                        payPeriod={historyPayPeriod} 
                     />
                 </Modal>
             )}
@@ -31,7 +53,12 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
 
             <hr className="border-gray-700 my-12" />
 
-            <PayrollHistory db={db} staffList={staffList} />
+            {/* --- NEW: Pass the handler function to PayrollHistory --- */}
+            <PayrollHistory 
+                db={db} 
+                staffList={staffList}
+                onViewHistoryDetails={handleViewHistoryDetails}
+            />
         </div>
     );
 };

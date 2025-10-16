@@ -6,7 +6,8 @@ import { TrashIcon } from './Icons';
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { department: 'N/A' }; } return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; };
 
-export default function PayrollHistory({ db, staffList }) {
+// --- NEW: Accept onViewHistoryDetails prop ---
+export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) {
     const { history, isLoadingHistory } = usePayrollHistory(db);
     const [expandedRunId, setExpandedRunId] = useState(null);
     const [isDeleting, setIsDeleting] = useState(null);
@@ -78,7 +79,12 @@ export default function PayrollHistory({ db, staffList }) {
                                                 const staffMember = staffList.find(s => s.id === p.staffId);
                                                 const displayName = staffMember ? `${staffMember.nickname || staffMember.firstName} (${getCurrentJob(staffMember).department || 'N/A'})` : p.name;
                                                 return (
-                                                    <tr key={p.id}>
+                                                    // --- NEW: Added onClick handler and styling to the table row ---
+                                                    <tr 
+                                                        key={p.id} 
+                                                        onClick={() => onViewHistoryDetails(p, run)}
+                                                        className="hover:bg-gray-700 cursor-pointer"
+                                                    >
                                                         <td className="px-4 py-2 text-sm text-white">{displayName}</td>
                                                         <td className="px-4 py-2 text-sm text-amber-400 font-semibold">{formatCurrency(p.netPay)} THB</td>
                                                     </tr>
