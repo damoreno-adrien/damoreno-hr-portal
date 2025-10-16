@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { Clock, Coffee,LogIn, LogOut, Moon, BarChart2, AlertTriangle, CheckCircle, Award } from 'lucide-react';
+import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn } from 'lucide-react';
 
+import { useMonthlyStats } from '../hooks/useMonthlyStats';
+import { DashboardCard } from '../components/Dashboard/DashboardCard';
+import { StatItem } from '../components/Dashboard/StatItem';
+import { DailySummary } from '../components/Dashboard/DailySummary';
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList }) {
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -9,31 +13,20 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [locationError, setLocationError] = useState('');
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
-    const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
     const [todaysAttendance, setTodaysAttendance] = useState(null);
-    const [monthlyStats, setMonthlyStats] = useState({
-        workedDays: 0,
-        lates: 0,
-        absences: 0,
-        totalHours: '0h 0m'
-    });
+    
+    const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
-    // --- BIRTHDAY LOGIC ---
     const today = new Date();
-    const todayMonth = today.getMonth() + 1;
-    const todayDay = today.getDate();
+    const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
+    const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
 
-    const checkBirthday = (birthdate) => {
+    function checkBirthday(birthdate) {
         if (!birthdate) return false;
         const birthDateObj = new Date(birthdate);
-        return birthDateObj.getMonth() + 1 === todayMonth && birthDateObj.getDate() === todayDay;
-    };
-
-    const currentUserProfile = staffList.find(s => s.id === user.uid);
-    const isMyBirthday = checkBirthday(currentUserProfile?.birthdate);
-    const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
+        return birthDateObj.getMonth() === today.getMonth() && birthDateObj.getDate() === today.getDate();
+    }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
-
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -62,89 +55,10 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = new Date().toISOString().split('T')[0];
-        const q = query(
-            collection(db, 'leave_requests'),
-            where('staffId', '==', user.uid),
-            where('status', '==', 'approved'),
-            where('startDate', '<=', todayStr),
-            where('endDate', '>=', todayStr)
-        );
-        getDocs(q).then(snapshot => {
-            setIsOnLeaveToday(!snapshot.empty);
-        });
+        const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', '==', 'approved'), where('startDate', '<=', todayStr), where('endDate', '>=', todayStr));
+        getDocs(q).then(snapshot => setIsOnLeaveToday(!snapshot.empty));
     }, [db, user]);
     
-    useEffect(() => {
-        if (!db || !user || !companyConfig) return;
-    
-        const calculateMonthlyStats = async () => {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = now.getMonth();
-            const startDate = new Date(year, month, 1).toISOString().split('T')[0];
-            const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
-    
-            const schedulesQuery = query(collection(db, "schedules"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
-            const attendanceQuery = query(collection(db, "attendance"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
-    
-            const [schedulesSnapshot, attendanceSnapshot] = await Promise.all([getDocs(schedulesQuery), getDocs(attendanceQuery)]);
-            const schedules = schedulesSnapshot.docs.map(doc => doc.data());
-            const attendanceRecords = new Map(attendanceSnapshot.docs.map(doc => [doc.data().date, doc.data()]));
-    
-            let lateCount = 0;
-            let absenceCount = 0;
-            let totalMillis = 0;
-    
-            schedules.forEach(schedule => {
-                if (new Date(schedule.date) > new Date()) return; // Don't count future schedules
-    
-                const attendance = attendanceRecords.get(schedule.date);
-                if (!attendance) {
-                    absenceCount++;
-                } else {
-                    // Calculate Lates
-                    const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
-                    const actualCheckIn = attendance.checkInTime.toDate();
-                    if (actualCheckIn > scheduledStart) {
-                        lateCount++;
-                    }
-    
-                    // Calculate Hours Worked
-                    if (attendance.checkInTime && attendance.checkOutTime) {
-                        let workMillis = attendance.checkOutTime.toDate() - attendance.checkInTime.toDate();
-                        if (attendance.breakStart && attendance.breakEnd) {
-                            workMillis -= (attendance.breakEnd.toDate() - attendance.breakStart.toDate());
-                        }
-                        totalMillis += workMillis;
-                    }
-                }
-            });
-    
-            // Update Bonus Status
-            if (companyConfig.attendanceBonus) {
-                const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus;
-                if (absenceCount > allowedAbsences || lateCount > allowedLates) {
-                    setBonusStatus({ text: 'Bonus Lost for this Month', onTrack: false });
-                } else {
-                    setBonusStatus({ text: 'On Track for Bonus', onTrack: true });
-                }
-            }
-            
-            // Format Total Hours
-            const hours = Math.floor(totalMillis / 3600000);
-            const minutes = Math.floor((totalMillis % 3600000) / 60000);
-            
-            setMonthlyStats({
-                workedDays: attendanceRecords.size,
-                lates: lateCount,
-                absences: absenceCount,
-                totalHours: `${hours}h ${minutes}m`
-            });
-        };
-    
-        calculateMonthlyStats();
-    }, [db, user, companyConfig]);
-
     useEffect(() => {
         if (!companyConfig?.geofence) {
             setLocationError("Geofence settings are not configured.");
@@ -156,9 +70,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             return;
         }
         navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const { latitude, longitude } = position.coords;
-                const distance = calculateDistance(latitude, longitude, RESTAURANT_LAT, RESTAURANT_LON);
+            ({ coords }) => {
+                const distance = calculateDistance(coords.latitude, coords.longitude, RESTAURANT_LAT, RESTAURANT_LON);
                 if (distance <= GEOFENCE_RADIUS_METERS) {
                     setIsWithinGeofence(true);
                     setLocationError('');
@@ -168,12 +81,12 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 }
             },
             (error) => {
-                switch (error.code) {
-                    case error.PERMISSION_DENIED: setLocationError("Location access was denied. Please enable it in your browser settings."); break;
-                    case error.POSITION_UNAVAILABLE: setLocationError("Location information is unavailable."); break;
-                    case error.TIMEOUT: setLocationError("The request to get user location timed out."); break;
-                    default: setLocationError("An unknown error occurred while getting your location."); break;
-                }
+                const messages = {
+                    [error.PERMISSION_DENIED]: "Location access was denied. Please enable it in your browser settings.",
+                    [error.POSITION_UNAVAILABLE]: "Location information is unavailable.",
+                    [error.TIMEOUT]: "The request to get user location timed out."
+                };
+                setLocationError(messages[error.code] || "An unknown error occurred while getting your location.");
             }
         );
     }, [companyConfig]);
@@ -182,133 +95,56 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         const R = 6371e3;
         const φ1 = lat1 * Math.PI / 180; const φ2 = lat2 * Math.PI / 180;
         const Δφ = (lat2 - lat1) * Math.PI / 180; const Δλ = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     };
     
-    const getDocRef = () => { const todayStr = new Date().toISOString().split('T')[0]; return doc(db, 'attendance', `${user.uid}_${todayStr}`); };
+    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${new Date().toISOString().split('T')[0]}`);
     const handleCheckIn = async () => await setDoc(getDocRef(), { staffId: user.uid, staffName: user.displayName || user.email, date: new Date().toISOString().split('T')[0], checkInTime: serverTimestamp() });
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
     const handleCheckOut = async () => await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
 
     const renderButtons = () => {
-        if (isOnLeaveToday) {
-            return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
-        }
+        if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
+        
         const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
         
         switch (status) {
-            case 'checked-out': 
-                return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
-            
-            case 'checked-in': 
-                // If break is finished, hide the 'Start Break' button and show a full-width 'Check-Out' button.
-                if (todaysAttendance?.breakEnd) {
-                    return <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-red-600 hover:bg-red-700`}>Check-Out</button>;
-                }
-                // Otherwise, show both buttons.
+            case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
+            case 'checked-in':
+                if (todaysAttendance?.breakEnd) return <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-red-600 hover:bg-red-700`}>Check-Out</button>;
                 return (
                     <div className="grid grid-cols-2 gap-4">
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button>
                         <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button>
                     </div>
                 );
-            
             case 'on-break': {
                 const breakStartTime = todaysAttendance?.breakStart?.toDate();
-                let minutesOnBreak = 0;
-                if (breakStartTime) {
-                    minutesOnBreak = (currentTime - breakStartTime) / 60000;
-                }
+                const minutesOnBreak = breakStartTime ? (currentTime - breakStartTime) / 60000 : 0;
                 const canEndBreak = minutesOnBreak >= 50;
                 const remainingBreakMinutes = Math.max(0, 60 - minutesOnBreak);
-
                 return (
                     <div>
                         <div className="text-center mb-4 space-y-1">
-                            {breakStartTime && (
-                                <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{breakStartTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span></p>
-                            )}
+                            {breakStartTime && <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{breakStartTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span></p>}
                             <p className="text-lg font-bold text-yellow-300">{Math.floor(remainingBreakMinutes)} minutes remaining</p>
                         </div>
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence || !canEndBreak} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>
-                        {!canEndBreak && breakStartTime && (
-                            <p className="text-center text-xs text-gray-500 mt-2">(You can end your break in {Math.ceil(50 - minutesOnBreak)} minute(s))</p>
-                        )}
+                        {!canEndBreak && breakStartTime && <p className="text-center text-xs text-gray-500 mt-2">(You can end your break in {Math.ceil(50 - minutesOnBreak)} minute(s))</p>}
                     </div>
                 );
             }
-            case 'checked-out-final': 
-                return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
-            
-            default: 
-                return <p className="text-center text-gray-400">Loading attendance status...</p>;
+            case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
+            default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
         }
     };
-    
-    const renderDailySummary = () => {
-        if (!todaysAttendance || !todaysAttendance.checkInTime) return null;
-
-        const formatTime = (timestamp) => timestamp ? timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '...';
-
-        return (
-            <div className="mt-8 border-t border-gray-700 pt-4 px-2 sm:px-0">
-                <h4 className="text-md font-semibold text-center text-gray-300 mb-4">Today's Summary</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                    <div className="bg-gray-700/50 p-3 rounded-lg">
-                        <p className="text-xs text-green-400">Check-In</p>
-                        <p className="text-lg font-bold">{formatTime(todaysAttendance.checkInTime)}</p>
-                    </div>
-                    <div className="bg-gray-700/50 p-3 rounded-lg">
-                        <p className="text-xs text-yellow-400">Break Start</p>
-                        <p className="text-lg font-bold">{todaysAttendance.breakStart ? formatTime(todaysAttendance.breakStart) : '--:--'}</p>
-                    </div>
-                    <div className="bg-gray-700/50 p-3 rounded-lg">
-                        <p className="text-xs text-blue-400">Break End</p>
-                        <p className="text-lg font-bold">{todaysAttendance.breakEnd ? formatTime(todaysAttendance.breakEnd) : '--:--'}</p>
-                    </div>
-                    <div className="bg-gray-700/50 p-3 rounded-lg">
-                        <p className="text-xs text-red-400">Check-Out</p>
-                        <p className="text-lg font-bold">{todaysAttendance.checkOutTime ? formatTime(todaysAttendance.checkOutTime) : '--:--'}</p>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
-    const DashboardCard = ({ title, children, className }) => (
-        <div className={`bg-gray-800 rounded-lg shadow-lg ${className}`}>
-            <h3 className="text-lg font-semibold text-white mb-4 px-4 pt-4">{title}</h3>
-            <div className="p-4 pt-0">{children}</div>
-        </div>
-    );
-    
-    const StatItem = ({ icon, label, value, colorClass }) => (
-        <div className="flex items-start space-x-3">
-            <div className={`p-2 rounded-full bg-${colorClass}-500/20`}>
-                {React.createElement(icon, { className: `w-5 h-5 text-${colorClass}-400` })}
-            </div>
-            <div>
-                <p className="text-sm text-gray-400">{label}</p>
-                <p className="text-xl font-bold text-white">{value}</p>
-            </div>
-        </div>
-    );
 
     return (
         <div>
-            {isMyBirthday && (
-                <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">
-                    🎉 Happy Birthday to you! We wish you all the best! 🎂
-                </div>
-            )}
-            {colleaguesWithBirthday.length > 0 && (
-                 <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8">
-                    <p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p>
-                    <p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(s => getDisplayName(s)).join(', ')}!</p>
-                </div>
-            )}
+            {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday to you! We wish you all the best! 🎂</div>}
+            {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p><p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(getDisplayName).join(', ')}!</p></div>}
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -318,10 +154,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                             <p className="text-base sm:text-lg text-gray-300">{currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
                             <p className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold tracking-tight sm:tracking-widest mt-1">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
                         </div>
-                        <div className="mt-6 px-2 sm:px-0">
-                            {renderButtons()}
-                        </div>
-                        {renderDailySummary()}
+                        <div className="mt-6 px-2 sm:px-0">{renderButtons()}</div>
+                        <DailySummary todaysAttendance={todaysAttendance} />
                         <div className="text-center mt-6 text-sm text-gray-500 h-5">
                             {locationError && <p className="text-red-400">{locationError}</p>}
                             {!locationError && !isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p>Checking location...</p>}
@@ -338,7 +172,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                            <StatItem icon={AlertTriangle} label="Late Arrivals" value={monthlyStats.lates} colorClass="yellow" />
                         </div>
                     </DashboardCard>
-                    
                     <DashboardCard title="Leave Balance">
                         <div className="flex justify-between items-center">
                             <span className="text-gray-300">Annual Leave Remaining</span>
@@ -346,15 +179,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Days available for the rest of the year.</p>
                     </DashboardCard>
-                    
-                    <DashboardCard title="Public Holiday Credit">
-                        <div className="flex justify-between items-center">
-                            <span className="text-gray-300">Credits Remaining</span>
-                            <span className="text-3xl font-bold text-blue-400">{leaveBalances.publicHoliday}</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">Earned from working on public holidays.</p>
-                    </DashboardCard>
-
                     <DashboardCard title="Bonus Status">
                          <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
