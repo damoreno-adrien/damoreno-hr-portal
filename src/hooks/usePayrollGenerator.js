@@ -163,7 +163,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
                 
-                const totalDeductions = autoDeductions + ssoDeduction + advanceDduction + loanDeduction + otherDeductions;
+                const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
 
                 // --- NEW: Pass totalAbsenceHours into the deductions object ---
