@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { Clock, Coffee,LogIn, LogOut, Moon, BarChart2, AlertTriangle, CheckCircle, Award } from 'lucide-react';
+
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList }) {
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -9,8 +11,14 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
     const [todaysAttendance, setTodaysAttendance] = useState(null);
+    const [monthlyStats, setMonthlyStats] = useState({
+        workedDays: 0,
+        lates: 0,
+        absences: 0,
+        totalHours: '0h 0m'
+    });
 
-    // --- NEW BIRTHDAY LOGIC ---
+    // --- BIRTHDAY LOGIC ---
     const today = new Date();
     const todayMonth = today.getMonth() + 1;
     const todayDay = today.getDate();
@@ -67,47 +75,74 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     }, [db, user]);
     
     useEffect(() => {
-        if (!db || !user || !companyConfig?.attendanceBonus) return;
-
-        const checkBonusStatus = async () => {
-            const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus;
+        if (!db || !user || !companyConfig) return;
+    
+        const calculateMonthlyStats = async () => {
             const now = new Date();
             const year = now.getFullYear();
             const month = now.getMonth();
             const startDate = new Date(year, month, 1).toISOString().split('T')[0];
             const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
-
+    
             const schedulesQuery = query(collection(db, "schedules"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
             const attendanceQuery = query(collection(db, "attendance"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
-
+    
             const [schedulesSnapshot, attendanceSnapshot] = await Promise.all([getDocs(schedulesQuery), getDocs(attendanceQuery)]);
             const schedules = schedulesSnapshot.docs.map(doc => doc.data());
             const attendanceRecords = new Map(attendanceSnapshot.docs.map(doc => [doc.data().date, doc.data()]));
-
+    
             let lateCount = 0;
             let absenceCount = 0;
-            
+            let totalMillis = 0;
+    
             schedules.forEach(schedule => {
-                if (new Date(schedule.date) > new Date()) return;
+                if (new Date(schedule.date) > new Date()) return; // Don't count future schedules
+    
                 const attendance = attendanceRecords.get(schedule.date);
                 if (!attendance) {
                     absenceCount++;
                 } else {
+                    // Calculate Lates
                     const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
                     const actualCheckIn = attendance.checkInTime.toDate();
                     if (actualCheckIn > scheduledStart) {
                         lateCount++;
                     }
+    
+                    // Calculate Hours Worked
+                    if (attendance.checkInTime && attendance.checkOutTime) {
+                        let workMillis = attendance.checkOutTime.toDate() - attendance.checkInTime.toDate();
+                        if (attendance.breakStart && attendance.breakEnd) {
+                            workMillis -= (attendance.breakEnd.toDate() - attendance.breakStart.toDate());
+                        }
+                        totalMillis += workMillis;
+                    }
                 }
             });
-
-            if (absenceCount > allowedAbsences || lateCount > allowedLates) {
-                setBonusStatus({ text: 'Bonus Lost for this Month', onTrack: false });
-            } else {
-                setBonusStatus({ text: 'On Track for Bonus', onTrack: true });
+    
+            // Update Bonus Status
+            if (companyConfig.attendanceBonus) {
+                const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus;
+                if (absenceCount > allowedAbsences || lateCount > allowedLates) {
+                    setBonusStatus({ text: 'Bonus Lost for this Month', onTrack: false });
+                } else {
+                    setBonusStatus({ text: 'On Track for Bonus', onTrack: true });
+                }
             }
+            
+            // Format Total Hours
+            const hours = Math.floor(totalMillis / 3600000);
+            const minutes = Math.floor((totalMillis % 3600000) / 60000);
+            
+            setMonthlyStats({
+                workedDays: attendanceRecords.size,
+                lates: lateCount,
+                absences: absenceCount,
+                totalHours: `${hours}h ${minutes}m`
+            });
         };
-        checkBonusStatus();
+    
+        calculateMonthlyStats();
     }, [db, user, companyConfig]);
 
     useEffect(() => {
@@ -162,9 +197,24 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
         }
         const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
+        
         switch (status) {
-            case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
-            case 'checked-in': return (<div className="grid grid-cols-2 gap-4"><button onClick={handleToggleBreak} disabled={!isWithinGeofence || todaysAttendance?.breakEnd} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button><button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button></div>);
+            case 'checked-out': 
+                return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
+            
+            case 'checked-in': 
+                // If break is finished, hide the 'Start Break' button and show a full-width 'Check-Out' button.
+                if (todaysAttendance?.breakEnd) {
+                    return <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-red-600 hover:bg-red-700`}>Check-Out</button>;
+                }
+                // Otherwise, show both buttons.
+                return (
+                    <div className="grid grid-cols-2 gap-4">
+                        <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button>
+                        <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button>
+                    </div>
+                );
+            
             case 'on-break': {
                 const breakStartTime = todaysAttendance?.breakStart?.toDate();
                 let minutesOnBreak = 0;
@@ -189,15 +239,60 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     </div>
                 );
             }
-            case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
-            default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
+            case 'checked-out-final': 
+                return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
+            
+            default: 
+                return <p className="text-center text-gray-400">Loading attendance status...</p>;
         }
+    };
+    
+    const renderDailySummary = () => {
+        if (!todaysAttendance || !todaysAttendance.checkInTime) return null;
+
+        const formatTime = (timestamp) => timestamp ? timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '...';
+
+        return (
+            <div className="mt-8 border-t border-gray-700 pt-4 px-2 sm:px-0">
+                <h4 className="text-md font-semibold text-center text-gray-300 mb-4">Today's Summary</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                        <p className="text-xs text-green-400">Check-In</p>
+                        <p className="text-lg font-bold">{formatTime(todaysAttendance.checkInTime)}</p>
+                    </div>
+                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                        <p className="text-xs text-yellow-400">Break Start</p>
+                        <p className="text-lg font-bold">{todaysAttendance.breakStart ? formatTime(todaysAttendance.breakStart) : '--:--'}</p>
+                    </div>
+                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                        <p className="text-xs text-blue-400">Break End</p>
+                        <p className="text-lg font-bold">{todaysAttendance.breakEnd ? formatTime(todaysAttendance.breakEnd) : '--:--'}</p>
+                    </div>
+                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                        <p className="text-xs text-red-400">Check-Out</p>
+                        <p className="text-lg font-bold">{todaysAttendance.checkOutTime ? formatTime(todaysAttendance.checkOutTime) : '--:--'}</p>
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     const DashboardCard = ({ title, children, className }) => (
         <div className={`bg-gray-800 rounded-lg shadow-lg ${className}`}>
             <h3 className="text-lg font-semibold text-white mb-4 px-4 pt-4">{title}</h3>
-            <div className="p-4">{children}</div>
+            <div className="p-4 pt-0">{children}</div>
+        </div>
+    );
+    
+    const StatItem = ({ icon, label, value, colorClass }) => (
+        <div className="flex items-start space-x-3">
+            <div className={`p-2 rounded-full bg-${colorClass}-500/20`}>
+                {React.createElement(icon, { className: `w-5 h-5 text-${colorClass}-400` })}
+            </div>
+            <div>
+                <p className="text-sm text-gray-400">{label}</p>
+                <p className="text-xl font-bold text-white">{value}</p>
+            </div>
         </div>
     );
 
@@ -226,6 +321,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                         <div className="mt-6 px-2 sm:px-0">
                             {renderButtons()}
                         </div>
+                        {renderDailySummary()}
                         <div className="text-center mt-6 text-sm text-gray-500 h-5">
                             {locationError && <p className="text-red-400">{locationError}</p>}
                             {!locationError && !isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p>Checking location...</p>}
@@ -234,6 +330,15 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     </DashboardCard>
                 </div>
                 <div className="space-y-8">
+                    <DashboardCard title="This Month's Summary">
+                        <div className="space-y-4">
+                           <StatItem icon={Clock} label="Total Hours Worked" value={monthlyStats.totalHours} colorClass="blue" />
+                           <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
+                           <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
+                           <StatItem icon={AlertTriangle} label="Late Arrivals" value={monthlyStats.lates} colorClass="yellow" />
+                        </div>
+                    </DashboardCard>
+                    
                     <DashboardCard title="Leave Balance">
                         <div className="flex justify-between items-center">
                             <span className="text-gray-300">Annual Leave Remaining</span>
@@ -253,7 +358,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     <DashboardCard title="Bonus Status">
                          <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
-                            <div className={`w-3 h-3 rounded-full ${bonusStatus.onTrack ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                            {bonusStatus.onTrack ? <CheckCircle className="w-5 h-5 text-green-400"/> : <Award className="w-5 h-5 text-red-400"/>}
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Based on monthly attendance.</p>
                     </DashboardCard>
