@@ -29,7 +29,17 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     reader.onerror = reject;
                     reader.readAsDataURL(blob);
                 });
-                doc.addImage(base64Image, 'PNG', 14, 10, 30, 15);
+
+                // --- NEW: Calculate logo dimensions to maintain aspect ratio ---
+                const img = new Image();
+                img.src = base64Image;
+                await new Promise(resolve => { img.onload = resolve; });
+
+                const pdfLogoWidth = 30; // Set a fixed width for the logo
+                const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; // Calculate height based on aspect ratio
+                
+                doc.addImage(base64Image, 'PNG', 14, 10, pdfLogoWidth, pdfLogoHeight);
+
             } catch (error) {
                 console.error("Error loading company logo for PDF:", error);
             }
@@ -64,8 +74,9 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
         }
         
+        // --- NEW: Use a summarized absence count for the PDF ---
         const absenceLabel = hasAbsenceDates
-            ? `Absences (${details.deductions.absenceDates.join(', ')})`
+            ? `Absences (${details.deductions.absenceDates.length} days)`
             : 'Absences';
             
         const deductionsBody = [
@@ -99,7 +110,7 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                              <div className="flex justify-between relative">
                                 <div className="flex items-center gap-2">
                                     <p>Leave Payout:</p>
-                                    <button onClick={() => setShowLeaveTooltip(true)} className="text-gray-400 hover:text-white">
+                                    <button onMouseEnter={() => setShowLeaveTooltip(true)} onMouseLeave={() => setShowLeaveTooltip(false)} className="text-gray-400 hover:text-white">
                                         <InfoIcon className="h-4 w-4" />
                                     </button>
                                 </div>
@@ -113,7 +124,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                                             <p>Holiday Credits: {details.earnings.leavePayoutDetails.holidayCredits} days</p>
                                             <p className="border-t border-gray-700 mt-1 pt-1">@ {formatCurrency(details.earnings.leavePayoutDetails.dailyRate)} / day</p>
                                         </div>
-                                        <button onClick={() => setShowLeaveTooltip(false)} className="mt-2 text-xs text-blue-400 hover:underline">Close</button>
                                     </div>
                                 )}
                             </div>
@@ -132,7 +142,7 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                             <div className="flex items-center gap-2">
                                 <p>Absences:</p>
                                 {hasAbsenceDates && (
-                                    <button onClick={() => setShowAbsenceTooltip(true)} className="text-gray-400 hover:text-white">
+                                    <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white">
                                         <InfoIcon className="h-4 w-4" />
                                     </button>
                                 )}
@@ -145,7 +155,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                                     <ul className="list-disc list-inside text-xs text-gray-300">
                                         {details.deductions.absenceDates.map(date => <li key={date}>{date}</li>)}
                                     </ul>
-                                    <button onClick={() => setShowAbsenceTooltip(false)} className="mt-2 text-xs text-blue-400 hover:underline">Close</button>
                                 </div>
                             )}
                         </div>
