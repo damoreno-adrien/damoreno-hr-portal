@@ -71,6 +71,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 let autoDeductions = 0;
                 let leavePayout = null;
                 let unpaidAbsenceDates = [];
+                // --- NEW: Initialize total absence hours ---
+                let totalAbsenceHours = 0;
 
                 const staffEndDate = staff.endDate ? new Date(staff.endDate + 'T00:00:00') : null;
                 const isLastMonth = staffEndDate && staffEndDate.getFullYear() === year && staffEndDate.getMonth() === month;
@@ -125,6 +127,17 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         const didAttend = attendanceData.has(`${staff.id}_${schedule.date}`);
                         if (!didAttend && !wasOnLeave && !publicHolidays.includes(schedule.date)) {
                             unpaidAbsenceDates.push(schedule.date);
+                            
+                            // --- NEW: Calculate hours for the missed shift and add to total ---
+                            if (schedule.startTime && schedule.endTime) {
+                                const start = new Date(`1970-01-01T${schedule.startTime}:00`);
+                                const end = new Date(`1970-01-01T${schedule.endTime}:00`);
+                                let durationHours = (end - start) / (1000 * 60 * 60);
+                                if (durationHours > 5) { // Assuming 1-hour break for shifts longer than 5 hours
+                                    durationHours -= 1;
+                                }
+                                totalAbsenceHours += durationHours > 0 ? durationHours : 0;
+                            }
                         }
                     });
                     autoDeductions = dailyRate * unpaidAbsenceDates.length;
@@ -150,10 +163,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
                 
-                const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
+                const totalDeductions = autoDeductions + ssoDeduction + advanceDduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
 
-                return { id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, displayName: displayName, payType: currentJob.position, totalEarnings, totalDeductions, netPay, bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak }, earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: staffAdjustments.filter(a => a.type === 'Earning') }, deductions: { absences: autoDeductions, absenceDates: unpaidAbsenceDates, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: staffAdjustments.filter(a => a.type === 'Deduction') } };
+                // --- NEW: Pass totalAbsenceHours into the deductions object ---
+                return { id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, displayName: displayName, payType: currentJob.position, totalEarnings, totalDeductions, netPay, bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak }, earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: staffAdjustments.filter(a => a.type === 'Earning') }, deductions: { absences: autoDeductions, absenceDates: unpaidAbsenceDates, totalAbsenceHours: totalAbsenceHours, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: staffAdjustments.filter(a => a.type === 'Deduction') } };
             });
             setPayrollData(data);
         } catch (err) { setError('Failed to generate payroll. Check browser console (F12) for details.'); console.error(err);
