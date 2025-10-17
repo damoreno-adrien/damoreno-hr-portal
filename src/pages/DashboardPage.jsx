@@ -7,6 +7,14 @@ import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
 
+// --- NEW HELPER: Get local date string consistently ---
+const getLocalDateString = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList }) {
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
@@ -33,10 +41,12 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => clearInterval(timer);
     }, []);
 
+    // --- MODIFIED: Both getDocRef and the listener now use the local date ---
+    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${getLocalDateString()}`);
+
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = new Date().toISOString().split('T')[0];
-        const docRef = doc(db, 'attendance', `${user.uid}_${todayStr}`);
+        const docRef = getDocRef(); // Use the corrected getDocRef
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
@@ -54,7 +64,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString(); // Use local date string
         const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', '==', 'approved'), where('startDate', '<=', todayStr), where('endDate', '>=', todayStr));
         getDocs(q).then(snapshot => setIsOnLeaveToday(!snapshot.empty));
     }, [db, user]);
@@ -100,22 +110,17 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return R * c;
     };
     
-    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${new Date().toISOString().split('T')[0]}`);
     const handleCheckIn = async () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    const localDateString = `${year}-${month}-${day}`;
+        const localDateString = getLocalDateString();
+        await setDoc(getDocRef(), { 
+            staffId: user.uid, 
+            staffName: user.displayName || user.email, 
+            date: localDateString, 
+            checkInTime: serverTimestamp(), 
+            checkOutTime: null 
+        });
+    };
 
-    await setDoc(getDocRef(), { 
-        staffId: user.uid, 
-        staffName: user.displayName || user.email, 
-        date: localDateString, 
-        checkInTime: serverTimestamp(), 
-        checkOutTime: null 
-    });
-};
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
     const handleCheckOut = async () => await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
 

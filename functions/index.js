@@ -567,8 +567,6 @@ exports.correctAttendanceDates = https.onCall({ region: "us-central1", timeoutSe
         let recordsChecked = 0;
         let recordsFixed = 0;
         
-        // Define a formatter that will give us the date parts in the correct timezone
-        // 'en-CA' format is YYYY-MM-DD, which is perfect for our needs.
         const formatter = new Intl.DateTimeFormat('en-CA', {
             year: 'numeric',
             month: '2-digit',
@@ -579,15 +577,26 @@ exports.correctAttendanceDates = https.onCall({ region: "us-central1", timeoutSe
         attendanceSnap.forEach(doc => {
             recordsChecked++;
             const record = doc.data();
-            const storedDate = record.date;
             
             if (record.checkInTime && typeof record.checkInTime.toDate === 'function') {
                 const checkInTimestamp = record.checkInTime.toDate();
-
-                // Use the robust formatter to get the correct local date string
                 const correctLocalDateString = formatter.format(checkInTimestamp);
+                const expectedDocId = `${record.staffId}_${correctLocalDateString}`;
 
-                if (storedDate !== correctLocalDateString) {
+                // If the document ID is wrong, we need to move the document
+                if (doc.id !== expectedDocId) {
+                    recordsFixed++;
+                    
+                    // Create a new document with the correct ID and data
+                    const correctDocRef = db.collection("attendance").doc(expectedDocId);
+                    const correctedData = { ...record, date: correctLocalDateString };
+                    batch.set(correctDocRef, correctedData);
+                    
+                    // Delete the old document with the incorrect ID
+                    batch.delete(doc.ref);
+                } 
+                // If the ID is right but the inner date field is wrong, just update it
+                else if (record.date !== correctLocalDateString) {
                     recordsFixed++;
                     batch.update(doc.ref, { date: correctLocalDateString });
                 }
