@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { calculateSeniority, formatDateForDisplay } from '../utils/dateHelpers';
+import { EyeIcon, EyeOffIcon } from 'lucide-react'; // Import icons
 
 // Helper component for displaying information rows
 const InfoRow = ({ label, value }) => (
@@ -24,8 +25,10 @@ const formatRate = (job) => {
     return job.payType === 'Hourly' ? `${rateString} THB / hour` : `${rateString} THB / month`;
 };
 
-
 export default function MyProfilePage({ staffProfile }) {
+    // --- NEW: State to manage salary visibility ---
+    const [isSalaryVisible, setIsSalaryVisible] = useState(false);
+
     if (!staffProfile) {
         return <p className="text-center text-gray-400">Loading profile information...</p>;
     }
@@ -61,8 +64,24 @@ export default function MyProfilePage({ staffProfile }) {
                         <InfoRow label="Seniority" value={calculateSeniority(staffProfile.startDate, null)} />
                         <InfoRow label="Current Department" value={currentJob.department} />
                         <InfoRow label="Current Position" value={currentJob.position} />
+                        
+                        {/* --- MODIFIED: Pay Rate section with reveal button --- */}
                         <div className="md:col-span-2">
-                            <InfoRow label="Current Pay Rate" value={formatRate(currentJob)} />
+                             <div>
+                                <p className="text-sm font-medium text-gray-400">Current Pay Rate</p>
+                                <div className="mt-1 flex items-center space-x-3">
+                                    <p className="text-lg text-white">
+                                        {isSalaryVisible ? formatRate(currentJob) : '***** THB / month'}
+                                    </p>
+                                    <button 
+                                        onClick={() => setIsSalaryVisible(!isSalaryVisible)} 
+                                        className="text-gray-400 hover:text-white transition-colors"
+                                        title={isSalaryVisible ? 'Hide salary' : 'Show salary'}
+                                    >
+                                        {isSalaryVisible ? <EyeOffIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
