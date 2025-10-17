@@ -5,6 +5,14 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { rate: 0, payType: 'Monthly', department: 'N/A' }; } const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) { return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' }; } return latestJob; };
 const calculateHours = (start, end) => { if (!start?.toDate || !end?.toDate) return 0; const diffMillis = end.toDate() - start.toDate(); return diffMillis / (1000 * 60 * 60); };
 
+// --- NEW HELPER: Creates a YYYY-MM-DD string from a Date object without timezone conversion ---
+const toLocalDateString = (date) => {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 export default function usePayrollGenerator(db, staffList, companyConfig, payPeriod) {
     const [payrollData, setPayrollData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -22,26 +30,22 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         try {
             const year = payPeriod.year;
             const month = payPeriod.month - 1;
-            const startDate = new Date(year, month, 1);
-            const endDate = new Date(year, month + 1, 0);
+            const startDate = new Date(Date.UTC(year, month, 1));
+            const endDate = new Date(Date.UTC(year, month + 1, 0));
+
+            // --- MODIFIED: Use the new helper for query date strings ---
+            const startDateStr = toLocalDateString(startDate);
+            const endDateStr = toLocalDateString(endDate);
 
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
-            // --- MODIFIED: Final, correct eligibility filter ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
                 const staffStartDate = new Date(staff.startDate);
                 const staffEndDate = staff.endDate ? new Date(staff.endDate) : null;
-
-                // Rule 1: Employee must have started before the END of the pay period.
                 const hasStarted = staffStartDate <= endDate;
-
-                // Rule 2: Employee must not have left before the START of the pay period.
-                // This correctly includes active staff (no end date) and inactive staff
-                // whose employment period overlaps with the current pay period.
                 const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startDate;
-
                 return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod;
             });
             
@@ -52,7 +56,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 return;
             }
 
-            const daysInMonth = endDate.getDate();
+            const daysInMonth = endDate.getUTCDate();
             
             const functions = getFunctions();
             const calculateBonus = httpsCallable(functions, 'calculateBonus');
@@ -61,8 +65,9 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 attendanceSnapshot, scheduleSnapshot, allLeaveSnapshot, advancesSnapshot,
                 loansSnapshot, adjustmentsSnapshot, bonusResults
             ] = await Promise.all([
-                getDocs(query(collection(db, "attendance"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]))),
-                getDocs(query(collection(db, "schedules"), where("date", ">=", startDate.toISOString().split('T')[0]), where("date", "<=", endDate.toISOString().split('T')[0]))),
+                // --- MODIFIED: Use the new date strings in all queries ---
+                getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr))),
+                getDocs(query(collection(db, "schedules"), where("date", ">=", startDateStr), where("date", "<=", endDateStr))),
                 getDocs(query(collection(db, "leave_requests"), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
