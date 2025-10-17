@@ -547,3 +547,61 @@ exports.exportStaffData = https.onCall({ region: "us-central1" }, async (request
         throw new HttpsError("internal", "An unexpected error occurred while exporting data.", error.message);
     }
 });
+
+exports.correctAttendanceDates = https.onCall({ region: "us-central1", timeoutSeconds: 540 }, async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
+    }
+    const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
+        throw new HttpsError("permission-denied", "Only managers can run this function.");
+    }
+
+    try {
+        const attendanceSnap = await db.collection("attendance").get();
+        if (attendanceSnap.empty) {
+            return { result: "No attendance records found to check." };
+        }
+
+        const batch = db.batch();
+        let recordsChecked = 0;
+        let recordsFixed = 0;
+        const timeZone = "Asia/Bangkok"; // Your local timezone
+
+        attendanceSnap.forEach(doc => {
+            recordsChecked++;
+            const record = doc.data();
+            const storedDate = record.date;
+            
+            // Check if checkInTime exists and is a valid timestamp
+            if (record.checkInTime && typeof record.checkInTime.toDate === 'function') {
+                const checkInTimestamp = record.checkInTime.toDate();
+
+                // Get the date components from the timestamp, interpreted in your local timezone
+                const localDate = new Date(checkInTimestamp.toLocaleString("en-US", { timeZone }));
+                const year = localDate.getFullYear();
+                const month = String(localDate.getMonth() + 1).padStart(2, '0');
+                const day = String(localDate.getDate()).padStart(2, '0');
+                const correctLocalDateString = `${year}-${month}-${day}`;
+
+                // If the stored date doesn't match the correct local date, fix it
+                if (storedDate !== correctLocalDateString) {
+                    recordsFixed++;
+                    batch.update(doc.ref, { date: correctLocalDateString });
+                }
+            }
+        });
+
+        if (recordsFixed > 0) {
+            await batch.commit();
+        }
+
+        return { 
+            result: `Scan complete. Checked ${recordsChecked} records and fixed ${recordsFixed}.`
+        };
+
+    } catch (error) {
+        console.error("Error correcting attendance dates:", error);
+        throw new HttpsError("internal", "An unexpected error occurred while correcting data.", error.message);
+    }
+});
