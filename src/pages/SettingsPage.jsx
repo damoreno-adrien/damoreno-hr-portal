@@ -1,17 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { PlusIcon, TrashIcon } from '../components/Icons';
 
 export default function SettingsPage({ db, companyConfig }) {
-    const defaultConfig = {
+    const defaultConfig = { 
         companyName: '',
         companyAddress: '',
         companyTaxId: '',
         companyLogoUrl: '',
-        departments: [],
-        paidSickDays: 30,
+        departments: [], 
+        paidSickDays: 30, 
         paidPersonalDays: 3,
         annualLeaveDays: 6,
         publicHolidays: [],
@@ -29,8 +28,6 @@ export default function SettingsPage({ db, companyConfig }) {
     const [newDepartment, setNewDepartment] = useState('');
     const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
     const [isSaving, setIsSaving] = useState(false);
-    const [isFixingData, setIsFixingData] = useState(false);
-    const [fixResult, setFixResult] = useState('');
 
     useEffect(() => {
         if (companyConfig) {
@@ -64,7 +61,7 @@ export default function SettingsPage({ db, companyConfig }) {
             setLogoPreview(URL.createObjectURL(file));
         }
     };
-
+    
     const handleSaveSettings = async () => {
         setIsSaving(true);
         const configDocRef = doc(db, 'settings', 'company_config');
@@ -100,26 +97,6 @@ export default function SettingsPage({ db, companyConfig }) {
         }
     };
 
-    // --- NEW: Handler for the data fix button ---
-    const handleFixAttendanceDates = async () => {
-        if (!window.confirm("This will scan all attendance records and correct any with a mismatched date due to old timezone bugs. This operation is safe to run multiple times. Do you want to proceed?")) {
-            return;
-        }
-        setIsFixingData(true);
-        setFixResult('Starting scan...');
-        try {
-            const functions = getFunctions();
-            const correctAttendanceDates = httpsCallable(functions, 'correctAttendanceDates');
-            const response = await correctAttendanceDates();
-            setFixResult(response.data.result);
-        } catch (error) {
-            console.error("Error fixing attendance dates:", error);
-            setFixResult(`Error: ${error.message}`);
-        } finally {
-            setIsFixingData(false);
-        }
-    };
-
     const handleAddDepartment = async (e) => { e.preventDefault(); if (!newDepartment.trim()) return; await updateDoc(doc(db, 'settings', 'company_config'), { departments: arrayUnion(newDepartment.trim()) }); setNewDepartment(''); };
     const handleDeleteDepartment = async (dept) => { if (window.confirm(`Delete "${dept}"?`)) { await updateDoc(doc(db, 'settings', 'company_config'), { departments: arrayRemove(dept) }); } };
     const handleAddHoliday = async (e) => { e.preventDefault(); if (!newHoliday.date || !newHoliday.name.trim()) return; await updateDoc(doc(db, 'settings', 'company_config'), { publicHolidays: arrayUnion({ date: newHoliday.date, name: newHoliday.name.trim() }) }); setNewHoliday({ date: '', name: '' }); };
@@ -128,7 +105,7 @@ export default function SettingsPage({ db, companyConfig }) {
     return (
         <div>
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Advanced Settings</h2>
-
+            
             <div className="space-y-8">
                 <div id="company-info" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8">
                     <h3 className="text-xl font-semibold text-white">Company Information</h3>
@@ -138,7 +115,7 @@ export default function SettingsPage({ db, companyConfig }) {
                         <div className="md:col-span-2"><label htmlFor="companyAddress" className="block text-sm font-medium text-gray-300 mb-1">Company Address</label><textarea id="companyAddress" value={config.companyAddress || ''} onChange={handleConfigChange} rows="3" className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"></textarea></div>
                         <div><label htmlFor="companyTaxId" className="block text-sm font-medium text-gray-300 mb-1">Company Tax ID</label><input type="text" id="companyTaxId" value={config.companyTaxId || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     </div>
-                    <div className="mt-6"><label className="block text-sm font-medium text-gray-300 mb-1">Company Logo</label><div className="flex items-center space-x-4">{logoPreview && <img src={logoPreview} alt="Logo Preview" className="h-16 w-16 object-contain rounded-md bg-white p-1" />}<input type="file" accept="image/png, image/jpeg" onChange={handleLogoChange} className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700" /></div></div>
+                    <div className="mt-6"><label className="block text-sm font-medium text-gray-300 mb-1">Company Logo</label><div className="flex items-center space-x-4">{logoPreview && <img src={logoPreview} alt="Logo Preview" className="h-16 w-16 object-contain rounded-md bg-white p-1" />}<input type="file" accept="image/png, image/jpeg" onChange={handleLogoChange} className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700"/></div></div>
                 </div>
 
                 <div id="attendance-bonus" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8">
@@ -190,12 +167,12 @@ export default function SettingsPage({ db, companyConfig }) {
                         <div><label htmlFor="publicHolidayCreditCap" className="block text-sm font-medium text-gray-300 mb-1">Max Holiday Credits / Year</label><input type="number" id="publicHolidayCreditCap" value={config.publicHolidayCreditCap || ''} onChange={handleConfigChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     </div>
                     <form onSubmit={handleAddHoliday} className="mt-6 flex flex-col sm:flex-row items-stretch sm:space-x-4 space-y-2 sm:space-y-0">
-                        <input type="date" value={newHoliday.date} onChange={(e) => setNewHoliday(p => ({ ...p, date: e.target.value }))} className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
-                        <input type="text" value={newHoliday.name} onChange={(e) => setNewHoliday(p => ({ ...p, name: e.target.value }))} placeholder="Holiday name" className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                        <input type="date" value={newHoliday.date} onChange={(e) => setNewHoliday(p => ({...p, date: e.target.value}))} className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"/>
+                        <input type="text" value={newHoliday.name} onChange={(e) => setNewHoliday(p => ({...p, name: e.target.value}))} placeholder="Holiday name" className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                         <button type="submit" className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Add Holiday</button>
                     </form>
                     <div className="mt-8 space-y-3 max-h-60 overflow-y-auto">
-                        {(config.publicHolidays || []).sort((a, b) => a.date.localeCompare(b.date)).map(holiday => (<div key={holiday.date} className="flex justify-between items-center bg-gray-700 p-3 rounded-lg"><div><span className="text-white font-semibold">{holiday.name}</span><span className="text-sm text-gray-400 ml-4">{new Date(holiday.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</span></div><button onClick={() => handleDeleteHoliday(holiday)} className="text-red-400 hover:text-red-300"><TrashIcon className="h-5 w-5" /></button></div>))}
+                        {(config.publicHolidays || []).sort((a,b) => a.date.localeCompare(b.date)).map(holiday => (<div key={holiday.date} className="flex justify-between items-center bg-gray-700 p-3 rounded-lg"><div><span className="text-white font-semibold">{holiday.name}</span><span className="text-sm text-gray-400 ml-4">{new Date(holiday.date + 'T00:00:00').toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric'})}</span></div><button onClick={() => handleDeleteHoliday(holiday)} className="text-red-400 hover:text-red-300"><TrashIcon className="h-5 w-5" /></button></div>))}
                     </div>
                 </div>
 
@@ -216,30 +193,6 @@ export default function SettingsPage({ db, companyConfig }) {
                     </form>
                     <div className="mt-8 space-y-3">
                         {(config.departments || []).map(dept => (<div key={dept} className="flex justify-between items-center bg-gray-700 p-3 rounded-lg"><span className="text-white">{dept}</span><button onClick={() => handleDeleteDepartment(dept)} className="text-red-400 hover:text-red-300"><TrashIcon className="h-5 w-5" /></button></div>))}
-                    </div>
-                </div>
-                <div id="data-integrity" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8">
-                    <h3 className="text-xl font-semibold text-white">Data Integrity Tools</h3>
-                    <p className="text-gray-400 mt-2">Use these tools to fix data inconsistencies caused by past bugs. It's safe to run these multiple times.</p>
-                    <div className="mt-6 border-t border-gray-700 pt-6">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                            <div className="mb-4 sm:mb-0">
-                                <h4 className="text-md font-semibold text-gray-200">Correct Attendance Dates</h4>
-                                <p className="text-sm text-gray-400">Scans all attendance records and fixes dates that were incorrectly saved due to past timezone bugs.</p>
-                            </div>
-                            <button
-                                onClick={handleFixAttendanceDates}
-                                disabled={isFixingData}
-                                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold disabled:bg-gray-600 w-full sm:w-48 text-center transition-colors"
-                            >
-                                {isFixingData ? 'Scanning...' : 'Run Fix'}
-                            </button>
-                        </div>
-                        {fixResult && (
-                            <p className={`mt-4 text-sm font-medium ${fixResult.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>
-                                Result: {fixResult}
-                            </p>
-                        )}
                     </div>
                 </div>
             </div>
