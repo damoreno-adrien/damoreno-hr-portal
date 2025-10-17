@@ -147,8 +147,16 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const latestPayslipQuery = db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get();
 
 
+        // --- THIS BLOCK IS FIXED ---
         const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([
-            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipSnap
+            staffProfileRef, 
+            configRef, 
+            advancesQuery, 
+            loansQuery, 
+            schedulesQuery, 
+            attendanceQuery, 
+            leaveQuery, 
+            latestPayslipQuery // Corrected variable
         ]);
 
         if (!staffProfileSnap.exists) throw new HttpsError("not-found", "Staff profile not found.");
@@ -170,7 +178,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         
         const activeLoans = loansSnap.docs.map(doc => doc.data());
         const loanRepayment = activeLoans.reduce((sum, loan) => sum + loan.recurringPayment, 0);
-
         const baseSalaryEarned = dailyRate * daysPassed;
         const bonusRules = companyConfig.attendanceBonus || {};
         const schedules = schedulesSnap.docs.map(doc => doc.data());
@@ -182,7 +189,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
             if (!attendance) { 
                 absenceCount++; 
             } else {
-                // --- MODIFIED: Added a check to ensure checkInTime exists ---
                 if (attendance.checkInTime && typeof attendance.checkInTime.toDate === 'function') {
                     const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
                     const actualCheckIn = attendance.checkInTime.toDate();
