@@ -13,6 +13,8 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             phoneNumber: staff.phoneNumber || '',
             birthdate: staff.birthdate || '',
             bankAccount: staff.bankAccount || '',
+            // --- NEW: Add startDate to initial form data ---
+            startDate: staff.startDate || '',
         };
 
         if (staff.firstName || staff.lastName) {
@@ -68,6 +70,8 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 phoneNumber: formData.phoneNumber,
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
+                // --- NEW: Add startDate to the update object ---
+                startDate: formData.startDate,
                 fullName: null
             });
             setIsEditing(false);
@@ -208,6 +212,8 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                     <div><label className="text-sm text-gray-400">Nickname</label><input id="nickname" value={formData.nickname} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Phone Number</label><input id="phoneNumber" value={formData.phoneNumber} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
+                                    {/* --- NEW: Editable start date field --- */}
+                                    <div><label className="text-sm text-gray-400">Start Date</label><input id="startDate" type="date" value={formData.startDate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div className="md:col-span-2"><label className="text-sm text-gray-400">Bank Account</label><input id="bankAccount" value={formData.bankAccount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                 </>
@@ -218,6 +224,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                     <InfoRow label="Nickname" value={staff.nickname} />
                                     <InfoRow label="Email Address" value={staff.email} />
                                     <InfoRow label="Phone Number" value={staff.phoneNumber} />
+                                    {/* --- NEW: Display start date --- */}
+                                    <InfoRow label="Start Date" value={staff.startDate} />
+                                    <InfoRow label="Birthdate" value={staff.birthdate} />
                                     <div className="md:col-span-2"><InfoRow label="Bank Account" value={staff.bankAccount} /></div>
                                     <hr className="md:col-span-2 border-gray-700 my-2" />
                                     <InfoRow label="Current Department" value={currentJob.department} />
