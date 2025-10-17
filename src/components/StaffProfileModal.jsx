@@ -3,8 +3,7 @@ import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { PlusIcon, TrashIcon } from './Icons';
-// --- NEW: Import the external function ---
-import { calculateSeniority } from '../utils/dateHelpers';
+import { calculateSeniority, formatDateForDisplay } from '../utils/dateHelpers';
 
 export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
     const [activeTab, setActiveTab] = useState('details');
@@ -218,14 +217,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                 </>
                             ) : (
                                 <>
-                                    {staff.status === 'inactive' && <InfoRow label="Last Day of Employment" value={staff.endDate} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
+                                    {staff.status === 'inactive' && <InfoRow label="Last Day of Employment" value={formatDateForDisplay(staff.endDate)} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
                                     <InfoRow label="Legal Name" value={displayName} />
                                     <InfoRow label="Nickname" value={staff.nickname} />
                                     <InfoRow label="Email Address" value={staff.email} />
                                     <InfoRow label="Phone Number" value={staff.phoneNumber} />
-                                    <InfoRow label="Start Date" value={staff.startDate} />
-                                    {/* --- NEW: Seniority display --- */}
+                                    <InfoRow label="Start Date" value={formatDateForDisplay(staff.startDate)} />
                                     <InfoRow label="Seniority" value={calculateSeniority(staff.startDate, staff.endDate)} />
+                                    <InfoRow label="Birthdate" value={formatDateForDisplay(staff.birthdate)} />
                                     <div className="md:col-span-2"><InfoRow label="Bank Account" value={staff.bankAccount} /></div>
                                     <hr className="md:col-span-2 border-gray-700 my-2" />
                                     <InfoRow label="Current Department" value={currentJob.department} />
@@ -245,7 +244,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                             {error && <p className="text-red-400 text-sm text-right mt-2">{error}</p>}
                         </div>
                     ) : ( <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600"><PlusIcon className="h-5 w-5 mr-2"/>Add New Job Role</button> )}
-                    <div className="space-y-2 max-h-40 overflow-y-auto">{sortedJobHistory.map((job, index) => (<div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group"><div><p className="font-bold">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p><p className="text-sm text-amber-400">{formatRate(job)}</p></div><div className="flex items-center space-x-3"><p className="text-sm text-gray-300">{job.startDate}</p><button onClick={() => handleDeleteJob(job)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><TrashIcon className="h-5 w-5"/></button></div></div>))}</div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">{sortedJobHistory.map((job, index) => (<div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group"><div><p className="font-bold">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p><p className="text-sm text-amber-400">{formatRate(job)}</p></div><div className="flex items-center space-x-3"><p className="text-sm text-gray-300">{formatDateForDisplay(job.startDate)}</p><button onClick={() => handleDeleteJob(job)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><TrashIcon className="h-5 w-5"/></button></div></div>))}</div>
                     {userRole === 'manager' && (<div className="bg-gray-800 rounded-lg p-4 border border-gray-700"><h4 className="text-base font-semibold text-white">Bonus Management</h4><p className="text-sm text-gray-400 mt-1">Manually set the bonus streak.</p><div className="mt-4 flex items-center space-x-4"><p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p><input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" /><button onClick={handleSetBonusStreak} className="px-4 py-1 rounded-md bg-blue-600 text-sm">Set Streak</button></div></div>)}
                 </div>
             )}
