@@ -1,5 +1,5 @@
 const { HttpsError, https } = require("firebase-functions/v2");
-const { onSchedule } = require("firebase-functions/v2/scheduler"); // Correct import for scheduled functions
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
@@ -8,6 +8,8 @@ const { Parser } = require('json2csv');
 admin.initializeApp();
 const db = getFirestore();
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// ... (All other functions remain unchanged) ...
 
 exports.createUser = https.onRequest({ region: "us-central1" }, (req, res) => {
   cors(req, res, async () => {
@@ -85,7 +87,6 @@ exports.calculateBonus = https.onCall({ region: "us-central1" }, async (request)
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile not found.");
         const currentStreak = staffProfileDoc.data().bonusStreak || 0;
 
-        // --- MODIFIED: Use Date.UTC to prevent timezone errors ---
         const startDate = new Date(Date.UTC(year, month - 1, 1)).toISOString().split('T')[0];
         const endDate = new Date(Date.UTC(year, month, 0)).toISOString().split('T')[0];
 
@@ -280,7 +281,6 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
     if (!request.auth) { throw new HttpsError("unauthenticated", "You must be logged in to perform this action."); }
     const staffId = request.auth.uid;
     try {
-        // --- MODIFIED: Use Date.UTC to prevent timezone errors ---
         const today = new Date();
         const year = today.getUTCFullYear();
         const month = today.getUTCMonth(); // 0-indexed
@@ -357,21 +357,37 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
     }
 });
 
+// --- MODIFIED: autoCheckout function with robust timezone fix ---
 exports.autoCheckout = onSchedule({ region: "us-central1", schedule: "every day 05:00" }, async (event) => {
     console.log("Running auto-checkout function.");
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    // Use the restaurant's local timezone (Asia/Bangkok for ICT)
+    const timeZone = "Asia/Bangkok";
+    
+    // Get the current date object based on the local timezone
+    const nowInLocalTime = new Date(new Date().toLocaleString("en-US", { timeZone }));
+
+    // Calculate yesterday's date based on that local time
+    const yesterdayInLocalTime = new Date(nowInLocalTime);
+    yesterdayInLocalTime.setDate(yesterdayInLocalTime.getDate() - 1);
+    
+    // Manually format the local yesterday's date into YYYY-MM-DD
+    const year = yesterdayInLocalTime.getFullYear();
+    const month = String(yesterdayInLocalTime.getMonth() + 1).padStart(2, '0');
+    const day = String(yesterdayInLocalTime.getDate()).padStart(2, '0');
+    const yesterdayStr = `${year}-${month}-${day}`;
+    
     const attendanceQuery = db.collection("attendance")
         .where("date", "==", yesterdayStr)
         .where("checkInTime", "!=", null)
         .where("checkOutTime", "==", null);
+        
     const incompleteRecordsSnap = await attendanceQuery.get();
     if (incompleteRecordsSnap.empty) {
-        console.log("No incomplete records found for yesterday. Exiting.");
+        console.log(`No incomplete records found for ${yesterdayStr}. Exiting.`);
         return null;
     }
+    
     console.log(`Found ${incompleteRecordsSnap.size} incomplete records for ${yesterdayStr}.`);
     const schedulesQuery = db.collection("schedules").where("date", "==", yesterdayStr);
     const schedulesSnap = await schedulesQuery.get();
@@ -380,8 +396,10 @@ exports.autoCheckout = onSchedule({ region: "us-central1", schedule: "every day 
         const data = doc.data();
         schedulesMap.set(data.staffId, data);
     });
+    
     const batch = db.batch();
     let updatedCount = 0;
+    
     incompleteRecordsSnap.forEach(doc => {
         const attendanceData = doc.data();
         const staffSchedule = schedulesMap.get(attendanceData.staffId);
@@ -395,6 +413,7 @@ exports.autoCheckout = onSchedule({ region: "us-central1", schedule: "every day 
             console.log(`Could not find a schedule with an end time for ${attendanceData.staffName}. Skipping.`);
         }
     });
+    
     if (updatedCount > 0) {
         await batch.commit();
         console.log(`Successfully updated ${updatedCount} records.`);
