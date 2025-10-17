@@ -28,12 +28,21 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
+            // --- MODIFIED: Smarter filter to include staff in their final month ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
-                // --- MODIFIED: More flexible check for active status ---
-                const isActive = staff.status === undefined || staff.status === 'active';
                 const hasStarted = new Date(staff.startDate) <= endDate;
-                return !isAlreadyFinalized && isActive && hasStarted;
+
+                // An employee is eligible if they are currently active, OR if they became inactive
+                // but their end date is within the pay period we are calculating.
+                const isCurrentlyActive = staff.status === undefined || staff.status === 'active';
+                const leftThisPeriod = staff.endDate && 
+                                       new Date(staff.endDate).getFullYear() === year &&
+                                       new Date(staff.endDate).getMonth() === month;
+
+                const isEligibleForPeriod = isCurrentlyActive || leftThisPeriod;
+
+                return !isAlreadyFinalized && hasStarted && isEligibleForPeriod;
             });
             
             if (staffToProcess.length === 0 && staffList.length > 0) {
