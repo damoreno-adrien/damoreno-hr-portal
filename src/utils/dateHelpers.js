@@ -9,7 +9,7 @@ export const formatDateForDisplay = (dateString) => {
     if (!dateString || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         return '';
     }
-    // Adding 'T00:00:00' and 'Z' treats the date as UTC to prevent timezone shifts
+    // Adding 'T00:00:00Z' treats the date as UTC to prevent timezone shifts
     const date = new Date(`${dateString}T00:00:00Z`);
     return date.toLocaleDateString('en-GB', {
         day: 'numeric',
@@ -50,7 +50,8 @@ export const calculateSeniority = (startDate, endDate) => {
     const parts = [];
     if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`);
     if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`);
-    if (days > 0) parts.push(`${day} day${days > 1 ? 's' : ''}`);
+    // --- THIS LINE IS FIXED ---
+    if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`);
     
     return parts.length > 0 ? parts.join(', ') : '0 days';
 };
