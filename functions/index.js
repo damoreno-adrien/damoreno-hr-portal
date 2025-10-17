@@ -76,7 +76,7 @@ exports.deleteStaff = https.onCall({ region: "us-central1" }, async (request) =>
 exports.calculateBonus = https.onCall({ region: "us-central1" }, async (request) => {
     if (!request.auth || !request.data.staffId || !request.data.payPeriod) { throw new HttpsError("invalid-argument", "Required data is missing."); }
     const { staffId, payPeriod } = request.data;
-    const { year, month } = payPeriod;
+    const { year, month } = payPeriod; // month is 1-indexed here
     try {
         const configDoc = await db.collection("settings").doc("company_config").get();
         if (!configDoc.exists) throw new HttpsError("not-found", "Company config not found.");
@@ -84,8 +84,11 @@ exports.calculateBonus = https.onCall({ region: "us-central1" }, async (request)
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile not found.");
         const currentStreak = staffProfileDoc.data().bonusStreak || 0;
-        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+
+        // --- MODIFIED: Use Date.UTC to prevent timezone errors ---
+        const startDate = new Date(Date.UTC(year, month - 1, 1)).toISOString().split('T')[0];
+        const endDate = new Date(Date.UTC(year, month, 0)).toISOString().split('T')[0];
+
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDate).where("date", "<=", endDate);
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDate).where("date", "<=", endDate);
         const [schedulesSnapshot, attendanceSnapshot] = await Promise.all([schedulesQuery.get(), attendanceQuery.get()]);
@@ -124,7 +127,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
     const staffId = request.auth.uid;
 
     try {
-        // --- 1. Date Setup (MODIFIED to use UTC) ---
         const today = new Date();
         const year = today.getUTCFullYear();
         const month = today.getUTCMonth(); // 0-indexed
@@ -134,7 +136,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const startDateOfMonthStr = new Date(Date.UTC(year, month, 1)).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
 
-        // --- 2. Parallel Data Fetching (No changes here) ---
         const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
         const configRef = db.collection("settings").doc("company_config").get();
         const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month + 1).where("status", "in", ["approved", "pending"]).get();
@@ -144,7 +145,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr).get();
         const latestPayslipQuery = db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get();
 
-
         const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([
             staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipSnap
         ]);
@@ -152,7 +152,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         if (!staffProfileSnap.exists) throw new HttpsError("not-found", "Staff profile not found.");
         if (!configSnap.exists) throw new HttpsError("not-found", "Company config not found.");
         
-        // --- 3. Process Fetched Data (No changes here) ---
         const staffProfile = staffProfileSnap.data();
         const companyConfig = configSnap.data();
         const latestJob = (staffProfile.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
@@ -169,11 +168,7 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         
         const activeLoans = loansSnap.docs.map(doc => doc.data());
         const loanRepayment = activeLoans.reduce((sum, loan) => sum + loan.recurringPayment, 0);
-
-        // --- 4. Calculate Earnings (No changes here) ---
         const baseSalaryEarned = dailyRate * daysPassed;
-
-        // --- 5. Calculate Potential Bonus (No changes here) ---
         const bonusRules = companyConfig.attendanceBonus || {};
         const schedules = schedulesSnap.docs.map(doc => doc.data());
         const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
@@ -195,7 +190,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
             else potentialBonus = bonusRules.month3 || 0;
         }
 
-        // --- 6. Calculate Deductions (No changes here) ---
         const approvedLeave = leaveSnap.docs.map(doc => doc.data());
         let unpaidAbsencesCount = 0;
         schedules.forEach(schedule => {
@@ -215,7 +209,6 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
 
         const latestPayslip = latestPayslipSnap.docs.length > 0 ? { id: latestPayslipSnap.docs[0].id, ...latestPayslipSnap.docs[0].data() } : null;
 
-        // --- 7. Return Result (No changes here) ---
         return {
             baseSalaryEarned: baseSalaryEarned,
             potentialBonus: {
@@ -249,7 +242,6 @@ exports.finalizeAndStorePayslips = https.onCall({ region: "us-central1" }, async
     const { payrollData, payPeriod } = request.data;
     const { year, month } = payPeriod;
 
-    // Verify user is a manager
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
     if (!callerDoc.exists || callerDoc.data().role !== "manager") {
         throw new HttpsError("permission-denied", "Only managers can finalize payroll.");
@@ -258,24 +250,20 @@ exports.finalizeAndStorePayslips = https.onCall({ region: "us-central1" }, async
     const batch = db.batch();
 
     payrollData.forEach(payslip => {
-        // 1. Create a reference for the new payslip document
         const payslipId = `${payslip.id}_${year}_${month}`;
         const payslipRef = db.collection("payslips").doc(payslipId);
 
-        // 2. Add the operation to create the payslip document to the batch
         batch.set(payslipRef, {
             staffId: payslip.id,
-            staffName: payslip.name, // Legal name
+            staffName: payslip.name,
             payPeriodYear: year,
             payPeriodMonth: month,
             generatedAt: FieldValue.serverTimestamp(),
-            // Store a complete snapshot of the data
             ...payslip
         });
 
-        // 3. Add the operation to update the bonus streak to the batch
         const staffRef = db.collection("staff_profiles").doc(payslip.id);
-        const bonusInfo = payslip.bonusInfo || { newStreak: 0 }; // Ensure bonusInfo exists
+        const bonusInfo = payslip.bonusInfo || { newStreak: 0 };
         batch.update(staffRef, { bonusStreak: bonusInfo.newStreak });
     });
 
@@ -292,14 +280,15 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
     if (!request.auth) { throw new HttpsError("unauthenticated", "You must be logged in to perform this action."); }
     const staffId = request.auth.uid;
     try {
+        // --- MODIFIED: Use Date.UTC to prevent timezone errors ---
         const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
+        const year = today.getUTCFullYear();
+        const month = today.getUTCMonth(); // 0-indexed
+        
+        const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        const startDateOfMonthStr = new Date(Date.UTC(year, month, 1)).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
-        const monthYearStr = `${year}-${String(month + 1).padStart(2, '0')}`;
-
+        
         const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
         if (!staffProfileDoc.exists) throw new HttpsError("not-found", "Staff profile could not be found.");
         
@@ -346,10 +335,7 @@ exports.calculateAdvanceEligibility = https.onCall({ region: "us-central1" }, as
         const absenceDeductions = dailyRate * unpaidAbsences;
         const currentSalaryDue = Math.max(0, baseSalary - absenceDeductions);
         
-        // --- KEY CHANGE ---
-        // Read the percentage from config, with a fallback to 50
         const advancePercentage = companyConfig.advanceEligibilityPercentage || 50;
-        // Use the dynamic percentage in the calculation
         const maxTheoreticalAdvance = Math.floor(currentSalaryDue * (advancePercentage / 100));
 
         const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
@@ -419,7 +405,6 @@ exports.autoCheckout = onSchedule({ region: "us-central1", schedule: "every day 
 });
 
 exports.deletePayrollRun = https.onCall({ region: "us-central1" }, async (request) => {
-    // 1. Authentication & Validation
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
@@ -435,7 +420,6 @@ exports.deletePayrollRun = https.onCall({ region: "us-central1" }, async (reques
     const { year, month } = payPeriod;
 
     try {
-        // 2. Find all payslips for the given period
         const payslipsQuery = db.collection("payslips")
             .where("payPeriodYear", "==", year)
             .where("payPeriodMonth", "==", month);
@@ -446,7 +430,6 @@ exports.deletePayrollRun = https.onCall({ region: "us-central1" }, async (reques
             return { result: "No payslips found for this period. Nothing to delete." };
         }
 
-        // 3. Use a batch write to delete payslips and revert bonus streaks
         const batch = db.batch();
 
         payslipsToDeleteSnap.forEach(doc => {
@@ -454,10 +437,8 @@ exports.deletePayrollRun = https.onCall({ region: "us-central1" }, async (reques
             const staffId = payslipData.staffId;
             const bonusInfo = payslipData.bonusInfo;
 
-            // Add the delete operation for the payslip
             batch.delete(doc.ref);
 
-            // Calculate the previous bonus streak and add the update operation
             if (staffId && bonusInfo) {
                 const previousStreak = bonusInfo.newStreak > 0 ? bonusInfo.newStreak - 1 : 0;
                 const staffRef = db.collection("staff_profiles").doc(staffId);
@@ -465,20 +446,17 @@ exports.deletePayrollRun = https.onCall({ region: "us-central1" }, async (reques
             }
         });
 
-        // 4. Commit all operations at once
         await batch.commit();
 
         return { result: `Successfully deleted ${payslipsToDeleteSnap.size} payslips for ${months[month - 1]} ${year} and reverted bonus streaks.` };
 
     } catch (error) {
         console.error("Error deleting payroll run:", error);
-        // CORRECTED: Added the 'new' keyword
         throw new HttpsError("internal", "An unexpected error occurred while deleting the payroll run.", error.message);
     }
 });
 
 exports.setStaffAuthStatus = https.onCall({ region: "us-central1" }, async (request) => {
-    // 1. Authentication & Validation
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
@@ -492,7 +470,6 @@ exports.setStaffAuthStatus = https.onCall({ region: "us-central1" }, async (requ
     }
 
     try {
-        // 2. Update the user's disabled status in Firebase Auth
         await admin.auth().updateUser(staffId, { disabled: disabled });
 
         return { result: `Successfully ${disabled ? 'disabled' : 'enabled'} the account for user ${staffId}.` };
@@ -503,7 +480,6 @@ exports.setStaffAuthStatus = https.onCall({ region: "us-central1" }, async (requ
 });
 
 exports.exportStaffData = https.onCall({ region: "us-central1" }, async (request) => {
-    // 1. Authentication
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
@@ -513,13 +489,11 @@ exports.exportStaffData = https.onCall({ region: "us-central1" }, async (request
     }
 
     try {
-        // 2. Fetch all staff profiles
         const staffSnap = await db.collection("staff_profiles").get();
         if (staffSnap.empty) {
-            return { csvData: "" }; // Return empty string if no staff
+            return { csvData: "" };
         }
 
-        // 3. Format the data for CSV
         const records = staffSnap.docs.map(doc => {
             const staff = doc.data();
             const latestJob = (staff.jobHistory || [])
@@ -543,12 +517,10 @@ exports.exportStaffData = https.onCall({ region: "us-central1" }, async (request
             };
         });
 
-        // 4. Define CSV headers and create the CSV string
         const fields = ['FirstName', 'LastName', 'Nickname', 'Email', 'PhoneNumber', 'Birthdate', 'StartDate', 'Status', 'EndDate', 'Department', 'Position', 'PayType', 'Rate', 'BankAccount'];
         const json2csvParser = new Parser({ fields });
         const csv = json2csvParser.parse(records);
 
-        // 5. Return the CSV data
         return { csvData: csv };
 
     } catch (error) {
