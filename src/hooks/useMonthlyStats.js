@@ -17,10 +17,10 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         const calculate = async () => {
             setIsLoading(true);
             const now = new Date();
-            const year = now.getFullYear();
-            const month = now.getMonth();
-            const startDate = new Date(year, month, 1).toISOString().split('T')[0];
-            const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
+            const year = now.getUTCFullYear();
+            const month = now.getUTCMonth();
+            const startDate = new Date(Date.UTC(year, month, 1)).toISOString().split('T')[0];
+            const endDate = new Date(Date.UTC(year, month + 1, 0)).toISOString().split('T')[0];
 
             const schedulesQuery = query(collection(db, "schedules"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
             const attendanceQuery = query(collection(db, "attendance"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));

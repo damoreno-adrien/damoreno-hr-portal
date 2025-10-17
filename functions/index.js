@@ -124,16 +124,17 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
     const staffId = request.auth.uid;
 
     try {
-        // --- 1. Date Setup ---
+        // --- 1. Date Setup (MODIFIED to use UTC) ---
         const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth(); // 0-indexed
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const daysPassed = today.getDate();
-        const startDateOfMonthStr = new Date(year, month, 1).toISOString().split('T')[0];
+        const year = today.getUTCFullYear();
+        const month = today.getUTCMonth(); // 0-indexed
+        
+        const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        const daysPassed = today.getUTCDate();
+        const startDateOfMonthStr = new Date(Date.UTC(year, month, 1)).toISOString().split('T')[0];
         const todayStr = today.toISOString().split('T')[0];
 
-        // --- 2. Parallel Data Fetching ---
+        // --- 2. Parallel Data Fetching (No changes here) ---
         const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
         const configRef = db.collection("settings").doc("company_config").get();
         const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month + 1).where("status", "in", ["approved", "pending"]).get();
@@ -145,13 +146,13 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
 
 
         const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([
-            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipQuery
+            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipSnap
         ]);
 
         if (!staffProfileSnap.exists) throw new HttpsError("not-found", "Staff profile not found.");
         if (!configSnap.exists) throw new HttpsError("not-found", "Company config not found.");
         
-        // --- 3. Process Fetched Data ---
+        // --- 3. Process Fetched Data (No changes here) ---
         const staffProfile = staffProfileSnap.data();
         const companyConfig = configSnap.data();
         const latestJob = (staffProfile.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
@@ -169,10 +170,10 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const activeLoans = loansSnap.docs.map(doc => doc.data());
         const loanRepayment = activeLoans.reduce((sum, loan) => sum + loan.recurringPayment, 0);
 
-        // --- 4. Calculate Earnings ---
+        // --- 4. Calculate Earnings (No changes here) ---
         const baseSalaryEarned = dailyRate * daysPassed;
 
-        // --- 5. Calculate Potential Bonus ---
+        // --- 5. Calculate Potential Bonus (No changes here) ---
         const bonusRules = companyConfig.attendanceBonus || {};
         const schedules = schedulesSnap.docs.map(doc => doc.data());
         const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
@@ -194,7 +195,7 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
             else potentialBonus = bonusRules.month3 || 0;
         }
 
-        // --- 6. Calculate Deductions ---
+        // --- 6. Calculate Deductions (No changes here) ---
         const approvedLeave = leaveSnap.docs.map(doc => doc.data());
         let unpaidAbsencesCount = 0;
         schedules.forEach(schedule => {
@@ -212,10 +213,9 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const totalEarnings = baseSalaryEarned + potentialBonus;
         const totalDeductions = absenceDeductions + ssoDeduction + advancesAlreadyTaken + loanRepayment;
 
-        // NEW: Extract the latest payslip data
         const latestPayslip = latestPayslipSnap.docs.length > 0 ? { id: latestPayslipSnap.docs[0].id, ...latestPayslipSnap.docs[0].data() } : null;
 
-        // --- 7. Return Result ---
+        // --- 7. Return Result (No changes here) ---
         return {
             baseSalaryEarned: baseSalaryEarned,
             potentialBonus: {
@@ -231,7 +231,7 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
             activeLoans: activeLoans,
             estimatedNetPay: totalEarnings - totalDeductions,
             currentAdvance: currentAdvance,
-            latestPayslip: latestPayslip, // Add the latest payslip to the return object
+            latestPayslip: latestPayslip,
         };
 
     } catch (error) {
