@@ -146,6 +146,7 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("startDate", "<=", todayStr).get();
         const latestPayslipQuery = db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get();
 
+
         const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([
             staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipSnap
         ]);
@@ -169,6 +170,7 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         
         const activeLoans = loansSnap.docs.map(doc => doc.data());
         const loanRepayment = activeLoans.reduce((sum, loan) => sum + loan.recurringPayment, 0);
+
         const baseSalaryEarned = dailyRate * daysPassed;
         const bonusRules = companyConfig.attendanceBonus || {};
         const schedules = schedulesSnap.docs.map(doc => doc.data());
@@ -177,8 +179,18 @@ exports.calculateLivePayEstimate = https.onCall({ region: "us-central1" }, async
         let absenceCount = 0;
         schedules.forEach(schedule => {
             const attendance = attendanceRecords.get(schedule.date);
-            if (!attendance) { absenceCount++; }
-            else if (new Date(`${schedule.date}T${schedule.startTime}`) < attendance.checkInTime.toDate()) { lateCount++; }
+            if (!attendance) { 
+                absenceCount++; 
+            } else {
+                // --- MODIFIED: Added a check to ensure checkInTime exists ---
+                if (attendance.checkInTime && typeof attendance.checkInTime.toDate === 'function') {
+                    const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
+                    const actualCheckIn = attendance.checkInTime.toDate();
+                    if (actualCheckIn > scheduledStart) {
+                        lateCount++;
+                    }
+                }
+            }
         });
         
         let potentialBonus = 0;
