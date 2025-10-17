@@ -4,6 +4,35 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { PlusIcon, TrashIcon } from './Icons';
 
+// --- NEW: Helper function to calculate seniority ---
+const calculateSeniority = (startDate, endDate) => {
+    if (!startDate) return 'N/A';
+    
+    const start = new Date(startDate);
+    const end = endDate ? new Date(endDate) : new Date();
+
+    let years = end.getFullYear() - start.getFullYear();
+    let months = end.getMonth() - start.getMonth();
+    let days = end.getDate() - start.getDate();
+
+    if (days < 0) {
+        months -= 1;
+        days += new Date(end.getFullYear(), end.getMonth(), 0).getDate();
+    }
+    if (months < 0) {
+        years -= 1;
+        months += 12;
+    }
+    
+    const parts = [];
+    if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`);
+    if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`);
+    if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`);
+    
+    return parts.length > 0 ? parts.join(', ') : '0 days';
+};
+
+
 export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
     const [activeTab, setActiveTab] = useState('details');
     
@@ -13,7 +42,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             phoneNumber: staff.phoneNumber || '',
             birthdate: staff.birthdate || '',
             bankAccount: staff.bankAccount || '',
-            // --- NEW: Add startDate to initial form data ---
             startDate: staff.startDate || '',
         };
 
@@ -70,7 +98,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 phoneNumber: formData.phoneNumber,
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
-                // --- NEW: Add startDate to the update object ---
                 startDate: formData.startDate,
                 fullName: null
             });
@@ -212,7 +239,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                     <div><label className="text-sm text-gray-400">Nickname</label><input id="nickname" value={formData.nickname} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Email</label><input id="email" type="email" value={formData.email} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Phone Number</label><input id="phoneNumber" value={formData.phoneNumber} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
-                                    {/* --- NEW: Editable start date field --- */}
                                     <div><label className="text-sm text-gray-400">Start Date</label><input id="startDate" type="date" value={formData.startDate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
                                     <div className="md:col-span-2"><label className="text-sm text-gray-400">Bank Account</label><input id="bankAccount" value={formData.bankAccount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md"/></div>
@@ -224,9 +250,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                     <InfoRow label="Nickname" value={staff.nickname} />
                                     <InfoRow label="Email Address" value={staff.email} />
                                     <InfoRow label="Phone Number" value={staff.phoneNumber} />
-                                    {/* --- NEW: Display start date --- */}
                                     <InfoRow label="Start Date" value={staff.startDate} />
-                                    <InfoRow label="Birthdate" value={staff.birthdate} />
+                                    {/* --- NEW: Seniority display --- */}
+                                    <InfoRow label="Seniority" value={calculateSeniority(staff.startDate, staff.endDate)} />
                                     <div className="md:col-span-2"><InfoRow label="Bank Account" value={staff.bankAccount} /></div>
                                     <hr className="md:col-span-2 border-gray-700 my-2" />
                                     <InfoRow label="Current Department" value={currentJob.department} />
