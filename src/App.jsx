@@ -5,7 +5,7 @@ import { getFirestore, doc, onSnapshot, collection, query, where } from 'firebas
 import { getFunctions } from "firebase/functions";
 import useAuth from './hooks/useAuth';
 import useCompanyConfig from './hooks/useCompanyConfig';
-import useStaffList from './hooks/useStaffList'; // NEW: Import hook
+import useStaffList from './hooks/useStaffList';
 
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
@@ -21,6 +21,7 @@ import FinancialsPage from './pages/FinancialsPage';
 import SalaryAdvancePage from './pages/SalaryAdvancePage';
 import FinancialsDashboardPage from './pages/FinancialsDashboardPage';
 import MyPayslipsPage from './pages/MyPayslipsPage';
+import MyProfilePage from './pages/MyProfilePage';
 import Sidebar from './components/Sidebar';
 import LoginPage from './pages/LoginPage';
 
@@ -45,7 +46,7 @@ export default function App() {
 
     const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db);
     const companyConfig = useCompanyConfig(db);
-    const staffList = useStaffList(db, user); // NEW: Use the hook
+    const staffList = useStaffList(db, user);
 
     useEffect(() => {
         try {
@@ -109,8 +110,6 @@ export default function App() {
         }
     }, [userRole, db, user]);
 
-    // REMOVED: The useEffect for staffList is now in the hook.
-
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
             const currentYear = new Date().getFullYear();
@@ -169,6 +168,7 @@ export default function App() {
             case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} />;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
+            case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
             case 'financials-dashboard': return <FinancialsDashboardPage companyConfig={companyConfig} />;
             case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;

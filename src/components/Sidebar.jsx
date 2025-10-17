@@ -29,13 +29,12 @@ export default function Sidebar({
     pendingLeaveCount, pendingAdvanceCount, unreadLeaveUpdatesCount, unreadAdvanceUpdatesCount,
     isFinancialsMenuOpen, setIsFinancialsMenuOpen, isSettingsMenuOpen, setIsSettingsMenuOpen
 }) {
-    // NEW: Smarter click handler for the Settings menu
     const handleSettingsClick = () => {
         if (isSidebarCollapsed) {
-            setIsSidebarCollapsed(false); // First, expand the sidebar
-            setIsSettingsMenuOpen(true);  // Then, open the sub-menu
+            setIsSidebarCollapsed(false); 
+            setIsSettingsMenuOpen(true);  
         } else {
-            setIsSettingsMenuOpen(!isSettingsMenuOpen); // Otherwise, just toggle
+            setIsSettingsMenuOpen(!isSettingsMenuOpen); 
         }
     };
 
@@ -63,7 +62,6 @@ export default function Sidebar({
 
                         <div>
                             <button
-                                // UPDATED: Use the new handler
                                 onClick={handleSettingsClick}
                                 className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === 'settings' ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}
                             >
@@ -100,6 +98,7 @@ export default function Sidebar({
                 {userRole === 'staff' && (
                     <>
                         <NavLink page="dashboard" label="My Dashboard" icon={<UserIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="my-profile" label="My Profile" icon={<BriefcaseIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         <NavLink page="team-schedule" label="Team Schedule" icon={<UsersIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5" />} badgeCount={unreadLeaveUpdatesCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
