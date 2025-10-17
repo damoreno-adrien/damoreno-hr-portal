@@ -28,21 +28,21 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
-            // --- MODIFIED: Smarter filter to include staff in their final month ---
+            // --- MODIFIED: Final, correct eligibility filter ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
-                const hasStarted = new Date(staff.startDate) <= endDate;
+                const staffStartDate = new Date(staff.startDate);
+                const staffEndDate = staff.endDate ? new Date(staff.endDate) : null;
 
-                // An employee is eligible if they are currently active, OR if they became inactive
-                // but their end date is within the pay period we are calculating.
-                const isCurrentlyActive = staff.status === undefined || staff.status === 'active';
-                const leftThisPeriod = staff.endDate && 
-                                       new Date(staff.endDate).getFullYear() === year &&
-                                       new Date(staff.endDate).getMonth() === month;
+                // Rule 1: Employee must have started before the END of the pay period.
+                const hasStarted = staffStartDate <= endDate;
 
-                const isEligibleForPeriod = isCurrentlyActive || leftThisPeriod;
+                // Rule 2: Employee must not have left before the START of the pay period.
+                // This correctly includes active staff (no end date) and inactive staff
+                // whose employment period overlaps with the current pay period.
+                const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startDate;
 
-                return !isAlreadyFinalized && hasStarted && isEligibleForPeriod;
+                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod;
             });
             
             if (staffToProcess.length === 0 && staffList.length > 0) {
