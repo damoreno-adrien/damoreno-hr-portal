@@ -28,10 +28,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
-            // --- NEW: Enhanced filtering for staff eligibility ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
-                const isActive = staff.status === 'active';
+                // --- MODIFIED: More flexible check for active status ---
+                const isActive = staff.status === undefined || staff.status === 'active';
                 const hasStarted = new Date(staff.startDate) <= endDate;
                 return !isAlreadyFinalized && isActive && hasStarted;
             });
@@ -157,10 +157,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const attendanceBonus = isLastMonth ? 0 : bonusInfo.bonusAmount;
                 const leavePayoutTotal = leavePayout ? leavePayout.total : 0;
                 
-                // --- NEW: Modified SSO Calculation ---
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
                 const ssoCap = companyConfig.ssoCap || 750;
-                // Calculate SSO based on the full monthly salary, not the prorated amount.
                 const ssoDeduction = Math.min((currentJob.rate || 0) * ssoRate, ssoCap);
                 const ssoAllowance = ssoDeduction;
 
