@@ -566,25 +566,27 @@ exports.correctAttendanceDates = https.onCall({ region: "us-central1", timeoutSe
         const batch = db.batch();
         let recordsChecked = 0;
         let recordsFixed = 0;
-        const timeZone = "Asia/Bangkok"; // Your local timezone
+        
+        // Define a formatter that will give us the date parts in the correct timezone
+        // 'en-CA' format is YYYY-MM-DD, which is perfect for our needs.
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            timeZone: 'Asia/Bangkok'
+        });
 
         attendanceSnap.forEach(doc => {
             recordsChecked++;
             const record = doc.data();
             const storedDate = record.date;
             
-            // Check if checkInTime exists and is a valid timestamp
             if (record.checkInTime && typeof record.checkInTime.toDate === 'function') {
                 const checkInTimestamp = record.checkInTime.toDate();
 
-                // Get the date components from the timestamp, interpreted in your local timezone
-                const localDate = new Date(checkInTimestamp.toLocaleString("en-US", { timeZone }));
-                const year = localDate.getFullYear();
-                const month = String(localDate.getMonth() + 1).padStart(2, '0');
-                const day = String(localDate.getDate()).padStart(2, '0');
-                const correctLocalDateString = `${year}-${month}-${day}`;
+                // Use the robust formatter to get the correct local date string
+                const correctLocalDateString = formatter.format(checkInTimestamp);
 
-                // If the stored date doesn't match the correct local date, fix it
                 if (storedDate !== correctLocalDateString) {
                     recordsFixed++;
                     batch.update(doc.ref, { date: correctLocalDateString });
