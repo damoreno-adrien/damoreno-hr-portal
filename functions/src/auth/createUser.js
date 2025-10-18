@@ -34,7 +34,8 @@ exports.createUserHandler = https.onRequest({ region: "us-central1" }, (req, res
         firstName, lastName, nickname, email, startDate, uid: newUserId,
         jobHistory: [initialJob],
         createdAt: FieldValue.serverTimestamp(),
-        bonusStreak: 0
+        bonusStreak: 0,
+        status: "active",
       });
       return res.status(200).send({ result: `Successfully created user ${email}` });
     } catch (error) {
