@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
+// Added 'collection', 'query', 'where', 'limit'
+import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, getDoc, limit } from 'firebase/firestore'; 
 import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn } from 'lucide-react';
 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
@@ -21,7 +22,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [todaysAttendance, setTodaysAttendance] = useState(null);
-    const [todaysSchedule, setTodaysSchedule] = useState(null); // State for today's schedule
+    const [todaysSchedule, setTodaysSchedule] = useState(null); 
     
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
@@ -61,24 +62,32 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => unsubscribe();
     }, [db, user]);
     
-    // Fetch today's schedule
+    // Corrected: Fetch today's schedule using a query
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = getLocalDateString();
-        const scheduleDocRef = doc(db, 'schedules', `${user.uid}_${todayStr}`);
         
-        getDoc(scheduleDocRef).then((docSnap) => {
-            if (docSnap.exists()) {
-                setTodaysSchedule(docSnap.data());
+        const q = query(
+            collection(db, 'schedules'),
+            where('staffId', '==', user.uid),
+            where('date', '==', todayStr),
+            limit(1) 
+        );
+
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            if (!querySnapshot.empty) {
+                setTodaysSchedule(querySnapshot.docs[0].data());
             } else {
-                setTodaysSchedule(null); // No schedule found for today
+                setTodaysSchedule(null); 
             }
-        }).catch(error => {
+        }, (error) => { 
             console.error("Error fetching today's schedule:", error);
-            setTodaysSchedule(null); // Handle potential errors
+            setTodaysSchedule(null);
         });
 
-    }, [db, user]);
+        return () => unsubscribe(); 
+
+    }, [db, user]); 
 
     // Check if on leave today
     useEffect(() => {
@@ -164,7 +173,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         if (proceedCheckout) {
             await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
         }
-    };
+     };
 
     const renderButtons = () => {
         if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
