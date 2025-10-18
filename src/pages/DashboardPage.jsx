@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
 import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn } from 'lucide-react';
 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
@@ -7,7 +7,6 @@ import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
 
-// --- NEW HELPER: Get local date string consistently ---
 const getLocalDateString = (date = new Date()) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -22,6 +21,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [todaysAttendance, setTodaysAttendance] = useState(null);
+    const [todaysSchedule, setTodaysSchedule] = useState(null); // State for today's schedule
     
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
@@ -41,12 +41,11 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => clearInterval(timer);
     }, []);
 
-    // --- MODIFIED: Both getDocRef and the listener now use the local date ---
     const getDocRef = () => doc(db, 'attendance', `${user.uid}_${getLocalDateString()}`);
 
     useEffect(() => {
         if (!db || !user) return;
-        const docRef = getDocRef(); // Use the corrected getDocRef
+        const docRef = getDocRef(); 
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
@@ -62,13 +61,34 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => unsubscribe();
     }, [db, user]);
     
+    // Fetch today's schedule
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = getLocalDateString(); // Use local date string
+        const todayStr = getLocalDateString();
+        const scheduleDocRef = doc(db, 'schedules', `${user.uid}_${todayStr}`);
+        
+        getDoc(scheduleDocRef).then((docSnap) => {
+            if (docSnap.exists()) {
+                setTodaysSchedule(docSnap.data());
+            } else {
+                setTodaysSchedule(null); // No schedule found for today
+            }
+        }).catch(error => {
+            console.error("Error fetching today's schedule:", error);
+            setTodaysSchedule(null); // Handle potential errors
+        });
+
+    }, [db, user]);
+
+    // Check if on leave today
+    useEffect(() => {
+        if (!db || !user) return;
+        const todayStr = getLocalDateString(); 
         const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', '==', 'approved'), where('startDate', '<=', todayStr), where('endDate', '>=', todayStr));
         getDocs(q).then(snapshot => setIsOnLeaveToday(!snapshot.empty));
     }, [db, user]);
     
+    // Geofence check
     useEffect(() => {
         if (!companyConfig?.geofence) {
             setLocationError("Geofence settings are not configured.");
@@ -122,7 +142,29 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     };
 
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
-    const handleCheckOut = async () => await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
+    
+    const handleCheckOut = async () => {
+        const now = new Date();
+        let proceedCheckout = true; 
+
+        if (todaysSchedule && todaysSchedule.endTime) {
+            try {
+                const [endHours, endMinutes] = todaysSchedule.endTime.split(':');
+                const scheduledEndTime = new Date(now); 
+                scheduledEndTime.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10), 0, 0);
+
+                if (now < scheduledEndTime) {
+                    proceedCheckout = window.confirm("Your shift isn't scheduled to end yet. Are you sure you want to check out early?");
+                }
+            } catch (e) {
+                console.error("Error parsing schedule end time:", e);
+            }
+        }
+
+        if (proceedCheckout) {
+            await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
+        }
+    };
 
     const renderButtons = () => {
         if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
