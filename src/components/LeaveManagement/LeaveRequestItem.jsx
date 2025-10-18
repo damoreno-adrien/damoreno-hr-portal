@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDateForDisplay } from '../utils/dateHelpers'; // Import formatter
+import { formatDateForDisplay } from '../../utils/dateHelpers'; // Import formatter, Go up two levels
 import { BriefcaseIcon, TrashIcon } from './Icons';
 
 // Reusable StatusBadge component (can be moved to a shared location later if needed)
