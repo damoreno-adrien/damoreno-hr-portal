@@ -13,7 +13,7 @@ export const formatDateForDisplay = (dateString) => {
     const date = new Date(`${dateString}T00:00:00Z`);
     return date.toLocaleDateString('en-GB', {
         day: 'numeric',
-        month: 'short',
+        month: 'numeric',
         year: 'numeric'
     }).replace(/ /g, '-'); // Replaces spaces with hyphens, e.g., "23 May 2023" -> "23-May-2023"
 };
