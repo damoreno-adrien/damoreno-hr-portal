@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-// --- ADD FieldValue import ---
-import { doc, updateDoc, arrayUnion, arrayRemove, FieldValue } from 'firebase/firestore';
+// Correct import (FieldValue removed)
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
@@ -95,7 +95,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         }
     };
 
-    // --- MODIFIED handleArchiveStaff ---
     const handleArchiveStaff = async (newStatus) => {
         setIsSaving(true);
         try {
@@ -119,8 +118,8 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     setIsSaving(false);
                     return;
                  }
-                 // --- Use FieldValue.delete() to remove the status field ---
-                 updateData = { status: FieldValue.delete(), endDate: null };
+                 // --- Use null to effectively clear the status ---
+                 updateData = { status: null, endDate: null };
                  authDisabled = false;
             }
 
