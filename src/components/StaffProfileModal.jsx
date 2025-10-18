@@ -7,11 +7,13 @@ import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
 import { JobHistoryManager } from './StaffProfile/JobHistoryManager';
 import { DocumentManager } from './StaffProfile/DocumentManager';
 import { ProfileActionButtons } from './StaffProfile/ProfileActionButtons';
+// Import KeyIcon from Icons.jsx
+import { KeyIcon } from './Icons'; 
 
-// Helper to get initial form data (remains here as it depends on `staff` prop)
+// Helper to get initial form data
 const getInitialFormData = (staff) => {
     let initialData = {
-        email: staff.email || '', // Ensure email is always present
+        email: staff.email || '',
         phoneNumber: staff.phoneNumber || '',
         birthdate: staff.birthdate || '',
         bankAccount: staff.bankAccount || '',
@@ -30,12 +32,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [activeTab, setActiveTab] = useState('details');
     const [formData, setFormData] = useState(getInitialFormData(staff));
     const [isEditing, setIsEditing] = useState(false);
-    const [isSaving, setIsSaving] = useState(false); // Used for multiple save operations
-    const [error, setError] = useState(''); // General error state
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
+    // State for Bonus Streak (could potentially be moved to a sub-component later)
+    const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
 
-    // Recalculate initial form data if the staff prop changes (e.g., parent updates list)
     useEffect(() => {
         setFormData(getInitialFormData(staff));
+        setBonusStreak(staff.bonusStreak || 0); // Reset bonus streak when staff changes
     }, [staff]);
 
     const currentJob = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0] || {};
@@ -44,15 +48,12 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
 
     // --- Action Handlers ---
-    // These now mostly handle the Firestore/backend interaction logic
-    // They are passed down as props to the relevant components
-
     const handleSaveDetails = async () => {
         setIsSaving(true);
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await updateDoc(staffDocRef, { 
+            await updateDoc(staffDocRef, {
                 firstName: formData.firstName,
                 lastName: formData.lastName,
                 nickname: formData.nickname,
@@ -61,20 +62,18 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
                 startDate: formData.startDate,
-                fullName: null // Clear legacy field if necessary
+                fullName: null
             });
-            setIsEditing(false); // Exit edit mode on success
-        } catch (err) { setError("Failed to save profile details."); console.error("Save Details Error:", err); } 
+            setIsEditing(false);
+        } catch (err) { setError("Failed to save profile details."); console.error("Save Details Error:", err); }
         finally { setIsSaving(false); }
     };
-    
+
     const handleAddNewJob = async (newJobData) => {
-        // Validation is done in JobHistoryManager, error handling is passed up
         const staffDocRef = doc(db, 'staff_profiles', staff.id);
         await updateDoc(staffDocRef, { jobHistory: arrayUnion(newJobData) });
-        // Let JobHistoryManager handle UI state reset
     };
-    
+
     const handleDeleteJob = async (jobToDelete) => {
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}" started on ${jobToDelete.startDate}?`)) {
             try {
@@ -83,22 +82,22 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             } catch (err) { alert("Failed to delete job history entry."); console.error("Delete Job Error:", err); }
         }
     };
-    
+
     const handleDeleteStaff = async () => {
         if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This will erase all their data and cannot be undone.`) && window.confirm("Final confirmation: Delete this staff member?")) {
-            setIsSaving(true); // Reuse isSaving state for delete operation
+            setIsSaving(true);
             try {
                 const functions = getFunctions();
                 const deleteStaffFunc = httpsCallable(functions, 'deleteStaff');
                 await deleteStaffFunc({ staffId: staff.id });
-                onClose(); // Close modal on success
-            } catch (err) { alert(`Error deleting staff: ${err.message}`); console.error("Delete Staff Error:", err); } 
+                onClose();
+            } catch (err) { alert(`Error deleting staff: ${err.message}`); console.error("Delete Staff Error:", err); }
             finally { setIsSaving(false); }
         }
     };
-    
+
     const handleArchiveStaff = async (newStatus) => {
-        setIsSaving(true); // Reuse isSaving state
+        setIsSaving(true);
         try {
             const functions = getFunctions();
             const setStaffAuthStatus = httpsCallable(functions, 'setStaffAuthStatus');
@@ -115,12 +114,12 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 }
                 updateData = { status: 'inactive', endDate: endDate };
                 authDisabled = true;
-            } else { // Setting back to active
+            } else {
                  if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
                     setIsSaving(false);
                     return;
                  }
-                 updateData = { status: undefined, endDate: null }; // Use undefined to potentially remove the field
+                 updateData = { status: undefined, endDate: null };
                  authDisabled = false;
             }
 
@@ -128,7 +127,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 updateDoc(staffDocRef, updateData),
                 setStaffAuthStatus({ staffId: staff.id, disabled: authDisabled })
             ]);
-            onClose(); // Close modal on success
+            onClose();
         } catch (err) {
             alert(`Failed to update status: ${err.message}`);
             console.error("Archive/Activate Error:", err);
@@ -138,7 +137,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleUploadFile = async (fileToUpload) => {
-        // Validation happens in DocumentManager
         const storage = getStorage();
         const storageRef = ref(storage, `staff_documents/${staff.id}/${fileToUpload.name}`);
         await uploadBytes(storageRef, fileToUpload);
@@ -146,9 +144,8 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         const fileMetadata = { name: fileToUpload.name, url: downloadURL, path: storageRef.fullPath, uploadedAt: new Date().toISOString() };
         const staffDocRef = doc(db, 'staff_profiles', staff.id);
         await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
-        // Let DocumentManager handle UI state reset
     };
-    
+
     const handleDeleteFile = async (fileToDelete) => {
         if (!window.confirm(`Delete "${fileToDelete.name}"?`)) return;
         try {
@@ -158,6 +155,39 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayRemove(fileToDelete) });
         } catch (error) { console.error("File deletion error:", error); alert("Failed to delete file."); }
+    };
+
+    const handleResetPassword = async (staffId) => {
+        const newPassword = window.prompt(`Enter a new temporary password for ${displayName} (minimum 6 characters):`);
+
+        if (!newPassword) return; 
+        if (newPassword.length < 6) {
+            alert("Password must be at least 6 characters long.");
+            return;
+        }
+
+        setIsSaving(true);
+        setError('');
+        try {
+            const functions = getFunctions();
+            const setStaffPassword = httpsCallable(functions, 'setStaffPassword');
+            const result = await setStaffPassword({ staffId: staffId, newPassword: newPassword });
+            alert(result.data.result);
+        } catch (err) {
+            alert(`Failed to reset password: ${err.message}`);
+            setError(`Failed to reset password: ${err.message}`);
+            console.error("Password Reset Error:", err);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSetBonusStreak = async () => {
+        const staffDocRef = doc(db, 'staff_profiles', staff.id);
+        try {
+            await updateDoc(staffDocRef, { bonusStreak: Number(bonusStreak) });
+            alert(`Bonus streak for ${displayName} has been set to ${bonusStreak}.`);
+        } catch (err) { alert("Failed to update bonus streak."); }
     };
 
     return (
@@ -181,23 +211,35 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     ) : (
                         <ProfileDetailsView staff={staff} currentJob={currentJob} />
                     )}
-                    <JobHistoryManager 
-                        jobHistory={staff.jobHistory} 
-                        departments={departments} 
-                        onAddNewJob={handleAddNewJob} 
-                        onDeleteJob={handleDeleteJob} 
+                    <JobHistoryManager
+                        jobHistory={staff.jobHistory}
+                        departments={departments}
+                        onAddNewJob={handleAddNewJob}
+                        onDeleteJob={handleDeleteJob}
                     />
-                     {/* Bonus Management (Optional: Could be its own component too) */}
+                     {/* Bonus Management */}
                      {userRole === 'manager' && (
                         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                            {/* ... Bonus streak logic remains here for now ... */}
+                           <h4 className="text-base font-semibold text-white">Bonus Management</h4>
+                           <p className="text-sm text-gray-400 mt-1">Manually set the attendance bonus streak.</p>
+                           <div className="mt-4 flex items-center space-x-4">
+                                <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
+                                <input 
+                                    type="number" 
+                                    value={bonusStreak} 
+                                    onChange={(e) => setBonusStreak(e.target.value)} 
+                                    className="w-24 bg-gray-700 rounded-md p-1 text-white" 
+                                    min="0" // Prevent negative streaks
+                                />
+                                <button onClick={handleSetBonusStreak} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white">Set Streak</button>
+                            </div>
                         </div>
                      )}
                 </div>
             )}
 
             {activeTab === 'documents' && (
-                <DocumentManager 
+                <DocumentManager
                     documents={staff.documents}
                     onUploadFile={handleUploadFile}
                     onDeleteFile={handleDeleteFile}
@@ -209,10 +251,12 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 isEditing={isEditing}
                 isSaving={isSaving}
                 staffStatus={staff.status}
-                onSetEditing={(editingState) => { setIsEditing(editingState); setError(''); }} // Clear error when switching modes
+                staffId={staff.id}
+                onSetEditing={(editingState) => { setIsEditing(editingState); setError(''); }}
                 onSave={handleSaveDetails}
                 onArchiveStaff={handleArchiveStaff}
                 onDeleteStaff={handleDeleteStaff}
+                onResetPassword={handleResetPassword}
                 onClose={onClose}
                 activeTab={activeTab}
             />

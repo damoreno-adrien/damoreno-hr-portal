@@ -1,11 +1,12 @@
 const admin = require("firebase-admin");
 
-// Initialize Firebase Admin SDK ONCE
 admin.initializeApp();
 
-// Import and re-export functions from their specific files
+// Import and re-export functions
 const { createUserHandler } = require('./src/auth/createUser');
 const { setStaffAuthStatusHandler } = require('./src/auth/setStaffAuthStatus');
+// --- NEW IMPORT ---
+const { setStaffPasswordHandler } = require('./src/auth/setStaffPassword'); 
 const { autoCheckoutHandler } = require('./src/attendance/autoCheckout');
 const { calculateAdvanceEligibilityHandler } = require('./src/financials/calculateAdvanceEligibility');
 const { calculateLivePayEstimateHandler } = require('./src/financials/calculateLivePayEstimate');
@@ -15,9 +16,10 @@ const { finalizeAndStorePayslipsHandler } = require('./src/payroll/finalizeAndSt
 const { deleteStaffHandler } = require('./src/staff/deleteStaff');
 const { exportStaffDataHandler } = require('./src/staff/exportStaffData');
 
-// Assign the imported handlers to the export names expected by Firebase
 exports.createUser = createUserHandler;
 exports.setStaffAuthStatus = setStaffAuthStatusHandler;
+// --- NEW EXPORT ---
+exports.setStaffPassword = setStaffPasswordHandler; 
 exports.autoCheckout = autoCheckoutHandler;
 exports.calculateAdvanceEligibility = calculateAdvanceEligibilityHandler;
 exports.calculateLivePayEstimate = calculateLivePayEstimateHandler;
