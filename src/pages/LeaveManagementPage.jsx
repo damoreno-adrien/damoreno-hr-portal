@@ -2,13 +2,23 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
-import { PlusIcon, BriefcaseIcon, TrashIcon } from '../components/Icons';
+import { PlusIcon } from '../components/Icons';
+// --- CORRECTED IMPORT PATH ---
+import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
+import { formatDateForDisplay } from '../utils/dateHelpers';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
     if (staff && staff.fullName) return staff.fullName;
     return 'Unknown Staff';
+};
+
+const StatusBadge = ({ status }) => {
+    const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
+    if (status === 'approved') return <span className={`${baseClasses} bg-green-600 text-green-100`}>Approved</span>;
+    if (status === 'rejected') return <span className={`${baseClasses} bg-red-600 text-red-100`}>Rejected</span>;
+    return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
 };
 
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
@@ -35,7 +45,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
             if (userRole === 'manager') {
                 const hydratedRequests = requests.map(req => {
                     const staffMember = staffList.find(s => s.id === req.staffId);
-                    return { ...req, displayStaffName: staffMember ? getDisplayName(staffMember) : req.staffName };
+                    return { ...req, displayStaffName: staffMember ? getDisplayName(staffMember) : (req.staffName || 'Unknown Staff') };
                 });
                 setAllLeaveRequests(hydratedRequests);
             } else {
@@ -55,27 +65,21 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                     const docRef = doc(db, 'leave_requests', req.id);
                     batch.update(docRef, { isReadByStaff: true });
                 });
-                batch.commit();
+                batch.commit().catch(err => console.error("Error marking leave requests as read:", err));
             }
         }
     }, [allLeaveRequests, userRole, db]);
-
 
     useEffect(() => {
         if (userRole === 'manager') {
             const filtered = allLeaveRequests.filter(req => {
                 if (req.status !== filter) return false;
-                
-                // For pending requests, only show them if the staff member is still active
                 if (filter === 'pending') {
                     const staffMember = staffList.find(s => s.id === req.staffId);
-                    // If we can't find the staff member, or they are inactive, hide the pending request.
                     if (!staffMember || staffMember.status === 'inactive') {
                         return false;
                     }
                 }
-                
-                // For approved/rejected, show all for historical context
                 return true; 
             });
             setFilteredLeaveRequests(filtered);
@@ -84,24 +88,21 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         }
     }, [filter, allLeaveRequests, userRole, staffList]);
 
-
-    const handleUpdateRequest = async (id, newStatus) => {
+    const handleUpdateRequest = async (id, newStatus) => { 
         const requestDocRef = doc(db, "leave_requests", id);
         try { 
             await updateDoc(requestDocRef, { status: newStatus, isReadByStaff: false }); 
         } 
         catch (error) { alert("Failed to update request."); }
     };
-
-    const handleDeleteRequest = async (id) => {
+    const handleDeleteRequest = async (id) => { 
         if (window.confirm("Are you sure you want to permanently delete this leave request?")) {
             const requestDocRef = doc(db, "leave_requests", id);
             try { await deleteDoc(requestDocRef); }
             catch (error) { alert("Failed to delete request."); }
         }
     };
-
-    const handleMcStatusChange = async (id, currentStatus) => {
+    const handleMcStatusChange = async (id, currentStatus) => { 
         const requestDocRef = doc(db, "leave_requests", id);
         try {
             await updateDoc(requestDocRef, { mcReceived: !currentStatus });
@@ -114,15 +115,8 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     const openNewRequestModal = () => { setRequestToEdit(null); setIsModalOpen(true); };
     const closeModal = () => { setIsModalOpen(false); setRequestToEdit(null); };
     
-    // Create a filtered list of only active staff for the "New Request" modal
     const activeStaffList = useMemo(() => staffList.filter(s => s.status !== 'inactive'), [staffList]);
 
-    const StatusBadge = ({ status }) => {
-        const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
-        if (status === 'approved') return <span className={`${baseClasses} bg-green-600 text-green-100`}>Approved</span>;
-        if (status === 'rejected') return <span className={`${baseClasses} bg-red-600 text-red-100`}>Rejected</span>;
-        return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
-    };
 
     if (userRole === 'manager') {
         return (
@@ -144,36 +138,14 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                 <div className="bg-gray-800 rounded-lg shadow-lg">
                     <div className="divide-y divide-gray-700">
                         {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
-                            <div key={req.id} className="p-4">
-                                <div className="flex flex-wrap justify-between items-center gap-4">
-                                    <div className="flex-grow min-w-[200px]">
-                                        <p className="font-bold text-white">{req.displayStaffName}</p>
-                                        <p className="text-sm text-gray-400">{req.leaveType} | Requested: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p>
-                                    </div>
-                                    <div className="text-center"><p className="text-sm text-gray-300">Dates:</p><p className="font-medium text-white">{req.startDate} to {req.endDate}</p></div>
-                                    <div className="text-center"><p className="text-sm text-gray-300">Total Days:</p><p className="font-medium text-white">{req.totalDays}</p></div>
-                                    <div className="flex items-center space-x-2">
-                                        <StatusBadge status={req.status} />
-                                        <button onClick={() => openEditModal(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><BriefcaseIcon className="h-4 w-4"/></button>
-                                        <button onClick={() => handleDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-800 hover:bg-red-700" title="Delete Request"><TrashIcon className="h-4 w-4"/></button>
-                                        {req.status === 'pending' && (
-                                            <>
-                                                <button onClick={() => handleUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700">Reject</button>
-                                                <button onClick={() => handleUpdateRequest(req.id, 'approved')} className="px-4 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-700">Approve</button>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
-                                {req.reason && (<p className="mt-2 text-sm text-amber-300 bg-gray-700 p-2 rounded-md"><span className="font-semibold">Reason:</span> {req.reason}</p>)}
-                                {req.leaveType === 'Sick Leave' && req.totalDays >= 3 && (
-                                    <div className="mt-3 pt-3 border-t border-gray-700">
-                                        <label className="flex items-center space-x-2 cursor-pointer">
-                                            <input type="checkbox" checked={!!req.mcReceived} onChange={() => handleMcStatusChange(req.id, req.mcReceived)} className="w-4 h-4 rounded bg-gray-600 border-gray-500 text-amber-500 focus:ring-amber-500"/>
-                                            <span className="text-sm text-gray-300">Medical Certificate Received</span>
-                                        </label>
-                                    </div>
-                                )}
-                            </div>
+                            <LeaveRequestItem 
+                                key={req.id}
+                                req={req}
+                                onUpdateRequest={handleUpdateRequest}
+                                onDeleteRequest={handleDeleteRequest}
+                                onEditRequest={openEditModal}
+                                onMcStatusChange={handleMcStatusChange}
+                            />
                         )) : (<p className="text-center py-10 text-gray-400">No {filter} requests found.</p>)}
                     </div>
                 </div>
@@ -184,7 +156,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
-                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} />
+                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={activeStaffList} />
             </Modal>
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>
@@ -193,9 +165,14 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
             <div className="bg-gray-800 rounded-lg shadow-lg">
                 <div className="divide-y divide-gray-700">
                     {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
-                        <div key={req.id} className="p-4 flex justify-between items-center">
-                            <div><p className="font-bold text-white">{req.leaveType}</p><p className="text-sm text-gray-400">Requested on: {req.requestedAt?.toDate().toLocaleDateString('en-GB')}</p></div>
-                            <div><p className="font-medium text-white">{req.startDate} to {req.endDate} ({req.totalDays} days)</p></div>
+                        <div key={req.id} className="p-4 flex flex-wrap justify-between items-center gap-4">
+                            <div>
+                                <p className="font-bold text-white">{req.leaveType}</p>
+                                <p className="text-sm text-gray-400">Requested on: {formatDateForDisplay(req.requestedAt?.toDate().toISOString().split('T')[0])}</p>
+                            </div>
+                            <div>
+                                <p className="font-medium text-white">{formatDateForDisplay(req.startDate)} to {formatDateForDisplay(req.endDate)} ({req.totalDays} days)</p>
+                            </div>
                             <StatusBadge status={req.status} />
                         </div>
                     )) : (<p className="text-center py-10 text-gray-400">You have not made any leave requests.</p>)}
