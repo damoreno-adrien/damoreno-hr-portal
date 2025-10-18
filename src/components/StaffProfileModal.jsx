@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+// --- ADD FieldValue import ---
+import { doc, updateDoc, arrayUnion, arrayRemove, FieldValue } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
@@ -7,8 +8,7 @@ import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
 import { JobHistoryManager } from './StaffProfile/JobHistoryManager';
 import { DocumentManager } from './StaffProfile/DocumentManager';
 import { ProfileActionButtons } from './StaffProfile/ProfileActionButtons';
-// Import KeyIcon from Icons.jsx
-import { KeyIcon } from './Icons'; 
+import { KeyIcon } from './Icons'; // Assuming KeyIcon is in Icons.jsx
 
 // Helper to get initial form data
 const getInitialFormData = (staff) => {
@@ -34,12 +34,11 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
-    // State for Bonus Streak (could potentially be moved to a sub-component later)
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
 
     useEffect(() => {
         setFormData(getInitialFormData(staff));
-        setBonusStreak(staff.bonusStreak || 0); // Reset bonus streak when staff changes
+        setBonusStreak(staff.bonusStreak || 0);
     }, [staff]);
 
     const currentJob = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0] || {};
@@ -96,6 +95,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         }
     };
 
+    // --- MODIFIED handleArchiveStaff ---
     const handleArchiveStaff = async (newStatus) => {
         setIsSaving(true);
         try {
@@ -114,12 +114,13 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 }
                 updateData = { status: 'inactive', endDate: endDate };
                 authDisabled = true;
-            } else {
+            } else { // Setting back to active
                  if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
                     setIsSaving(false);
                     return;
                  }
-                 updateData = { status: undefined, endDate: null };
+                 // --- Use FieldValue.delete() to remove the status field ---
+                 updateData = { status: FieldValue.delete(), endDate: null };
                  authDisabled = false;
             }
 
@@ -160,7 +161,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const handleResetPassword = async (staffId) => {
         const newPassword = window.prompt(`Enter a new temporary password for ${displayName} (minimum 6 characters):`);
 
-        if (!newPassword) return; 
+        if (!newPassword) return;
         if (newPassword.length < 6) {
             alert("Password must be at least 6 characters long.");
             return;
@@ -224,12 +225,12 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                            <p className="text-sm text-gray-400 mt-1">Manually set the attendance bonus streak.</p>
                            <div className="mt-4 flex items-center space-x-4">
                                 <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
-                                <input 
-                                    type="number" 
-                                    value={bonusStreak} 
-                                    onChange={(e) => setBonusStreak(e.target.value)} 
-                                    className="w-24 bg-gray-700 rounded-md p-1 text-white" 
-                                    min="0" // Prevent negative streaks
+                                <input
+                                    type="number"
+                                    value={bonusStreak}
+                                    onChange={(e) => setBonusStreak(e.target.value)}
+                                    className="w-24 bg-gray-700 rounded-md p-1 text-white"
+                                    min="0"
                                 />
                                 <button onClick={handleSetBonusStreak} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white">Set Streak</button>
                             </div>
