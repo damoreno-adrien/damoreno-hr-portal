@@ -29,7 +29,18 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
         if (payPeriod.year > currentYear || (payPeriod.year === currentYear && payPeriod.month > currentMonth)) {
             setError("Cannot generate payroll for a future period.");
-            setPayrollData([]); // Clear any existing data
+            setPayrollData([]);
+            setIsMonthFullyFinalized(false);
+            return;
+        }
+
+        // --- NEW: Check for periods before October 2025 ---
+        const earliestAllowedYear = 2025;
+        const earliestAllowedMonth = 10; // October (1-indexed)
+
+        if (payPeriod.year < earliestAllowedYear || (payPeriod.year === earliestAllowedYear && payPeriod.month < earliestAllowedMonth)) {
+            setError(`Cannot generate payroll for periods before October 2025.`);
+            setPayrollData([]);
             setIsMonthFullyFinalized(false);
             return; // Stop execution
         }

@@ -7,7 +7,7 @@ const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFra
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // Generate years dynamically
-const generateYears = (startYear = 2023) => {
+const generateYears = (startYear = 2025) => {
     const currentYear = new Date().getFullYear();
     const years = [];
     // Go up to current year + 1 to allow for planning/viewing next year if needed
