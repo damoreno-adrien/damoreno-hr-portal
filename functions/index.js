@@ -15,10 +15,10 @@ const { deletePayrollRunHandler } = require('./src/payroll/deletePayrollRun');
 const { finalizeAndStorePayslipsHandler } = require('./src/payroll/finalizeAndStorePayslips');
 const { deleteStaffHandler } = require('./src/staff/deleteStaff');
 const { exportStaffDataHandler } = require('./src/staff/exportStaffData');
+const { importStaffDataHandler } = require('./src/staff/importStaffData');
 
 exports.createUser = createUserHandler;
 exports.setStaffAuthStatus = setStaffAuthStatusHandler;
-// --- NEW EXPORT ---
 exports.setStaffPassword = setStaffPasswordHandler; 
 exports.autoCheckout = autoCheckoutHandler;
 exports.calculateAdvanceEligibility = calculateAdvanceEligibilityHandler;
@@ -28,3 +28,4 @@ exports.deletePayrollRun = deletePayrollRunHandler;
 exports.finalizeAndStorePayslips = finalizeAndStorePayslipsHandler;
 exports.deleteStaff = deleteStaffHandler;
 exports.exportStaffData = exportStaffDataHandler;
+exports.importStaffData = importStaffDataHandler;
