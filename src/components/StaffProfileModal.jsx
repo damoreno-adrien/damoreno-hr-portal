@@ -18,6 +18,9 @@ const getInitialFormData = (staff) => {
         birthdate: staff.birthdate || '',
         bankAccount: staff.bankAccount || '',
         startDate: staff.startDate || '',
+        address: staff.address || '',
+        emergencyContactName: staff.emergencyContactName || '',
+        emergencyContactPhone: staff.emergencyContactPhone || '',
     };
     if (staff.firstName || staff.lastName) {
         return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
@@ -52,6 +55,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            // Include new fields in the update
             await updateDoc(staffDocRef, {
                 firstName: formData.firstName,
                 lastName: formData.lastName,
@@ -61,9 +65,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 birthdate: formData.birthdate,
                 bankAccount: formData.bankAccount,
                 startDate: formData.startDate,
-                fullName: null
+                // --- NEW ---
+                address: formData.address,
+                emergencyContactName: formData.emergencyContactName,
+                emergencyContactPhone: formData.emergencyContactPhone,
+                // --- END NEW ---
+                fullName: null // Clear legacy field if necessary
             });
-            setIsEditing(false);
+            setIsEditing(false); // Exit edit mode on success
         } catch (err) { setError("Failed to save profile details."); console.error("Save Details Error:", err); }
         finally { setIsSaving(false); }
     };

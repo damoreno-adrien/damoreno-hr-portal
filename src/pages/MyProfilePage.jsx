@@ -53,6 +53,13 @@ export default function MyProfilePage({ staffProfile }) {
                         <div className="md:col-span-2">
                            <InfoRow label="Bank Account" value={staffProfile.bankAccount} />
                         </div>
+                        {/* --- NEW FIELDS --- */}
+                        <div className="md:col-span-2">
+                           <InfoRow label="Address" value={staffProfile.address} />
+                        </div>
+                        <InfoRow label="Emergency Contact Name" value={staffProfile.emergencyContactName} />
+                        <InfoRow label="Emergency Contact Phone" value={staffProfile.emergencyContactPhone} />
+                        {/* --- END NEW FIELDS --- */}
                     </div>
                 </div>
 

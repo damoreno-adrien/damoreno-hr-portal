@@ -21,21 +21,32 @@ exports.createUserHandler = https.onRequest({ region: "us-central1" }, (req, res
       }
     } catch (error) { return res.status(500).send({ error: "Internal server error while verifying role." }); }
 
-    const { email, password, firstName, lastName, nickname, position, department, startDate, payType, rate } = req.body;
     if (!email || !password || !firstName || !lastName || !nickname || !position || !department || !startDate || !payType || !rate) {
-        return res.status(400).send({ error: "Missing required user data." });
+        // Keep essential fields required
+        return res.status(400).send({ error: "Missing required core user data (email, name, job info)." });
     }
+    
     try {
       const userRecord = await admin.auth().createUser({ email, password, displayName: nickname });
       const newUserId = userRecord.uid;
       await db.collection("users").doc(newUserId).set({ role: "staff" });
       const initialJob = { position, department, startDate, payType, rate: Number(rate) };
+      
+      // --- ADD new fields to the Firestore document ---
       await db.collection("staff_profiles").doc(newUserId).set({
+        // Existing fields
         firstName, lastName, nickname, email, startDate, uid: newUserId,
         jobHistory: [initialJob],
         createdAt: FieldValue.serverTimestamp(),
         bonusStreak: 0,
-        status: "active",
+        status: 'active',
+        // New optional fields
+        phoneNumber: phoneNumber || null, // Use null if not provided
+        birthdate: birthdate || null,
+        bankAccount: bankAccount || null,
+        address: address || null,
+        emergencyContactName: emergencyContactName || null,
+        emergencyContactPhone: emergencyContactPhone || null,
       });
       return res.status(200).send({ result: `Successfully created user ${email}` });
     } catch (error) {

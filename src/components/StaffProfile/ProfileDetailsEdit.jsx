@@ -10,5 +10,20 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange }) => (
         <div><label className="text-sm text-gray-400">Start Date</label><input id="startDate" type="date" value={formData.startDate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"/></div>
         <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"/></div>
         <div className="md:col-span-2"><label className="text-sm text-gray-400">Bank Account</label><input id="bankAccount" value={formData.bankAccount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"/></div>
+        
+        {/* --- NEW FIELDS --- */}
+        <div className="md:col-span-2">
+            <label className="text-sm text-gray-400">Address</label>
+            <textarea id="address" value={formData.address || ''} onChange={handleInputChange} rows="3" className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"></textarea>
+        </div>
+        <div>
+            <label className="text-sm text-gray-400">Emergency Contact Name</label>
+            <input id="emergencyContactName" value={formData.emergencyContactName || ''} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"/>
+        </div>
+        <div>
+            <label className="text-sm text-gray-400">Emergency Contact Phone</label>
+            <input id="emergencyContactPhone" value={formData.emergencyContactPhone || ''} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"/>
+        </div>
+        {/* --- END NEW FIELDS --- */}
     </div>
 );

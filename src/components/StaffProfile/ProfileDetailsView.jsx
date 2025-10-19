@@ -23,6 +23,11 @@ export const ProfileDetailsView = ({ staff, currentJob }) => {
             <InfoRow label="Seniority" value={calculateSeniority(staff.startDate, staff.endDate)} />
             <InfoRow label="Birthdate" value={formatDateForDisplay(staff.birthdate)} />
             <div className="md:col-span-2"><InfoRow label="Bank Account" value={staff.bankAccount} /></div>
+            {/* --- NEW FIELDS --- */}
+            <div className="md:col-span-2"><InfoRow label="Address" value={staff.address} /></div>
+            <InfoRow label="Emergency Contact Name" value={staff.emergencyContactName} />
+            <InfoRow label="Emergency Contact Phone" value={staff.emergencyContactPhone} />
+            {/* --- END NEW FIELDS --- */}
             <hr className="md:col-span-2 border-gray-700 my-2" />
             <InfoRow label="Current Department" value={currentJob.department} />
             <InfoRow label="Current Position" value={currentJob.position} />
