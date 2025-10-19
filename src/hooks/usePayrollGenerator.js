@@ -22,11 +22,23 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
     const [selectedForPayroll, setSelectedForPayroll] = useState(new Set());
 
     const handleGeneratePayroll = async () => {
+        // Check for future pay period
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1; // 1-indexed
+
+        if (payPeriod.year > currentYear || (payPeriod.year === currentYear && payPeriod.month > currentMonth)) {
+            setError("Cannot generate payroll for a future period.");
+            setPayrollData([]); // Clear any existing data
+            setIsMonthFullyFinalized(false);
+            return; // Stop execution
+        }
+
         if (!companyConfig) { setError("Company settings are not loaded yet. Please wait and try again."); return; }
         setIsLoading(true);
         setError('');
         setIsMonthFullyFinalized(false);
-        
+
         try {
             const year = payPeriod.year;
             const month = payPeriod.month - 1; // JS months are 0-indexed
@@ -46,10 +58,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 const hasStarted = staffStartDate <= endDate;
                 const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startDate;
-                
+
                 // Check for explicit 'active' status OR if they left this period
                 const isCurrentlyActive = staff.status === 'active';
-                const leftThisPeriod = staffEndDate && 
+                const leftThisPeriod = staffEndDate &&
                                        staffEndDate.getFullYear() === year &&
                                        staffEndDate.getMonth() === month;
 
@@ -57,7 +69,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 return !isAlreadyFinalized && hasStarted && isEligibleForPeriod;
             });
-            
+
             if (staffToProcess.length === 0 && staffList.length > 0) {
                 setPayrollData([]);
                 setIsMonthFullyFinalized(true); // Set flag if all eligible staff are finalized
@@ -66,7 +78,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             }
 
             const daysInMonth = endDate.getUTCDate(); // Use getUTCDate for correct day count
-            
+
             const functions = getFunctions();
             const calculateBonus = httpsCallable(functions, 'calculateBonus');
 
@@ -93,7 +105,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const adjustmentsData = adjustmentsSnapshot.docs.map(doc => doc.data());
             const bonusMap = new Map(bonusResults.map(res => [res.staffId, res]));
             const publicHolidays = companyConfig.publicHolidays.map(h => h.date);
-            
+
             // Calculate payroll for each eligible staff member
             const data = staffToProcess.map(staff => {
                 const currentJob = getCurrentJob(staff);
@@ -137,7 +149,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                         const finalAnnualBalance = Math.max(0, annualLeaveEntitlement - usedAnnual);
                         const finalHolidayCredit = Math.max(0, earnedCredits - usedPublicHoliday);
-                        
+
                         leavePayout = {
                             annualDays: finalAnnualBalance,
                             holidayCredits: finalHolidayCredit,
@@ -155,11 +167,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     staffSchedules.forEach(schedule => {
                         const scheduleDate = new Date(schedule.date + 'T00:00:00'); // Add time part
                         if (isLastMonth && scheduleDate > staffEndDate) return; // Skip days after leaving
-                        
+
                         const wasOnLeave = monthLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
                         const didAttend = attendanceData.has(`${staff.id}_${schedule.date}`);
                         if (!didAttend && !wasOnLeave && !publicHolidays.includes(schedule.date)) {
-                            
+
                             let durationHours = 0;
                             if (schedule.startTime && schedule.endTime) {
                                 const start = new Date(`1970-01-01T${schedule.startTime}:00`);
@@ -174,7 +186,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     });
                     autoDeductions = dailyRate * unpaidAbsences.length;
                 }
-                
+
                 // Calculate other earnings and deductions
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
                 const otherEarningsList = staffAdjustments.filter(a => a.type === 'Earning');
@@ -186,7 +198,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const bonusInfo = bonusMap.get(staff.id) || { bonusAmount: 0, newStreak: 0 };
                 const attendanceBonus = isLastMonth ? 0 : bonusInfo.bonusAmount; // No bonus in the final month
                 const leavePayoutTotal = leavePayout ? leavePayout.total : 0;
-                
+
                 // Calculate SSO (based on full salary, not prorated)
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
                 const ssoCap = companyConfig.ssoCap || 750;
@@ -195,40 +207,40 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 // Calculate totals
                 const totalEarnings = basePay + attendanceBonus + otherEarnings + ssoAllowance + leavePayoutTotal;
-                
+
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
-                
+
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
 
                 // Return the final payslip object structure
-                return { 
-                    id: staff.id, 
-                    name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, 
-                    displayName: displayName, 
+                return {
+                    id: staff.id,
+                    name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName,
+                    displayName: displayName,
                     payType: currentJob.position, // Assuming position describes payType intent
-                    totalEarnings, 
-                    totalDeductions, 
-                    netPay, 
-                    bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak }, 
-                    earnings: { 
-                        basePay, 
-                        attendanceBonus, 
-                        ssoAllowance, 
-                        leavePayout: leavePayoutTotal, 
-                        leavePayoutDetails: leavePayout, 
+                    totalEarnings,
+                    totalDeductions,
+                    netPay,
+                    bonusInfo: { newStreak: isLastMonth ? staff.bonusStreak : bonusInfo.newStreak },
+                    earnings: {
+                        basePay,
+                        attendanceBonus,
+                        ssoAllowance,
+                        leavePayout: leavePayoutTotal,
+                        leavePayoutDetails: leavePayout,
                         others: otherEarningsList // Store the list of other earnings
-                    }, 
-                    deductions: { 
-                        absences: autoDeductions, 
-                        unpaidAbsences: unpaidAbsences, 
-                        totalAbsenceHours: totalAbsenceHours, 
-                        sso: ssoDeduction, 
-                        advance: advanceDeduction, 
-                        loan: loanDeduction, 
+                    },
+                    deductions: {
+                        absences: autoDeductions,
+                        unpaidAbsences: unpaidAbsences,
+                        totalAbsenceHours: totalAbsenceHours,
+                        sso: ssoDeduction,
+                        advance: advanceDeduction,
+                        loan: loanDeduction,
                         others: otherDeductionsList // Store the list of other deductions
-                    } 
+                    }
                 };
             });
             setPayrollData(data);
@@ -252,7 +264,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         // Get month name for confirmation
         const monthName = new Date(payPeriod.year, payPeriod.month - 1).toLocaleString('default', { month: 'long' });
         if (!window.confirm(`Are you sure you want to finalize payroll for ${dataToFinalize.length} employee(s) for ${monthName} ${payPeriod.year}?`)) { return; }
-        
+
         setIsFinalizing(true);
         try {
             const functions = getFunctions();
@@ -266,20 +278,20 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
     // Handle selecting/deselecting individual staff for finalization
     const handleSelectOne = (staffId) => {
-        setSelectedForPayroll(prev => { 
-            const newSet = new Set(prev); 
-            if (newSet.has(staffId)) { newSet.delete(staffId); } 
-            else { newSet.add(staffId); } 
-            return newSet; 
+        setSelectedForPayroll(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(staffId)) { newSet.delete(staffId); }
+            else { newSet.add(staffId); }
+            return newSet;
         });
     };
 
     // Handle selecting/deselecting all staff for finalization
     const handleSelectAll = () => {
-        if (selectedForPayroll.size === payrollData.length) { 
-            setSelectedForPayroll(new Set()); 
-        } else { 
-            setSelectedForPayroll(new Set(payrollData.map(p => p.id))); 
+        if (selectedForPayroll.size === payrollData.length) {
+            setSelectedForPayroll(new Set());
+        } else {
+            setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
         }
     };
 
