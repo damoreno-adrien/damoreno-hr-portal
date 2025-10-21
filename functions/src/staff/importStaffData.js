@@ -8,16 +8,17 @@ const db = getFirestore();
 
 // --- Configuration ---
 const REQUIRED_HEADERS = [
-    'email', 'firstName', 'lastName', 'nickname', 'startDate',
-    'department', 'position', 'payType', 'rate'
+    'email', 'firstname', 'lastname', 'nickname', 'startdate',
+    'department', 'position', 'paytype', 'rate'
 ];
-const ALL_EXPECTED_HEADERS = [ // Includes optional fields
-    'email', 'firstName', 'lastName', 'nickname', 'startDate',
-    'department', 'position', 'payType', 'rate',
-    'phoneNumber', 'birthdate', 'bankAccount', 'address',
-    'emergencyContactName', 'emergencyContactPhone'
+// --- END MODIFICATION ---
+const ALL_EXPECTED_HEADERS = [
+    'email', 'firstname', 'lastname', 'nickname', 'startdate',
+    'department', 'position', 'paytype', 'rate',
+    'phonenumber', 'birthdate', 'bankaccount', 'address',
+    'emergencycontactname', 'emergencycontactphone'
 ];
-const DEFAULT_PASSWORD = "Welcome123!"; // Default password for new users
+const DEFAULT_PASSWORD = "Welcome123!";
 
 exports.importStaffDataHandler = functions.https.onCall({
     region: "us-central1",
