@@ -1,5 +1,5 @@
 const functions = require("firebase-functions/v2");
-const { HttpsError } = functions.https; // Get HttpsError from the nested https object
+const { HttpsError } = functions.https;
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { parse } = require('csv-parse/sync');
@@ -11,19 +11,12 @@ const REQUIRED_HEADERS = [
     'email', 'firstname', 'lastname', 'nickname', 'startdate',
     'department', 'position', 'paytype', 'rate'
 ];
-// --- END MODIFICATION ---
-const ALL_EXPECTED_HEADERS = [
-    'email', 'firstname', 'lastname', 'nickname', 'startdate',
-    'department', 'position', 'paytype', 'rate',
-    'phonenumber', 'birthdate', 'bankaccount', 'address',
-    'emergencycontactname', 'emergencycontactphone'
-];
 const DEFAULT_PASSWORD = "Welcome123!";
 
 exports.importStaffDataHandler = functions.https.onCall({
     region: "us-central1",
-    timeoutSeconds: 540, // Increase timeout for potentially long imports
-    memory: "1GiB"       // Increase memory for parsing larger files
+    timeoutSeconds: 540,
+    memory: "1GiB"
 }, async (request) => {
     // --- Auth Checks ---
     if (!request.auth) {
@@ -49,120 +42,119 @@ exports.importStaffDataHandler = functions.https.onCall({
     try {
         // --- Parse CSV Data ---
         const records = parse(csvData, {
-            columns: true,       // Treat first row as headers
+            columns: true,
             skip_empty_lines: true,
-            trim: true,          // Trim whitespace from values
-            cast: (value, context) => {
-                // Basic type casting (can add more specific casting if needed)
-                if (context.column === 'rate') return Number(value) || 0;
-                // Add casting for dates if necessary, though YYYY-MM-DD strings are okay for Firestore
-                return value;
-            }
+            trim: true,
         });
 
         if (records.length === 0) {
             return { result: "CSV file was empty or contained no data rows." };
         }
 
-        // --- Header Validation ---
+        // --- Header Validation (Case-Insensitive) ---
         const headers = Object.keys(records[0]).map(h => h.toLowerCase());
-        // REQUIRED_HEADERS are already lowercase
-        const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h)); 
+        const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h));
         if (missingHeaders.length > 0) {
-            // Report the expected (lowercase) headers that were missing
             throw new HttpsError("invalid-argument", `Missing required columns in CSV (case-insensitive check failed for): ${missingHeaders.join(', ')}`);
         }
 
         // --- Process Each Record ---
-        // Use Promise.allSettled to process rows concurrently but wait for all
         const results = await Promise.allSettled(records.map(async (record, index) => {
             recordsProcessed++;
-            const rowNum = index + 2; // +1 for header row, +1 for 0-index
+            const rowNum = index + 2;
 
-            // --- Basic Row Validation ---
-            const missingRequired = REQUIRED_HEADERS.filter(h => !record[h]);
-            if (missingRequired.length > 0) {
-                throw new Error(`Row ${rowNum}: Missing required data for column(s): ${missingRequired.join(', ')}`);
+            const getRecordValue = (key) => {
+                const actualHeader = Object.keys(record).find(h => h.toLowerCase() === key.toLowerCase());
+                return actualHeader ? record[actualHeader] : undefined;
+            };
+
+            // --- Row Validation (Checks for null, undefined, or empty strings) ---
+            const missingRequiredCheck = REQUIRED_HEADERS.filter(h => {
+                const value = getRecordValue(h);
+                return value === null || value === undefined || String(value).trim() === '';
+            });
+
+            if (missingRequiredCheck.length > 0) {
+                console.error(`Row ${rowNum} validation failed. Missing/Empty required fields: ${missingRequiredCheck.join(', ')}. Record data:`, record);
+                throw new Error(`Row ${rowNum}: Missing or empty required data for column(s): ${missingRequiredCheck.join(', ')}`);
             }
-            if (typeof record.email !== 'string' || !record.email.includes('@')) {
-                throw new Error(`Row ${rowNum}: Invalid email format: ${record.email}`);
+
+            const email = getRecordValue('email');
+            const payType = getRecordValue('payType');
+
+            if (typeof email !== 'string' || !email.includes('@')) {
+                throw new Error(`Row ${rowNum}: Invalid email format: ${email}`);
             }
-            if (record.payType !== 'Monthly' && record.payType !== 'Hourly') {
-                 throw new Error(`Row ${rowNum}: Invalid payType. Must be 'Monthly' or 'Hourly'.`);
+            if (payType !== 'Monthly' && payType !== 'Hourly') {
+                throw new Error(`Row ${rowNum}: Invalid payType. Must be 'Monthly' or 'Hourly'. Value found: ${payType}`);
             }
-            // Add more specific validation (date formats, department exists?) if needed
 
             // --- Prepare Firestore Data Object ---
             const staffData = {
-                firstName: record.firstName,
-                lastName: record.lastName,
-                nickname: record.nickname,
-                email: record.email,
-                startDate: record.startDate, // Assuming YYYY-MM-DD format
-                phoneNumber: record.phoneNumber || null,
-                birthdate: record.birthdate || null, // Assuming YYYY-MM-DD format
-                bankAccount: record.bankAccount || null,
-                address: record.address || null,
-                emergencyContactName: record.emergencyContactName || null,
-                emergencyContactPhone: record.emergencyContactPhone || null,
-                status: 'active', // Always set new/updated users to active
-                bonusStreak: 0, // Default for new users or keep existing below
+                firstName: getRecordValue('firstName'),
+                lastName: getRecordValue('lastName'),
+                nickname: getRecordValue('nickname'),
+                email: email,
+                startDate: getRecordValue('startDate'),
+                phoneNumber: getRecordValue('phoneNumber') || null,
+                birthdate: getRecordValue('birthdate') || null,
+                bankAccount: getRecordValue('bankAccount') || null,
+                address: getRecordValue('address') || null,
+                emergencyContactName: getRecordValue('emergencyContactName') || null,
+                emergencyContactPhone: getRecordValue('emergencyContactPhone') || null,
+                status: 'active',
+                bonusStreak: 0,
             };
             const jobData = {
-                position: record.position,
-                department: record.department,
-                startDate: record.startDate,
-                payType: record.payType,
-                rate: record.rate, // Already cast to Number
+                position: getRecordValue('position'),
+                department: getRecordValue('department'),
+                startDate: getRecordValue('startDate'),
+                payType: payType,
+                rate: Number(getRecordValue('rate')) || 0,
             };
 
             // --- Check if User Exists ---
             let userRecord;
             let existingProfile = null;
             try {
-                userRecord = await admin.auth().getUserByEmail(record.email);
+                userRecord = await admin.auth().getUserByEmail(email);
                 const profileSnap = await db.collection('staff_profiles').doc(userRecord.uid).get();
-                if (profileSnap.exists) {
-                    existingProfile = profileSnap.data();
-                }
+                if (profileSnap.exists) { existingProfile = profileSnap.data(); }
             } catch (error) {
                 if (error.code !== 'auth/user-not-found') {
-                    throw new Error(`Row ${rowNum}: Error checking user ${record.email}: ${error.message}`); // Re-throw unexpected errors
+                    throw new Error(`Row ${rowNum}: Error checking user ${email}: ${error.message}`);
                 }
-                // User not found - proceed to create
             }
 
             // --- Create or Update ---
             if (userRecord) { // User Exists - Update
                 const staffRef = db.collection('staff_profiles').doc(userRecord.uid);
-                 await staffRef.update({
+                await staffRef.update({
                     ...staffData,
-                    jobHistory: FieldValue.arrayUnion(jobData), // Add new job entry if different
-                    bonusStreak: existingProfile?.bonusStreak ?? 0 // Keep existing streak
-                 });
-                return { action: 'updated', email: record.email };
+                    jobHistory: FieldValue.arrayUnion(jobData),
+                    bonusStreak: existingProfile?.bonusStreak ?? 0
+                });
+                return { action: 'updated', email: email };
 
             } else { // User Doesn't Exist - Create
-                const batch = db.batch(); // Use batch for atomic creation
+                const batch = db.batch();
                 const newUserRecord = await admin.auth().createUser({
-                    email: record.email,
+                    email: email,
                     password: DEFAULT_PASSWORD,
-                    displayName: record.nickname,
+                    displayName: staffData.nickname,
                 });
                 const newUserId = newUserRecord.uid;
-
                 const userRef = db.collection('users').doc(newUserId);
                 const staffRef = db.collection('staff_profiles').doc(newUserId);
-
                 batch.set(userRef, { role: 'staff' });
                 batch.set(staffRef, {
                     ...staffData,
                     uid: newUserId,
-                    jobHistory: [jobData], // Start with the imported job
+                    jobHistory: [jobData],
                     createdAt: FieldValue.serverTimestamp(),
                 });
-                await batch.commit(); // Commit creation atomically
-                return { action: 'created', email: record.email };
+                await batch.commit();
+                return { action: 'created', email: email };
             }
         }));
 
@@ -173,17 +165,15 @@ exports.importStaffDataHandler = functions.https.onCall({
                 if (result.value.action === 'created') recordsCreated++;
                 if (result.value.action === 'updated') recordsUpdated++;
             } else {
-                 // Log the reason, making sure it's a string
                 const reasonMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
                 errors.push(`Row ${rowNum}: ${reasonMessage}`);
             }
         });
 
     } catch (error) {
-        // Handle parsing errors or general function errors
         console.error("Error during staff import:", error);
-        if (error instanceof HttpsError) throw error; // Re-throw HttpsErrors correctly now
-        errors.push(`General Error: ${error.message}`); // Add other errors to the list
+        if (error instanceof HttpsError) throw error;
+        errors.push(`General Error: ${error.message}`);
     }
 
     // --- Return Summary ---
@@ -193,7 +183,7 @@ exports.importStaffDataHandler = functions.https.onCall({
 
     return {
         result: summaryMessage,
-        errors: errors, // Send detailed errors back to the frontend
-        defaultPassword: errors.length < recordsProcessed ? DEFAULT_PASSWORD : null // Only show password if some succeeded
+        errors: errors,
+        defaultPassword: (recordsCreated > 0) ? DEFAULT_PASSWORD : null
     };
 });
