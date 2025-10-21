@@ -64,10 +64,12 @@ exports.importStaffDataHandler = functions.https.onCall({
         }
 
         // --- Header Validation ---
-        const headers = Object.keys(records[0]);
-        const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h));
+        const headers = Object.keys(records[0]).map(h => h.toLowerCase());
+        // REQUIRED_HEADERS are already lowercase
+        const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h)); 
         if (missingHeaders.length > 0) {
-            throw new HttpsError("invalid-argument", `Missing required columns in CSV: ${missingHeaders.join(', ')}`);
+            // Report the expected (lowercase) headers that were missing
+            throw new HttpsError("invalid-argument", `Missing required columns in CSV (case-insensitive check failed for): ${missingHeaders.join(', ')}`);
         }
 
         // --- Process Each Record ---
