@@ -1,25 +1,26 @@
-const { HttpsError, https } = require("firebase-functions/v2");
+const functions = require("firebase-functions/v2");
+const { HttpsError } = functions.https; // Get HttpsError from the nested https object
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-const { parse } = require('csv-parse/sync'); // For synchronous parsing
+const { parse } = require('csv-parse/sync');
 
 const db = getFirestore();
 
 // --- Configuration ---
 const REQUIRED_HEADERS = [
-    'email', 'firstName', 'lastName', 'nickname', 'startDate', 
+    'email', 'firstName', 'lastName', 'nickname', 'startDate',
     'department', 'position', 'payType', 'rate'
 ];
 const ALL_EXPECTED_HEADERS = [ // Includes optional fields
-    'email', 'firstName', 'lastName', 'nickname', 'startDate', 
+    'email', 'firstName', 'lastName', 'nickname', 'startDate',
     'department', 'position', 'payType', 'rate',
     'phoneNumber', 'birthdate', 'bankAccount', 'address',
     'emergencyContactName', 'emergencyContactPhone'
 ];
 const DEFAULT_PASSWORD = "Welcome123!"; // Default password for new users
 
-exports.importStaffDataHandler = https.onCall({ 
-    region: "us-central1", 
+exports.importStaffDataHandler = functions.https.onCall({
+    region: "us-central1",
     timeoutSeconds: 540, // Increase timeout for potentially long imports
     memory: "1GiB"       // Increase memory for parsing larger files
 }, async (request) => {
@@ -68,7 +69,7 @@ exports.importStaffDataHandler = https.onCall({
         if (missingHeaders.length > 0) {
             throw new HttpsError("invalid-argument", `Missing required columns in CSV: ${missingHeaders.join(', ')}`);
         }
-        
+
         // --- Process Each Record ---
         // Use Promise.allSettled to process rows concurrently but wait for all
         const results = await Promise.allSettled(records.map(async (record, index) => {
@@ -102,7 +103,7 @@ exports.importStaffDataHandler = https.onCall({
                 emergencyContactName: record.emergencyContactName || null,
                 emergencyContactPhone: record.emergencyContactPhone || null,
                 status: 'active', // Always set new/updated users to active
-                bonusStreak: 0, // Default for new users
+                bonusStreak: 0, // Default for new users or keep existing below
             };
             const jobData = {
                 position: record.position,
@@ -129,19 +130,17 @@ exports.importStaffDataHandler = https.onCall({
             }
 
             // --- Create or Update ---
-            const batch = db.batch(); // Use a batch for atomicity per row
-            
             if (userRecord) { // User Exists - Update
                 const staffRef = db.collection('staff_profiles').doc(userRecord.uid);
-                // Update profile data, keeping existing job history and potentially bonus streak
-                batch.update(staffRef, { 
-                    ...staffData, 
-                    jobHistory: FieldValue.arrayUnion(jobData), // Add new job entry
-                    bonusStreak: existingProfile?.bonusStreak ?? 0 // Keep existing streak if profile found
-                });
+                 await staffRef.update({
+                    ...staffData,
+                    jobHistory: FieldValue.arrayUnion(jobData), // Add new job entry if different
+                    bonusStreak: existingProfile?.bonusStreak ?? 0 // Keep existing streak
+                 });
                 return { action: 'updated', email: record.email };
-                
+
             } else { // User Doesn't Exist - Create
+                const batch = db.batch(); // Use batch for atomic creation
                 const newUserRecord = await admin.auth().createUser({
                     email: record.email,
                     password: DEFAULT_PASSWORD,
@@ -159,7 +158,7 @@ exports.importStaffDataHandler = https.onCall({
                     jobHistory: [jobData], // Start with the imported job
                     createdAt: FieldValue.serverTimestamp(),
                 });
-                await batch.commit(); // Commit immediately after creating user
+                await batch.commit(); // Commit creation atomically
                 return { action: 'created', email: record.email };
             }
         }));
@@ -171,14 +170,16 @@ exports.importStaffDataHandler = https.onCall({
                 if (result.value.action === 'created') recordsCreated++;
                 if (result.value.action === 'updated') recordsUpdated++;
             } else {
-                errors.push(`Row ${rowNum}: ${result.reason.message}`);
+                 // Log the reason, making sure it's a string
+                const reasonMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
+                errors.push(`Row ${rowNum}: ${reasonMessage}`);
             }
         });
 
     } catch (error) {
         // Handle parsing errors or general function errors
         console.error("Error during staff import:", error);
-        if (error instanceof HttpsError) throw error; // Re-throw HttpsErrors
+        if (error instanceof HttpsError) throw error; // Re-throw HttpsErrors correctly now
         errors.push(`General Error: ${error.message}`); // Add other errors to the list
     }
 
@@ -187,8 +188,8 @@ exports.importStaffDataHandler = https.onCall({
     console.log(summaryMessage);
     if (errors.length > 0) console.error("Import errors:", errors);
 
-    return { 
-        result: summaryMessage, 
+    return {
+        result: summaryMessage,
         errors: errors, // Send detailed errors back to the frontend
         defaultPassword: errors.length < recordsProcessed ? DEFAULT_PASSWORD : null // Only show password if some succeeded
     };
