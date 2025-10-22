@@ -27,7 +27,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             return;
         }
 
-        // --- NEW: Check for periods before October 2025 ---
+        // Check for periods before October 2025
         const earliestAllowedYear = 2025;
         const earliestAllowedMonth = 10; // October (1-indexed)
 
@@ -35,8 +35,9 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             setError(`Cannot generate payroll for periods before October 2025.`);
             setPayrollData([]);
             setIsMonthFullyFinalized(false);
-            return; // Stop execution
+            return;
         }
+
 
         if (!companyConfig) { setError("Company settings are not loaded yet. Please wait and try again."); return; }
         setIsLoading(true);
@@ -54,7 +55,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", year), where("payPeriodMonth", "==", month + 1)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
-            // Simplified eligibility filter
+            // --- REVERTED eligibility filter ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
                 const staffStartDate = new Date(staff.startDate);
@@ -63,8 +64,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const hasStarted = staffStartDate <= endDate;
                 const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startDate;
 
-                // Check for explicit 'active' status OR if they left this period
-                const isCurrentlyActive = staff.status === 'active';
+                // Check for undefined, null, OR explicit 'active' status
+                const isCurrentlyActive = staff.status === undefined || staff.status === null || staff.status === 'active';
                 const leftThisPeriod = staffEndDate &&
                                        staffEndDate.getFullYear() === year &&
                                        staffEndDate.getMonth() === month;
@@ -73,6 +74,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 return !isAlreadyFinalized && hasStarted && isEligibleForPeriod;
             });
+            // --- END REVERT ---
 
             if (staffToProcess.length === 0 && staffList.length > 0) {
                 setPayrollData([]);
@@ -223,7 +225,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     id: staff.id,
                     name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName,
                     displayName: displayName,
-                    payType: currentJob.position, // Assuming position describes payType intent
+                    payType: currentJob.position,
                     totalEarnings,
                     totalDeductions,
                     netPay,
@@ -234,7 +236,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         ssoAllowance,
                         leavePayout: leavePayoutTotal,
                         leavePayoutDetails: leavePayout,
-                        others: otherEarningsList // Store the list of other earnings
+                        others: otherEarningsList
                     },
                     deductions: {
                         absences: autoDeductions,
@@ -243,7 +245,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         sso: ssoDeduction,
                         advance: advanceDeduction,
                         loan: loanDeduction,
-                        others: otherDeductionsList // Store the list of other deductions
+                        others: otherDeductionsList
                     }
                 };
             });
@@ -252,7 +254,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         } finally { setIsLoading(false); }
     };
 
-    // Update selected staff when payroll data changes
     useEffect(() => {
         if (payrollData.length > 0) {
             setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
@@ -261,11 +262,9 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         }
     }, [payrollData]);
 
-    // Handle finalizing the payroll
     const handleFinalizePayroll = async () => {
         const dataToFinalize = payrollData.filter(p => selectedForPayroll.has(p.id));
         if (dataToFinalize.length === 0) { alert("Please select at least one employee to finalize."); return; }
-        // Get month name for confirmation
         const monthName = new Date(payPeriod.year, payPeriod.month - 1).toLocaleString('default', { month: 'long' });
         if (!window.confirm(`Are you sure you want to finalize payroll for ${dataToFinalize.length} employee(s) for ${monthName} ${payPeriod.year}?`)) { return; }
 
@@ -275,12 +274,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizeAndStorePayslips = httpsCallable(functions, 'finalizeAndStorePayslips');
             await finalizeAndStorePayslips({ payrollData: dataToFinalize, payPeriod });
             alert("Payroll finalized and payslips stored successfully!");
-            handleGeneratePayroll(); // Refresh the list after finalizing
+            handleGeneratePayroll();
         } catch (error) { console.error("Error finalizing payroll:", error); alert(`Failed to finalize payroll: ${error.message}`);
         } finally { setIsFinalizing(false); }
     };
 
-    // Handle selecting/deselecting individual staff for finalization
     const handleSelectOne = (staffId) => {
         setSelectedForPayroll(prev => {
             const newSet = new Set(prev);
@@ -290,7 +288,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         });
     };
 
-    // Handle selecting/deselecting all staff for finalization
     const handleSelectAll = () => {
         if (selectedForPayroll.size === payrollData.length) {
             setSelectedForPayroll(new Set());
@@ -299,14 +296,12 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         }
     };
 
-    // Calculate total net pay for selected staff (memoized for performance)
     const totalSelectedNetPay = useMemo(() => {
         return payrollData
             .filter(p => selectedForPayroll.has(p.id))
             .reduce((sum, p) => sum + p.netPay, 0);
     }, [payrollData, selectedForPayroll]);
 
-    // Return state and handlers for the component to use
     return {
         payrollData, isLoading, isFinalizing, error, isMonthFullyFinalized,
         selectedForPayroll, totalSelectedNetPay,
