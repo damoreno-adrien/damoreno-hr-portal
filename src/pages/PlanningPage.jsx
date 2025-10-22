@@ -140,17 +140,19 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     // Main component render
     return (
         <div>
-            {/* Shift Modal */}
             {isShiftModalOpen && (
                 <ShiftModal
                     isOpen={isShiftModalOpen}
                     onClose={closeModal}
                     db={db}
                     staffId={selectedShiftInfo.staffId}
-                    staffName={getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId))}
+                    // --- MODIFIED: Added check for found staff ---
+                    staffName={
+                        getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId)) || 'Unknown Staff'
+                    }
                     date={selectedShiftInfo.date}
                     existingShift={selectedShiftInfo.shift}
-                    onSaveSuccess={refetchWeekData} // Refetch data when a shift is saved/deleted
+                    onSaveSuccess={refetchWeekData}
                 />
             )}
 
