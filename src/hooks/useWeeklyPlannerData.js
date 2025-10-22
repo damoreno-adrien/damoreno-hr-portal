@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-// --- Ensure this import is correct ---
 import { toLocalDateString } from '../utils/dateHelpers';
 
 export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
     const [weekData, setWeekData] = useState({});
     const [weekDates, setWeekDates] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [currentListener, setCurrentListener] = useState(null); // To manage unsubscribe
+    const [currentListener, setCurrentListener] = useState(null);
 
     const fetchData = useCallback(() => {
+        console.log("fetchData called, setting loading to true"); // <<< ADD LOG
         setLoading(true);
         setWeekData({});
         setWeekDates([]);
@@ -19,27 +19,26 @@ export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
         const startDate = new Date(currentWeekStart);
         for (let i = 0; i < 7; i++) {
             const currentDate = new Date(startDate);
-            // Use UTC methods to avoid potential DST issues when adding days
-            currentDate.setUTCDate(startDate.getUTCDate() + i); 
-            
-            const dateString = toLocalDateString(currentDate); // Use imported helper
-            
+            currentDate.setUTCDate(startDate.getUTCDate() + i);
+            const dateString = toLocalDateString(currentDate);
             tempWeekDates.push({
                 dateString: dateString,
-                dayName: currentDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }), // Use UTC to match getUTCDate
-                dateNum: currentDate.getUTCDate(), 
+                dayName: currentDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+                dateNum: currentDate.getUTCDate(),
             });
         }
-        setWeekDates(tempWeekDates); // Set dates immediately
+        console.log("Calculated week dates:", tempWeekDates); // <<< ADD LOG
+        setWeekDates(tempWeekDates);
 
         if (tempWeekDates.length === 0) {
             console.error("Week dates array is empty, cannot query Firestore.");
-            setLoading(false); // Make sure loading stops
+            setLoading(false);
             return;
         }
 
         const startOfWeekStr = tempWeekDates[0].dateString;
         const endOfWeekStr = tempWeekDates[6].dateString;
+        console.log(`Querying schedules from ${startOfWeekStr} to ${endOfWeekStr}`); // <<< ADD LOG
 
         // Query Firestore
         const q = query(
@@ -48,58 +47,56 @@ export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
             where('date', '<=', endOfWeekStr)
         );
 
-        // Clean up previous listener
         if (currentListener) {
+            console.log("Cleaning up previous listener before attaching new one."); // <<< ADD LOG
             currentListener();
         }
 
+        console.log("Attaching onSnapshot listener..."); // <<< ADD LOG
         const unsubscribe = onSnapshot(q, (schedulesSnap) => {
+            console.log("onSnapshot SUCCESS callback triggered."); // <<< ADD LOG
             const schedulesByStaff = {};
             schedulesSnap.forEach(doc => {
                 const schedule = doc.data();
                 if (!schedulesByStaff[schedule.staffId]) {
                     schedulesByStaff[schedule.staffId] = {};
                 }
-                // Ensure data structure is correct even if staffId/date missing in data (unlikely)
                 if (schedule.staffId && schedule.date) {
                     schedulesByStaff[schedule.staffId][schedule.date] = { id: doc.id, ...schedule };
                 }
             });
+            console.log("Processed schedule data:", schedulesByStaff); // <<< ADD LOG
             setWeekData(schedulesByStaff);
-            setLoading(false); // Set loading false on successful data fetch
+            setLoading(false); // Set loading false on success
         }, (error) => {
-            console.error("Error fetching weekly planner data:", error);
-            // --- Ensure loading stops on error ---
-            setLoading(false); 
-            setWeekData({}); 
-            setWeekDates([]); 
+            console.error("onSnapshot ERROR callback triggered:", error); // <<< ADD LOG
+            setLoading(false); // Ensure loading stops on error
+            setWeekData({});
+            setWeekDates([]);
         });
 
         setCurrentListener(() => unsubscribe);
 
-    // Ensure dependencies are stable
-    }, [db, currentWeekStart]); // Removed currentListener from here
+    }, [db, currentWeekStart]); // Dependencies correct now
 
 
     useEffect(() => {
-        fetchData(); // Call fetch data
+        console.log("useEffect triggered, calling fetchData."); // <<< ADD LOG
+        fetchData();
 
-        // Return the cleanup function directly
         return () => {
             if (currentListener) {
-                console.log("Cleaning up weekly planner listener.");
+                console.log("useEffect cleanup: Cleaning up weekly planner listener."); // <<< ADD LOG
                 currentListener();
             }
         };
-    // Re-run ONLY if db or currentWeekStart changes
-    }, [db, currentWeekStart, fetchData]); // fetchData is stable due to useCallback
+    }, [db, currentWeekStart, fetchData]);
 
 
     const refetchWeekData = useCallback(() => {
         console.log("Refetch triggered");
-         // No need to manually cleanup here, useEffect's cleanup will handle it
         fetchData();
-    }, [fetchData]); // Dependency includes fetchData
+    }, [fetchData]);
 
 
     return { weekData, weekDates, loading, refetchWeekData };
