@@ -58,9 +58,10 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         });
     };
 
-    // Handler for clicking a cell in the schedule table
-    const handleCellClick = (staffId, date, shift) => {
-        setSelectedShiftInfo({ staffId, date, shift });
+    const handleCellClick = (staffId, dateString, shift) => {
+        // Convert the date string back to a Date object (interpret as UTC)
+        const dateObject = new Date(`${dateString}T00:00:00Z`); 
+        setSelectedShiftInfo({ staffId, date: dateObject, shift }); // Pass Date object
         setIsShiftModalOpen(true);
     };
 
