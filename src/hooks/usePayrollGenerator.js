@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { toLocalDateString } from '../utils/dateHelpers';
 
 const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { rate: 0, payType: 'Monthly', department: 'N/A' }; } const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) { return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' }; } return latestJob; };
 const calculateHours = (start, end) => { if (!start?.toDate || !end?.toDate) return 0; const diffMillis = end.toDate() - start.toDate(); return diffMillis / (1000 * 60 * 60); };
