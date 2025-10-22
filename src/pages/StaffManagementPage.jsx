@@ -5,7 +5,7 @@ import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
 // Added UploadIcon, assuming it exists in Icons.jsx
 import { PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
-import { formatDateForDisplay } from '../utils/dateHelpers'; // Import date formatter
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const StatusBadge = ({ status }) => {
     // Determine status text and classes
@@ -130,7 +130,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            const today = new Date().toISOString().split('T')[0];
+            const today = dateUtils.formatISODate(new Date()); // Use dateUtils
             link.setAttribute("download", `staff_export_${today}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
@@ -310,7 +310,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                     <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{getCurrentJob(staff).position}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDateForDisplay(staff.startDate)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(staff.startDate)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                                             <StatusBadge status={staff.status} />
                                         </td>
