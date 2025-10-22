@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-
-// --- Import the helper function ---
-import { toLocalDateString } from '../utils/dateHelpers'; // Ensure this line exists and path is correct
+// --- Ensure this import is correct ---
+import { toLocalDateString } from '../utils/dateHelpers';
 
 export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
     const [weekData, setWeekData] = useState({});
@@ -12,44 +11,44 @@ export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
 
     const fetchData = useCallback(() => {
         setLoading(true);
-        setWeekData({}); // Clear previous data
-        setWeekDates([]); // Clear previous dates
+        setWeekData({});
+        setWeekDates([]);
 
-        // --- Calculate Week Dates using toLocalDateString ---
+        // Calculate Week Dates
         const tempWeekDates = [];
-        const startDate = new Date(currentWeekStart); // Start with a copy
+        const startDate = new Date(currentWeekStart);
         for (let i = 0; i < 7; i++) {
             const currentDate = new Date(startDate);
-            currentDate.setUTCDate(startDate.getUTCDate() + i); // Use UTC functions for consistency after setting start date locally
+            // Use UTC methods to avoid potential DST issues when adding days
+            currentDate.setUTCDate(startDate.getUTCDate() + i); 
             
-            const dateString = toLocalDateString(currentDate); // Use helper here
+            const dateString = toLocalDateString(currentDate); // Use imported helper
             
             tempWeekDates.push({
                 dateString: dateString,
-                dayName: currentDate.toLocaleDateString('en-US', { weekday: 'short' }),
-                dateNum: currentDate.getUTCDate(), // Use UTC date number
+                dayName: currentDate.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }), // Use UTC to match getUTCDate
+                dateNum: currentDate.getUTCDate(), 
             });
         }
-        setWeekDates(tempWeekDates); // Set dates immediately for UI responsiveness
+        setWeekDates(tempWeekDates); // Set dates immediately
 
-        // Ensure tempWeekDates is populated before querying
         if (tempWeekDates.length === 0) {
             console.error("Week dates array is empty, cannot query Firestore.");
-            setLoading(false);
-            return; // Stop if dates aren't generated
+            setLoading(false); // Make sure loading stops
+            return;
         }
 
         const startOfWeekStr = tempWeekDates[0].dateString;
         const endOfWeekStr = tempWeekDates[6].dateString;
 
-        // --- Query Firestore ---
+        // Query Firestore
         const q = query(
             collection(db, 'schedules'),
             where('date', '>=', startOfWeekStr),
             where('date', '<=', endOfWeekStr)
         );
 
-        // Clean up previous listener if it exists
+        // Clean up previous listener
         if (currentListener) {
             currentListener();
         }
@@ -61,46 +60,46 @@ export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
                 if (!schedulesByStaff[schedule.staffId]) {
                     schedulesByStaff[schedule.staffId] = {};
                 }
-                schedulesByStaff[schedule.staffId][schedule.date] = { id: doc.id, ...schedule };
+                // Ensure data structure is correct even if staffId/date missing in data (unlikely)
+                if (schedule.staffId && schedule.date) {
+                    schedulesByStaff[schedule.staffId][schedule.date] = { id: doc.id, ...schedule };
+                }
             });
             setWeekData(schedulesByStaff);
-            setLoading(false);
+            setLoading(false); // Set loading false on successful data fetch
         }, (error) => {
             console.error("Error fetching weekly planner data:", error);
-            setLoading(false); // Ensure loading stops on error
-            setWeekData({}); // Clear data on error
-            setWeekDates([]); // Clear dates on error
+            // --- Ensure loading stops on error ---
+            setLoading(false); 
+            setWeekData({}); 
+            setWeekDates([]); 
         });
 
-        setCurrentListener(() => unsubscribe); // Store the new unsubscribe function
+        setCurrentListener(() => unsubscribe);
 
-    // Include db and currentWeekStart in dependency array
-    }, [db, currentWeekStart, currentListener]); // Added currentListener dependency
+    // Ensure dependencies are stable
+    }, [db, currentWeekStart]); // Removed currentListener from here
 
 
-    // Fetch data when component mounts or dependencies change
     useEffect(() => {
-        fetchData();
-        
-        // Cleanup listener on component unmount or when dependencies change before next fetch
+        fetchData(); // Call fetch data
+
+        // Return the cleanup function directly
         return () => {
             if (currentListener) {
+                console.log("Cleaning up weekly planner listener.");
                 currentListener();
             }
         };
-    // Re-run effect if db or currentWeekStart changes
-    }, [db, currentWeekStart, fetchData, currentListener]); // Added fetchData and currentListener
+    // Re-run ONLY if db or currentWeekStart changes
+    }, [db, currentWeekStart, fetchData]); // fetchData is stable due to useCallback
 
 
-    // Function to manually trigger a refetch
     const refetchWeekData = useCallback(() => {
-        // Cleanup listener before refetching
-        if (currentListener) {
-            currentListener();
-            setCurrentListener(null); // Reset listener state
-        }
-        fetchData(); // Call fetchData to establish a new listener
-    }, [fetchData, currentListener]); // Dependency includes fetchData now
+        console.log("Refetch triggered");
+         // No need to manually cleanup here, useEffect's cleanup will handle it
+        fetchData();
+    }, [fetchData]); // Dependency includes fetchData
 
 
     return { weekData, weekDates, loading, refetchWeekData };
