@@ -1,57 +1,107 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
-const formatDateToYYYYMMDD = (date) => {
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
+// --- Import the helper function ---
+import { toLocalDateString } from '../utils/dateHelpers'; // Adjust path if needed
 
-export default function useWeeklyPlannerData(db, startOfWeek) {
-    const [schedules, setSchedules] = useState({});
-    const [approvedLeave, setApprovedLeave] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
+    const [weekData, setWeekData] = useState({});
+    const [weekDates, setWeekDates] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [currentListener, setCurrentListener] = useState(null); // To manage unsubscribe
 
-    useEffect(() => {
-        if (!db) return;
-        
-        setIsLoading(true);
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(endOfWeek.getDate() + 6);
-        
-        const startStr = formatDateToYYYYMMDD(startOfWeek);
-        const endStr = formatDateToYYYYMMDD(endOfWeek);
+    const fetchData = useCallback(() => {
+        setLoading(true);
+        setWeekData({}); // Clear previous data
+        setWeekDates([]); // Clear previous dates
 
-        const shiftsQuery = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
-        const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
-            const newSchedules = {};
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                const key = `${data.staffId}_${data.date}`;
-                newSchedules[key] = { id: doc.id, ...data };
+        // --- Calculate Week Dates using toLocalDateString ---
+        const tempWeekDates = [];
+        const startDate = new Date(currentWeekStart); // Start with a copy
+        for (let i = 0; i < 7; i++) {
+            const currentDate = new Date(startDate);
+            currentDate.setUTCDate(startDate.getUTCDate() + i); // Use UTC functions for consistency after setting start date locally
+            
+            const dateString = toLocalDateString(currentDate); // Use helper here
+            
+            tempWeekDates.push({
+                dateString: dateString,
+                dayName: currentDate.toLocaleDateString('en-US', { weekday: 'short' }),
+                dateNum: currentDate.getUTCDate(), // Use UTC date number
             });
-            setSchedules(newSchedules);
+        }
+        setWeekDates(tempWeekDates); // Set dates immediately for UI responsiveness
+
+        // Ensure tempWeekDates is populated before querying
+        if (tempWeekDates.length === 0) {
+            console.error("Week dates array is empty, cannot query Firestore.");
+            setLoading(false);
+            return; // Stop if dates aren't generated
+        }
+
+        const startOfWeekStr = tempWeekDates[0].dateString;
+        const endOfWeekStr = tempWeekDates[6].dateString;
+
+        // --- Query Firestore ---
+        const q = query(
+            collection(db, 'schedules'),
+            where('date', '>=', startOfWeekStr),
+            where('date', '<=', endOfWeekStr)
+        );
+
+        // Clean up previous listener if it exists
+        if (currentListener) {
+            currentListener();
+        }
+
+        const unsubscribe = onSnapshot(q, (schedulesSnap) => {
+            const schedulesByStaff = {};
+            schedulesSnap.forEach(doc => {
+                const schedule = doc.data();
+                if (!schedulesByStaff[schedule.staffId]) {
+                    schedulesByStaff[schedule.staffId] = {};
+                }
+                schedulesByStaff[schedule.staffId][schedule.date] = { id: doc.id, ...schedule };
+            });
+            setWeekData(schedulesByStaff);
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching weekly planner data:", error);
+            setLoading(false); // Ensure loading stops on error
+            setWeekData({}); // Clear data on error
+            setWeekDates([]); // Clear dates on error
         });
 
-        const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("endDate", ">=", startStr));
-        const unsubscribeLeave = onSnapshot(leaveQuery, (snapshot) => {
-            const leaveRequests = snapshot.docs
-                .map(doc => ({ id: doc.id, ...doc.data() }))
-                .filter(req => req.startDate <= endStr);
-            setApprovedLeave(leaveRequests);
-        });
+        setCurrentListener(() => unsubscribe); // Store the new unsubscribe function
 
-        // A simple way to signal loading is complete after initial fetch, though onSnapshot is real-time
-        const timer = setTimeout(() => setIsLoading(false), 500);
+    // Include db and currentWeekStart in dependency array
+    }, [db, currentWeekStart, currentListener]); // Added currentListener dependency
 
+
+    // Fetch data when component mounts or dependencies change
+    useEffect(() => {
+        fetchData();
+        
+        // Cleanup listener on component unmount or when dependencies change before next fetch
         return () => {
-            unsubscribeShifts();
-            unsubscribeLeave();
-            clearTimeout(timer);
+            if (currentListener) {
+                currentListener();
+            }
         };
-    }, [db, startOfWeek]);
+    // Re-run effect if db or currentWeekStart changes
+    }, [db, currentWeekStart, fetchData, currentListener]); // Added fetchData and currentListener
 
-    return { schedules, approvedLeave, isLoading };
+
+    // Function to manually trigger a refetch
+    const refetchWeekData = useCallback(() => {
+        // Cleanup listener before refetching
+        if (currentListener) {
+            currentListener();
+            setCurrentListener(null); // Reset listener state
+        }
+        fetchData(); // Call fetchData to establish a new listener
+    }, [fetchData, currentListener]); // Dependency includes fetchData now
+
+
+    return { weekData, weekDates, loading, refetchWeekData };
 }
