@@ -5,7 +5,7 @@ import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon } from '../components/Icons';
 // --- CORRECTED IMPORT PATH ---
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
-import { formatDateForDisplay } from '../utils/dateHelpers';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -24,7 +24,7 @@ const StatusBadge = ({ status }) => {
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
-    const [filter, setFilter] = useState('pending');
+    const [filter, setFilter] = 'pending';
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
 
@@ -168,10 +168,10 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                         <div key={req.id} className="p-4 flex flex-wrap justify-between items-center gap-4">
                             <div>
                                 <p className="font-bold text-white">{req.leaveType}</p>
-                                <p className="text-sm text-gray-400">Requested on: {formatDateForDisplay(req.requestedAt?.toDate().toISOString().split('T')[0])}</p>
+                                <p className="text-sm text-gray-400">Requested on: {dateUtils.formatDisplayDate(req.requestedAt)}</p>
                             </div>
                             <div>
-                                <p className="font-medium text-white">{formatDateForDisplay(req.startDate)} to {formatDateForDisplay(req.endDate)} ({req.totalDays} days)</p>
+                                <p className="font-medium text-white">{dateUtils.formatDisplayDate(req.startDate)} to {dateUtils.formatDisplayDate(req.endDate)} ({req.totalDays} days)</p>
                             </div>
                             <StatusBadge status={req.status} />
                         </div>

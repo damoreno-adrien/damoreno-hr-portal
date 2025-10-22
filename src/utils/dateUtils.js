@@ -46,13 +46,14 @@ export const toFirestoreFormat = (dateObj) => {
 };
 
 /**
- * Formats a date for display in tables, headers, etc.
- * Example: "Oct 22, 2025"
- */
+* Formats a date for display in tables, headers, etc.
+* Example: "22/10/2025"
+*/
 export const formatDisplayDate = (date) => {
   const dateObj = fromFirestore(date);
   if (!dateObj) return '';
-  return format(dateObj, 'MMM dd, yyyy');
+  // Updated to match your DD/MM/YYYY format
+  return format(dateObj, 'dd/MM/yyyy');
 };
 
 /**
@@ -67,7 +68,7 @@ export const formatDisplayTime = (date) => {
 
 /**
  * Formats a date into the "yyyy-MM-dd" format.
- * This is essential for creating daily document IDs, filtering by day, etc.
+ * This is essential for database queries, document IDs, and <input type="date">.
  * Example: "2025-10-22"
  */
 export const formatISODate = (date) => {
