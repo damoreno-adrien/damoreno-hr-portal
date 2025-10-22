@@ -1,209 +1,219 @@
-import React, { useState, useMemo } from 'react';
-import Modal from '../components/Modal';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from "firebase/functions"; // Added for export
+import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '../components/Icons'; // Added DownloadIcon
 import ShiftModal from '../components/ShiftModal';
-import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData'; // NEW: Import hook
-import { PlusIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/Icons';
-
-const formatDateToYYYYMMDD = (date) => {
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
 
 const getDisplayName = (staff) => {
-    if (staff && staff.nickname) return staff.nickname;
-    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
-    if (staff && staff.fullName) return staff.fullName;
-    return 'Unknown Staff';
+    if (!staff) return 'N/A';
+    if (staff.nickname) return staff.nickname;
+    if (staff.firstName) return `${staff.firstName} ${staff.lastName}`;
+    return staff.fullName || 'Unknown';
 };
 
 const getCurrentJob = (staff) => {
-    if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-        return null;
+    if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) {
+        return { position: 'N/A', department: 'Unassigned' };
     }
-    return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+    return [...staff.jobHistory].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0))[0];
 };
 
 export default function PlanningPage({ db, staffList, userRole, departments }) {
-    const [departmentFilter, setDepartmentFilter] = useState('All Departments');
-    const [showArchived, setShowArchived] = useState(false);
+    const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+        const today = new Date();
+        const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ...
+        const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday
+        return new Date(today.setDate(diff));
+    });
 
-    const getStartOfWeek = (date) => {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        const day = d.getDay();
-        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-        return new Date(d.setDate(diff));
-    };
+    const { weekData, weekDates, loading, refetchWeekData } = useWeeklyPlannerData(db, currentWeekStart, staffList);
+    const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+    const [selectedShiftInfo, setSelectedShiftInfo] = useState({ staffId: null, date: null, shift: null });
+    const [isExporting, setIsExporting] = useState(false); // State for export loading
 
-    const [startOfWeek, setStartOfWeek] = useState(getStartOfWeek(new Date()));
-    const [selectedShift, setSelectedShift] = useState(null);
-    const [selectedLeave, setSelectedLeave] = useState(null);
-    
-    // NEW: All data fetching is now handled by the hook
-    const { schedules, approvedLeave, isLoading } = useWeeklyPlannerData(db, startOfWeek);
-    
-    const getLeaveForStaffOnDate = (staffId, date) => {
-        const dateStr = formatDateToYYYYMMDD(date);
-        return approvedLeave.find(leave => 
-            leave.staffId === staffId && 
-            dateStr >= leave.startDate && 
-            dateStr <= leave.endDate
-        );
-    };
-
-    const changeWeek = (offset) => {
-        setStartOfWeek(prevDate => {
+    const handlePrevWeek = () => {
+        setCurrentWeekStart(prevDate => {
             const newDate = new Date(prevDate);
-            newDate.setDate(newDate.getDate() + (7 * offset));
+            newDate.setDate(newDate.getDate() - 7);
             return newDate;
         });
     };
-    
-    const days = Array.from({ length: 7 }).map((_, i) => {
-        const date = new Date(startOfWeek);
-        date.setDate(date.getDate() + i);
-        return date;
-    });
 
-    const formatDateHeader = (date) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const isToday = date.getTime() === today.getTime();
-        return (
-            <div className={`text-center py-4 border-b-2 ${isToday ? 'border-amber-500' : 'border-gray-700'} border-r border-gray-700`}>
-                <p className={`font-bold ${isToday ? 'text-amber-400' : 'text-white'}`}>{date.toLocaleDateString('en-US', { weekday: 'short' })}</p>
-                <p className={`text-2xl font-light ${isToday ? 'text-white' : 'text-gray-300'}`}>{date.getDate()}</p>
-            </div>
-        );
+    const handleNextWeek = () => {
+        setCurrentWeekStart(prevDate => {
+            const newDate = new Date(prevDate);
+            newDate.setDate(newDate.getDate() + 7);
+            return newDate;
+        });
     };
 
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(endOfWeek.getDate() + 6);
-    const weekRangeString = `${startOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${endOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
-    const isManager = userRole === 'manager';
+    const handleCellClick = (staffId, date, shift) => {
+        setSelectedShiftInfo({ staffId, date, shift });
+        setIsShiftModalOpen(true);
+    };
 
-    const filteredStaffList = useMemo(() => staffList.filter(staff => {
-        if (!showArchived && staff.status === 'inactive') return false;
+    const closeModal = () => {
+        setIsShiftModalOpen(false);
+        setSelectedShiftInfo({ staffId: null, date: null, shift: null });
+    };
 
-        if (departmentFilter === 'All Departments') return true;
-        const currentJob = getCurrentJob(staff);
-        return currentJob?.department === departmentFilter;
-    }), [staffList, showArchived, departmentFilter]);
+    const weekStartFormatted = currentWeekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const weekEnd = new Date(currentWeekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekEndFormatted = weekEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
-    const groupedStaff = useMemo(() => filteredStaffList.reduce((acc, staff) => {
-        const job = getCurrentJob(staff);
-        const dept = job?.department || 'Unassigned';
-        if (!acc[dept]) acc[dept] = [];
-        acc[dept].push(staff);
-        return acc;
-    }, {}), [filteredStaffList]);
-    
-    const orderedDepartments = Object.keys(groupedStaff).sort();
+    // Filter staff to only include 'active' ones for planning
+    const activeStaff = useMemo(() => staffList.filter(s => s.status === 'active' || s.status === undefined || s.status === null), [staffList]);
+
+    // Group active staff by department for display
+    const groupedStaff = useMemo(() => {
+        const grouped = activeStaff.reduce((acc, staff) => {
+            const department = getCurrentJob(staff).department || 'Unassigned';
+            if (!acc[department]) acc[department] = [];
+            acc[department].push(staff);
+            return acc;
+        }, {});
+        // Sort staff within each department
+        Object.values(grouped).forEach(list => list.sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))));
+        return grouped;
+    }, [activeStaff]);
+
+    const sortedDepartments = useMemo(() => Object.keys(groupedStaff).sort(), [groupedStaff]);
+
+    // --- NEW: Handler for exporting the current week ---
+    const handleExportWeek = async () => {
+        setIsExporting(true);
+        try {
+            const functions = getFunctions();
+            const exportPlanningData = httpsCallable(functions, 'exportPlanningData'); // Assumes function named 'exportPlanningData'
+
+            // Calculate start and end dates in YYYY-MM-DD format
+            const startDate = currentWeekStart.toISOString().split('T')[0];
+            const endDate = weekEnd.toISOString().split('T')[0];
+
+            const result = await exportPlanningData({ startDate, endDate });
+            const csvData = result.data.csvData;
+
+            if (!csvData) {
+                alert("No planning data found for this week to export.");
+                setIsExporting(false);
+                return;
+            }
+
+            // Trigger CSV download
+            const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `planning_${startDate}_to_${endDate}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+        } catch (error) {
+            console.error("Error exporting planning data:", error);
+            alert(`Failed to export planning data: ${error.message}`);
+        } finally {
+            setIsExporting(false);
+        }
+    };
 
     return (
         <div>
-            {selectedShift && (
-                <Modal isOpen={true} onClose={() => setSelectedShift(null)} title={selectedShift.existingShift ? "Edit Shift" : "Add Shift"}>
-                    <ShiftModal 
-                        db={db}
-                        staffMember={selectedShift.staff}
-                        date={selectedShift.date}
-                        existingShift={selectedShift.existingShift}
-                        onClose={() => setSelectedShift(null)}
-                    />
-                </Modal>
+            {isShiftModalOpen && (
+                <ShiftModal
+                    isOpen={isShiftModalOpen}
+                    onClose={closeModal}
+                    db={db}
+                    staffId={selectedShiftInfo.staffId}
+                    staffName={getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId))}
+                    date={selectedShiftInfo.date}
+                    existingShift={selectedShiftInfo.shift}
+                    onSaveSuccess={refetchWeekData} // Refetch data when a shift is saved/deleted
+                />
             )}
 
-            {selectedLeave && (
-                <Modal isOpen={true} onClose={() => setSelectedLeave(null)} title="Leave Request Details">
-                    <div className="space-y-3 text-white">
-                        <p><span className="font-semibold text-gray-400">Employee:</span> {getDisplayName(staffList.find(s => s.id === selectedLeave.staffId))}</p>
-                        <p><span className="font-semibold text-gray-400">Leave Type:</span> {selectedLeave.leaveType}</p>
-                        <p><span className="font-semibold text-gray-400">Dates:</span> {selectedLeave.startDate} to {selectedLeave.endDate} ({selectedLeave.totalDays} days)</p>
-                        {selectedLeave.reason && <p><span className="font-semibold text-gray-400">Reason:</span> {selectedLeave.reason}</p>}
-                    </div>
-                </Modal>
-            )}
-
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 space-y-4 sm:space-y-0">
+            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
+                <h2 className="text-2xl md:text-3xl font-bold text-white">Weekly Planning</h2>
                 <div className="flex items-center space-x-4">
-                    <h2 className="text-2xl md:text-3xl font-bold text-white flex-shrink-0">Weekly Planner</h2>
-                    <select value={departmentFilter} onChange={e => setDepartmentFilter(e.target.value)} className="bg-gray-700 border border-gray-600 rounded-lg text-white p-2 text-sm">
-                        <option>All Departments</option>
-                        {departments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
-                    </select>
-                    <div className="flex items-center">
-                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
-                        <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
-                    </div>
-                </div>
-                <div className="flex items-center space-x-2 sm:space-x-4">
-                    <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronLeftIcon className="h-6 w-6" /></button>
-                    <h3 className="text-lg sm:text-xl font-semibold w-48 sm:w-64 text-center">{weekRangeString}</h3>
-                    <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronRightIcon className="h-6 w-6" /></button>
+                    <button onClick={handlePrevWeek} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600">
+                        <ChevronLeftIcon className="h-6 w-6" />
+                    </button>
+                    <span className="text-lg font-semibold text-amber-400 whitespace-nowrap">
+                        {weekStartFormatted} - {weekEndFormatted}
+                    </span>
+                    <button onClick={handleNextWeek} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600">
+                        <ChevronRightIcon className="h-6 w-6" />
+                    </button>
+                    {/* --- NEW: Export Button --- */}
+                     <button
+                        onClick={handleExportWeek}
+                        disabled={isExporting}
+                        className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500"
+                        title="Export this week's schedule to CSV"
+                    >
+                        <DownloadIcon className="h-5 w-5 mr-2" />
+                        {isExporting ? 'Exporting...' : 'Export Week'}
+                    </button>
                 </div>
             </div>
 
-            <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-lg">
-                <div className="min-w-[1200px]">
-                    <div className="grid grid-cols-[200px_repeat(7,1fr)]">
-                        <div className="px-4 py-3 font-medium text-white border-b-2 border-r border-gray-700 flex items-center">STAFF</div>
-                        {days.map(day => (<div key={day.toISOString()}>{formatDateHeader(day)}</div>))}
-                        
-                        {isLoading ? (
-                            <div className="col-span-8 text-center py-10 text-gray-500">Loading schedule...</div>
-                        ) : (
-                            orderedDepartments.map(dept => (
-                                <React.Fragment key={dept}>
-                                    <div className="col-span-8 bg-gray-900 text-amber-400 font-bold p-2 border-t border-b border-gray-700">{dept}</div>
-                                    {groupedStaff[dept].sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => (
-                                        <div key={staff.id} className="grid grid-cols-subgrid col-span-8 border-t border-gray-700">
-                                            <div className="px-4 py-3 font-medium text-white border-r border-gray-700 h-16 flex items-center">{getDisplayName(staff)}</div>
-                                            {days.map(day => {
-                                                const leaveDetails = getLeaveForStaffOnDate(staff.id, day);
-                                                if (leaveDetails) {
-                                                    const staffForLeave = staffList.find(s => s.id === leaveDetails.staffId);
-                                                    return (
-                                                        <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
-                                                            <button onClick={() => setSelectedLeave({ ...leaveDetails, staffName: getDisplayName(staffForLeave) })} className="bg-blue-600 text-white font-bold p-2 rounded-md w-full h-full flex items-center justify-center text-center text-sm hover:bg-blue-500">
-                                                                On Leave
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                }
-                                                const dayStr = formatDateToYYYYMMDD(day);
-                                                const shiftKey = `${staff.id}_${dayStr}`;
-                                                const shift = schedules[shiftKey];
+            {loading && <p className="text-center text-gray-400 my-10">Loading schedule...</p>}
+
+            {!loading && (
+                <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-lg">
+                    <table className="min-w-full divide-y divide-gray-700 border-collapse">
+                        <thead className="bg-gray-900 sticky top-0 z-10">
+                            <tr>
+                                <th className="sticky left-0 bg-gray-900 px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-48 z-20">Staff</th>
+                                {weekDates.map(dateObj => (
+                                    <th key={dateObj.dateString} className="px-3 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-32 min-w-[8rem]">
+                                        {dateObj.dayName} <span className="block text-gray-400 font-normal">{dateObj.dateNum}</span>
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        {sortedDepartments.map(department => (
+                             <React.Fragment key={department}>
+                                <tbody>{/* Separate tbody for department header */}
+                                    <tr className="bg-gray-700 sticky top-[calc(theme(space.12)+theme(space.px))] z-10"> {/* Adjust top based on header height */}
+                                        <th colSpan={weekDates.length + 1} className="sticky left-0 bg-gray-700 px-4 py-2 text-left text-sm font-semibold text-amber-400 z-20">
+                                            {department}
+                                        </th>
+                                    </tr>
+                                </tbody>
+                                <tbody className="divide-y divide-gray-700">
+                                    {groupedStaff[department].map(staff => (
+                                        <tr key={staff.id}>
+                                            <td className="sticky left-0 bg-gray-800 group-hover:bg-gray-700 px-4 py-3 whitespace-nowrap text-sm font-medium text-white w-48 z-10">
+                                                {getDisplayName(staff)}
+                                                <div className="text-xs text-gray-400">{getCurrentJob(staff).position}</div>
+                                            </td>
+                                            {weekDates.map(dateObj => {
+                                                const shift = weekData[staff.id]?.[dateObj.dateString];
+                                                const displayTime = shift ? `${shift.startTime} - ${shift.endTime}` : '';
                                                 return (
-                                                    <div key={day.toISOString()} className="border-r border-gray-700 h-16 flex items-center justify-center p-1">
-                                                        <button 
-                                                            onClick={() => isManager && setSelectedShift({ staff, date: day, existingShift: shift })} 
-                                                            disabled={!isManager}
-                                                            className={`w-full h-full rounded-md flex items-center justify-center text-xs transition-colors ${isManager ? 'hover:bg-gray-700' : 'cursor-default'}`}
-                                                        >
-                                                            {shift ? (
-                                                                <div className="bg-amber-600 text-white font-bold p-2 rounded-md w-full h-full flex flex-col justify-center text-center">
-                                                                    <span>{shift.startTime}</span>
-                                                                    <span>{shift.endTime}</span>
-                                                                </div>
-                                                            ) : (
-                                                                isManager && <PlusIcon className="h-6 w-6 text-gray-500"/>
-                                                            )}
-                                                        </button>
-                                                    </div>
-                                                )
+                                                    <td
+                                                        key={dateObj.dateString}
+                                                        onClick={() => handleCellClick(staff.id, dateObj.dateString, shift)}
+                                                        className="px-3 py-3 text-center text-sm text-white hover:bg-gray-700 cursor-pointer w-32 min-w-[8rem]"
+                                                        title={shift ? `Click to edit ${getDisplayName(staff)}'s shift` : `Click to add shift for ${getDisplayName(staff)}`}
+                                                    >
+                                                        {displayTime || <span className="text-gray-600 italic">OFF</span>}
+                                                    </td>
+                                                );
                                             })}
-                                        </div>
+                                        </tr>
                                     ))}
-                                </React.Fragment>
-                            ))
-                        )}
-                    </div>
+                                </tbody>
+                             </React.Fragment>
+                        ))}
+                    </table>
                 </div>
-            </div>
+            )}
         </div>
     );
-};
+}

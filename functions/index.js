@@ -5,7 +5,6 @@ admin.initializeApp();
 // Import and re-export functions
 const { createUserHandler } = require('./src/auth/createUser');
 const { setStaffAuthStatusHandler } = require('./src/auth/setStaffAuthStatus');
-// --- NEW IMPORT ---
 const { setStaffPasswordHandler } = require('./src/auth/setStaffPassword'); 
 const { autoCheckoutHandler } = require('./src/attendance/autoCheckout');
 const { calculateAdvanceEligibilityHandler } = require('./src/financials/calculateAdvanceEligibility');
@@ -16,6 +15,7 @@ const { finalizeAndStorePayslipsHandler } = require('./src/payroll/finalizeAndSt
 const { deleteStaffHandler } = require('./src/staff/deleteStaff');
 const { exportStaffDataHandler } = require('./src/staff/exportStaffData');
 const { importStaffDataHandler } = require('./src/staff/importStaffData');
+const { exportPlanningDataHandler } = require('./src/planning/exportPlanningData');
 
 exports.createUser = createUserHandler;
 exports.setStaffAuthStatus = setStaffAuthStatusHandler;
@@ -29,3 +29,4 @@ exports.finalizeAndStorePayslips = finalizeAndStorePayslipsHandler;
 exports.deleteStaff = deleteStaffHandler;
 exports.exportStaffData = exportStaffDataHandler;
 exports.importStaffData = importStaffDataHandler;
+exports.exportPlanningData = exportPlanningDataHandler;
