@@ -1,19 +1,13 @@
 import React, { useState, useEffect } from 'react';
 // Added 'collection', 'query', 'where', 'limit'
-import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, getDoc, limit } from 'firebase/firestore'; 
+import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore'; 
 import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn } from 'lucide-react';
 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
-
-const getLocalDateString = (date = new Date()) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
+import * as dateUtils from '../utils/dateUtils'; // Import our new standard
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList }) {
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -26,14 +20,14 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
-    const today = new Date();
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
     const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
-        const birthDateObj = new Date(birthdate);
-        return birthDateObj.getMonth() === today.getMonth() && birthDateObj.getDate() === today.getDate();
+        const birthDateStr = dateUtils.formatCustom(birthdate, 'MM-dd');
+        const todayStr = dateUtils.formatCustom(new Date(), 'MM-dd');
+        return birthDateStr === todayStr;
     }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
 
@@ -42,7 +36,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => clearInterval(timer);
     }, []);
 
-    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${getLocalDateString()}`);
+    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${dateUtils.formatISODate(new Date())}`);
 
     useEffect(() => {
         if (!db || !user) return;
@@ -65,7 +59,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     // Corrected: Fetch today's schedule using a query
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = getLocalDateString();
+        const todayStr = dateUtils.formatISODate(new Date());
         
         const q = query(
             collection(db, 'schedules'),
@@ -92,7 +86,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     // Check if on leave today
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = getLocalDateString(); 
+        const todayStr = dateUtils.formatISODate(new Date()); 
         const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', '==', 'approved'), where('startDate', '<=', todayStr), where('endDate', '>=', todayStr));
         getDocs(q).then(snapshot => setIsOnLeaveToday(!snapshot.empty));
     }, [db, user]);
@@ -140,7 +134,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     };
     
     const handleCheckIn = async () => {
-        const localDateString = getLocalDateString();
+        const localDateString = dateUtils.formatISODate(new Date());
         await setDoc(getDocRef(), { 
             staffId: user.uid, 
             staffName: user.displayName || user.email, 
@@ -191,14 +185,14 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     </div>
                 );
             case 'on-break': {
-                const breakStartTime = todaysAttendance?.breakStart?.toDate();
+                const breakStartTime = dateUtils.fromFirestore(todaysAttendance?.breakStart);
                 const minutesOnBreak = breakStartTime ? (currentTime - breakStartTime) / 60000 : 0;
                 const canEndBreak = minutesOnBreak >= 50;
                 const remainingBreakMinutes = Math.max(0, 60 - minutesOnBreak);
                 return (
                     <div>
                         <div className="text-center mb-4 space-y-1">
-                            {breakStartTime && <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{breakStartTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span></p>}
+                            {breakStartTime && <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{dateUtils.formatCustom(breakStartTime, 'HH:mm')}</span></p>}
                             <p className="text-lg font-bold text-yellow-300">{Math.floor(remainingBreakMinutes)} minutes remaining</p>
                         </div>
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence || !canEndBreak} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>
@@ -221,8 +215,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 <div className="lg:col-span-2">
                     <DashboardCard title="Time Clock" className="p-2 sm:p-6">
                         <div className="text-center mb-6">
-                            <p className="text-base sm:text-lg text-gray-300">{currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-                            <p className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold tracking-tight sm:tracking-widest mt-1">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
+                            <p className="text-base sm:text-lg text-gray-300">{dateUtils.formatCustom(currentTime, 'EEEE, dd MMMM')}</p>
+                            <p className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold tracking-tight sm:tracking-widest mt-1">{dateUtils.formatCustom(currentTime, 'HH:mm:ss')}</p>
                         </div>
                         <div className="mt-6 px-2 sm:px-0">{renderButtons()}</div>
                         <DailySummary todaysAttendance={todaysAttendance} />
@@ -260,4 +254,4 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             </div>
         </div>
     );
-};
+}
