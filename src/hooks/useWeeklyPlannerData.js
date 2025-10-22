@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 // --- Import the helper function ---
-import { toLocalDateString } from '../utils/dateHelpers'; // Adjust path if needed
+import { toLocalDateString } from '../utils/dateHelpers'; // Ensure this line exists and path is correct
 
 export default function useWeeklyPlannerData(db, currentWeekStart, staffList) {
     const [weekData, setWeekData] = useState({});

@@ -1,10 +1,17 @@
 // src/utils/dateHelpers.js
 
 /**
- * Formats a date string (YYYY-MM-DD) into a more readable format (e.g., 23-May-2023).
- * @param {string} dateString - The date string in YYYY-MM-DD format.
- * @returns {string} The formatted date string, or an empty string if the input is invalid.
+ * Creates a YYYY-MM-DD string from a Date object without timezone conversion issues.
+ * @param {Date} date - The date object to format.
+ * @returns {string} The formatted date string (YYYY-MM-DD).
  */
+export const toLocalDateString = (date) => {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 export const formatDateForDisplay = (dateString) => {
     if (!dateString || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         return '';
@@ -21,7 +28,6 @@ export const formatDateForDisplay = (dateString) => {
 
 /**
  * Calculates the duration between a start and end date in years, months, and days.
- * If no end date is provided, it calculates up to the current date.
  * @param {string} startDate - The start date in YYYY-MM-DD format.
  * @param {string|null} endDate - The end date in YYYY-MM-DD format, or null.
  * @returns {string} A formatted string, e.g., "1 year, 2 months, 15 days".

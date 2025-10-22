@@ -5,14 +5,6 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { rate: 0, payType: 'Monthly', department: 'N/A' }; } const latestJob = staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; if (latestJob.rate === undefined && latestJob.baseSalary !== undefined) { return { ...latestJob, rate: latestJob.baseSalary, payType: 'Monthly' }; } return latestJob; };
 const calculateHours = (start, end) => { if (!start?.toDate || !end?.toDate) return 0; const diffMillis = end.toDate() - start.toDate(); return diffMillis / (1000 * 60 * 60); };
 
-// Helper: Creates a YYYY-MM-DD string from a Date object without timezone conversion
-const toLocalDateString = (date) => {
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
 export default function usePayrollGenerator(db, staffList, companyConfig, payPeriod) {
     const [payrollData, setPayrollData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
