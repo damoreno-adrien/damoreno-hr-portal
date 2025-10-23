@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDateForDisplay } from '../../utils/dateHelpers'; // Import the formatter
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 
 const formatCurrency = (num) => num != null ? num.toLocaleString('en-US') : '0';
 
@@ -33,8 +33,8 @@ export const RequestHistoryTable = ({ requests, isLoading }) => (
                 ) : (
                     requests.map(req => (
                         <tr key={req.id}>
-                            {/* --- Apply date formatting here --- */}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDateForDisplay(req.date)}</td>
+                            {/* --- Apply standard date formatting here --- */}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(req.date)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{formatCurrency(req.amount)} THB</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm capitalize"><StatusBadge status={req.status} /></td>
                         </tr>
