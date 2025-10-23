@@ -21,63 +21,80 @@ const StatusBadge = ({ status }) => {
 };
 
 
-export const SideCards = ({ estimate, visibility, onToggleVisibility, onSelectPayslip }) => (
-    <div className="space-y-8">
-        {/* Latest Payslip Card */}
-        {estimate.latestPayslip && (
-            <FinancialCard
-                title="Latest Payslip"
-                isVisible={visibility.latestPayslip}
-                onToggle={() => onToggleVisibility('latestPayslip')}
-                onClick={() => onSelectPayslip(estimate.latestPayslip)}
-            >
-                <div className="flex justify-between items-center">
-                    <div>
-                        <p className="text-gray-400 text-sm">{formatMonthYear(estimate.latestPayslip)}</p>
-                        <p className="text-xl font-bold text-amber-400">{visibility.latestPayslip ? `฿${formatCurrency(estimate.latestPayslip.netPay)}` : `฿${censor}`}</p>
-                    </div>
-                    <div className="text-blue-400 text-xs font-semibold">VIEW DETAILS</div>
+export const SideCards = ({ payEstimate, visibility, onToggleVisibility, onSelectPayslip, isLoading }) => {
+    
+    // 💥 CRITICAL FIX: Early return if data is still loading or not available
+    if (isLoading || !payEstimate) {
+        return (
+            <div className="lg:col-span-1 space-y-8">
+                <div className="bg-gray-800 p-6 rounded-xl text-center text-gray-400">
+                    Loading Financial Summaries...
                 </div>
-            </FinancialCard>
-        )}
+            </div>
+        );
+    }
+    
+    // Rename prop for cleaner use in the component body
+    const estimate = payEstimate;
 
-        {/* Current Salary Advance Card */}
-        <FinancialCard
-            title="Current Salary Advance"
-            isVisible={visibility.salaryAdvance}
-            onToggle={() => onToggleVisibility('salaryAdvance')}
-        >
-            {estimate.currentAdvance ? (
-                <div className="flex justify-between items-center">
-                    <div>
-                        <p className="text-gray-400 text-sm">Amount</p>
-                        <p className="text-xl font-bold text-amber-400">{visibility.salaryAdvance ? `฿${formatCurrency(estimate.currentAdvance.amount)}` : `฿${censor}`}</p>
-                    </div>
-                    <StatusBadge status={estimate.currentAdvance.status} />
-                </div>
-            ) : (
-                <p className="text-gray-400 text-center py-4">No active advance this month.</p>
-            )}
-        </FinancialCard>
-        
-        {/* Active Loans Card */}
-        <FinancialCard
-            title="Active Loans"
-            isVisible={visibility.activeLoans}
-            onToggle={() => onToggleVisibility('activeLoans')}
-        >
-            {estimate.activeLoans && estimate.activeLoans.length > 0 ? (
-                <div className="space-y-4">
-                    {estimate.activeLoans.map((loan, index) => (
-                        <div key={index} className="bg-gray-700/50 p-3 rounded-md">
-                            <p className="font-bold text-white">{visibility.activeLoans ? `Loan of ฿${formatCurrency(loan.totalAmount)}` : `Loan of ฿${censor}`}</p>
-                            <p className="text-sm text-gray-400">Next payment: <span className="text-amber-400">{visibility.activeLoans ? `฿${formatCurrency(loan.recurringPayment)}` : `฿${censor}`}</span></p>
+    return (
+        <div className="space-y-8">
+            {/* Latest Payslip Card */}
+            {estimate.latestPayslip && (
+                <FinancialCard
+                    title="Latest Payslip"
+                    isVisible={visibility.latestPayslip}
+                    onToggle={() => onToggleVisibility('latestPayslip')}
+                    onClick={() => onSelectPayslip(estimate.latestPayslip)}
+                >
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <p className="text-gray-400 text-sm">{formatMonthYear(estimate.latestPayslip)}</p>
+                            <p className="text-xl font-bold text-amber-400">{visibility.latestPayslip ? `฿${formatCurrency(estimate.latestPayslip.netPay)}` : `฿${censor}`}</p>
                         </div>
-                    ))}
-                </div>
-            ) : (
-                <p className="text-gray-400 text-center py-4">You have no active loans.</p>
+                        <div className="text-blue-400 text-xs font-semibold">VIEW DETAILS</div>
+                    </div>
+                </FinancialCard>
             )}
-        </FinancialCard>
-    </div>
-);
+
+            {/* Current Salary Advance Card */}
+            <FinancialCard
+                title="Current Salary Advance"
+                isVisible={visibility.salaryAdvance}
+                onToggle={() => onToggleVisibility('salaryAdvance')}
+            >
+                {estimate.currentAdvance ? (
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <p className="text-gray-400 text-sm">Amount</p>
+                            <p className="text-xl font-bold text-amber-400">{visibility.salaryAdvance ? `฿${formatCurrency(estimate.currentAdvance.amount)}` : `฿${censor}`}</p>
+                        </div>
+                        <StatusBadge status={estimate.currentAdvance.status} />
+                    </div>
+                ) : (
+                    <p className="text-gray-400 text-center py-4">No active advance this month.</p>
+                )}
+            </FinancialCard>
+            
+            {/* Active Loans Card */}
+            <FinancialCard
+                title="Active Loans"
+                isVisible={visibility.activeLoans}
+                onToggle={() => onToggleVisibility('activeLoans')}
+            >
+                {estimate.activeLoans && estimate.activeLoans.length > 0 ? (
+                    <div className="space-y-4">
+                        {estimate.activeLoans.map((loan, index) => (
+                            <div key={index} className="bg-gray-700/50 p-3 rounded-md">
+                                <p className="font-bold text-white">{visibility.activeLoans ? `Loan of ฿${formatCurrency(loan.totalAmount)}` : `Loan of ฿${censor}`}</p>
+                                <p className="text-sm text-gray-400">Next payment: <span className="text-amber-400">{visibility.activeLoans ? `฿${formatCurrency(loan.recurringPayment)}` : `฿${censor}`}</span></p>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-400 text-center py-4">You have no active loans.</p>
+                )}
+            </FinancialCard>
+        </div>
+    );
+};
