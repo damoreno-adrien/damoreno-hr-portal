@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { TrashIcon } from './Icons';
-// Import both formatters
-import { toLocalDateString, formatDateForDisplay } from '../utils/dateHelpers'; 
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, date, existingShift, onSaveSuccess }) {
     const [startTime, setStartTime] = useState('');
@@ -27,10 +26,10 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
         setError(''); // Clear error when modal opens or shift changes
     }, [existingShift, isOpen]); // Rerun when modal opens or existingShift changes
 
-    // Ensure date is consistently handled, whether passed as string or Date object
-    const dateObject = date instanceof Date ? date : new Date(`${date}T00:00:00Z`); // Assume string is YYYY-MM-DD UTC if not Date
-    const dateString = toLocalDateString(dateObject); // Use consistent YYYY-MM-DD for saving/ID
-    const displayDate = formatDateForDisplay(dateString); // Use DD-MMM-YYYY for display
+    // Ensure date is consistently handled
+    const dateObject = dateUtils.fromFirestore(date);
+    const dateString = dateUtils.formatISODate(dateObject); // YYYY-MM-DD for saving/ID
+    const displayDate = dateUtils.formatDisplayDate(dateObject); // DD/MM/YYYY for display
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -86,8 +85,9 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
 
     const handleDelete = async () => {
         if (!existingShift || !existingShift.id) return; // Guard clause
-        // Use consistent dateString for confirmation
-        if (!window.confirm(`Are you sure you want to delete the shift for ${staffName} on ${dateString}?`)) return;
+        
+        // Use user-friendly displayDate for confirmation
+        if (!window.confirm(`Are you sure you want to delete the shift for ${staffName} on ${displayDate}?`)) return;
 
         setIsDeleting(true);
         setError('');

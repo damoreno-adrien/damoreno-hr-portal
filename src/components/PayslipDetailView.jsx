@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { InfoIcon } from './Icons';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -160,11 +161,11 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                             {showAbsenceTooltip && (
                                 <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
                                     <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
-                                    {/* --- MODIFIED: Updated tooltip to show daily hours --- */}
+                                    {/* --- MODIFIED: Updated tooltip to show daily hours and format date --- */}
                                     <ul className="list-disc list-inside text-xs text-gray-300">
                                         {details.deductions.unpaidAbsences.map(abs => 
                                             <li key={abs.date}>
-                                                {abs.date} <span className="text-gray-400">{formatHours(abs.hours)}</span>
+                                                {dateUtils.formatDisplayDate(abs.date)} <span className="text-gray-400">{formatHours(abs.hours)}</span>
                                             </li>
                                         )}
                                     </ul>

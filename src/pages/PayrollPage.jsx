@@ -3,11 +3,17 @@ import Modal from '../components/Modal';
 import PayslipDetailView from '../components/PayslipDetailView';
 import PayrollHistory from '../components/PayrollHistory';
 import PayrollGenerator from '../components/PayrollGenerator';
+import * as dateUtils from '../utils/dateUtils'; // Import new standard
 
 export default function PayrollPage({ db, staffList, companyConfig }) {
     // State for the Payroll Generator's "view details" modal
     const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
-    const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
+    
+    // Use dateUtils for initial state
+    const [payPeriod, setPayPeriod] = useState({ 
+        month: dateUtils.getMonth(new Date()), 
+        year: dateUtils.getYear(new Date()) 
+    });
 
     // --- NEW: State for the Payroll History's "view details" modal ---
     const [selectedHistoryDetails, setSelectedHistoryDetails] = useState(null);

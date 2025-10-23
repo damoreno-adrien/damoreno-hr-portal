@@ -1,25 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ChevronLeftIcon, ChevronRightIcon } from '../components/Icons';
-
-const formatDateToYYYYMMDD = (date) => {
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 export default function MySchedulePage({ db, user }) {
-    const getStartOfWeek = (date) => {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        const day = d.getDay();
-        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-        return new Date(d.setDate(diff));
-    };
-
-    const [startOfWeek, setStartOfWeek] = useState(getStartOfWeek(new Date()));
+    // Use the new standard function
+    const [startOfWeek, setStartOfWeek] = useState(dateUtils.startOfWeek(new Date()));
     const [weekData, setWeekData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -27,10 +13,10 @@ export default function MySchedulePage({ db, user }) {
         if (!db || !user) return;
         setIsLoading(true);
 
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(endOfWeek.getDate() + 6);
-        const startStr = formatDateToYYYYMMDD(startOfWeek);
-        const endStr = formatDateToYYYYMMDD(endOfWeek);
+        // Use new standard functions for date math and formatting
+        const endOfWeek = dateUtils.addDays(startOfWeek, 6);
+        const startStr = dateUtils.formatISODate(startOfWeek);
+        const endStr = dateUtils.formatISODate(endOfWeek);
 
         const shiftsQuery = query(collection(db, "schedules"), where("staffId", "==", user.uid), where("date", ">=", startStr), where("date", "<=", endStr));
         const leaveQuery = query(collection(db, "leave_requests"), where("staffId", "==", user.uid), where("status", "==", "approved"), where("endDate", ">=", startStr));
@@ -42,10 +28,10 @@ export default function MySchedulePage({ db, user }) {
             const unsubLeaves = onSnapshot(leaveQuery, (leavesSnapshot) => {
                 const leaves = leavesSnapshot.docs.map(doc => doc.data()).filter(req => req.startDate <= endStr);
                 
+                // Use a standard loop with date-fns helpers
                 const days = Array.from({ length: 7 }).map((_, i) => {
-                    const date = new Date(startOfWeek);
-                    date.setDate(date.getDate() + i);
-                    const dateStr = formatDateToYYYYMMDD(date);
+                    const date = dateUtils.addDays(startOfWeek, i);
+                    const dateStr = dateUtils.formatISODate(date);
 
                     const shift = shiftsMap.get(dateStr);
                     const onLeave = leaves.some(leave => dateStr >= leave.startDate && dateStr <= leave.endDate);
@@ -72,19 +58,18 @@ export default function MySchedulePage({ db, user }) {
 
     const changeWeek = (offset) => {
         setStartOfWeek(prevDate => {
-            const newDate = new Date(prevDate);
-            newDate.setDate(newDate.getDate() + (7 * offset));
-            return newDate;
+            // Use date-fns for reliable date math
+            return dateUtils.addDays(prevDate, 7 * offset);
         });
     };
 
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(endOfWeek.getDate() + 6);
-    const weekRangeString = `${startOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${endOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+    const endOfWeek = dateUtils.addDays(startOfWeek, 6);
+    // Use standard formatters
+    const weekRangeString = `${dateUtils.formatCustom(startOfWeek, 'dd MMM')} - ${dateUtils.formatCustom(endOfWeek, 'dd MMM, yyyy')}`;
 
     const DayCard = ({ dayInfo }) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Use new standard function
+        const today = dateUtils.startOfToday();
         const isToday = dayInfo.date.getTime() === today.getTime();
         
         let statusElement;
@@ -102,8 +87,8 @@ export default function MySchedulePage({ db, user }) {
         return (
             <div className={`bg-gray-800 p-4 rounded-lg flex items-center justify-between ${isToday ? 'border-l-4 border-amber-500' : ''}`}>
                 <div>
-                    <p className={`font-bold ${isToday ? 'text-amber-400' : 'text-white'}`}>{dayInfo.date.toLocaleDateString('en-US', { weekday: 'long' })}</p>
-                    <p className="text-sm text-gray-400">{dayInfo.date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}</p>
+                    <p className={`font-bold ${isToday ? 'text-amber-400' : 'text-white'}`}>{dateUtils.formatCustom(dayInfo.date, 'EEEE')}</p>
+                    <p className="text-sm text-gray-400">{dateUtils.formatCustom(dayInfo.date, 'dd MMMM')}</p>
                 </div>
                 <div className="w-40">
                     {statusElement}

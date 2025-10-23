@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 export default function EditAttendanceModal({ db, record, onClose }) {
     const isCreating = !record.fullRecord;
     
     const [formData, setFormData] = useState({
-        checkIn: record.fullRecord?.checkInTime ? new Date(record.fullRecord.checkInTime.seconds * 1000).toTimeString().substring(0, 5) : '',
-        breakStart: record.fullRecord?.breakStart ? new Date(record.fullRecord.breakStart.seconds * 1000).toTimeString().substring(0, 5) : '',
-        breakEnd: record.fullRecord?.breakEnd ? new Date(record.fullRecord.breakEnd.seconds * 1000).toTimeString().substring(0, 5) : '',
-        checkOut: record.fullRecord?.checkOutTime ? new Date(record.fullRecord.checkOutTime.seconds * 1000).toTimeString().substring(0, 5) : '',
+        checkIn: record.fullRecord?.checkInTime ? dateUtils.formatCustom(record.fullRecord.checkInTime, 'HH:mm') : '',
+        breakStart: record.fullRecord?.breakStart ? dateUtils.formatCustom(record.fullRecord.breakStart, 'HH:mm') : '',
+        breakEnd: record.fullRecord?.breakEnd ? dateUtils.formatCustom(record.fullRecord.breakEnd, 'HH:mm') : '',
+        checkOut: record.fullRecord?.checkOutTime ? dateUtils.formatCustom(record.fullRecord.checkOutTime, 'HH:mm') : '',
     });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -22,12 +23,15 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         setError('');
         try {
             const datePart = record.date;
+            
+            // Use dateUtils to reliably combine date and time
             const toTimestamp = (timeString) => {
                 if (!timeString) return null;
-                const [hours, minutes] = timeString.split(':');
-                const date = new Date(datePart); // Use date directly
-                date.setHours(hours, minutes, 0, 0);
-                return Timestamp.fromDate(date);
+                // Create a local ISO-like string (e.g., "2025-10-23T14:30:00")
+                const isoString = `${datePart}T${timeString}:00`;
+                // Parse it as a local date
+                const date = dateUtils.fromFirestore(isoString);
+                return date ? Timestamp.fromDate(date) : null;
             };
 
             const dataToSave = {
@@ -73,7 +77,7 @@ export default function EditAttendanceModal({ db, record, onClose }) {
 
     return (
         <div className="space-y-4">
-            <p className="text-sm text-gray-400">Editing record for <span className="font-bold text-white">{record.staffName}</span> on <span className="font-bold text-white">{record.date}</span>.</p>
+            <p className="text-sm text-gray-400">Editing record for <span className="font-bold text-white">{record.staffName}</span> on <span className="font-bold text-white">{dateUtils.formatDisplayDate(record.date)}</span>.</p>
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label htmlFor="checkIn" className="block text-sm font-medium text-gray-300 mb-1">Check-In Time</label>

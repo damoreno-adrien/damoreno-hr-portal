@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import EditAttendanceModal from '../components/EditAttendanceModal';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // --- NEW HELPER FUNCTION ---
 const getDisplayName = (staff) => {
@@ -14,8 +15,8 @@ const getDisplayName = (staff) => {
 export default function AttendanceReportsPage({ db, staffList }) {
     const [reportData, setReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+    const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
+    const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
     const [selectedStaffId, setSelectedStaffId] = useState('all');
     const [editingRecord, setEditingRecord] = useState(null);
 
@@ -42,17 +43,21 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
             const staffToReport = selectedStaffId === 'all' ? staffList : staffList.filter(s => s.id === selectedStaffId);
             const generatedData = [];
+            
+            // Use our new reliable date range iterator
+            const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
 
             for (const staff of staffToReport) {
-                for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
-                    const dateStr = d.toISOString().split('T')[0];
+                for (const day of dateInterval) {
+                    const dateStr = dateUtils.formatISODate(day); // Format date for key
                     const key = `${staff.id}_${dateStr}`;
                     const schedule = schedulesMap.get(key);
                     const attendance = attendanceMap.get(key);
 
                     if (schedule || attendance) {
-                        const checkInTime = attendance?.checkInTime?.toDate();
-                        const scheduledTime = schedule ? new Date(`${dateStr}T${schedule.startTime}`) : null;
+                        const checkInTime = dateUtils.fromFirestore(attendance?.checkInTime);
+                        // Create a local date object from the date string and schedule time
+                        const scheduledTime = schedule ? dateUtils.fromFirestore(`${dateStr}T${schedule.startTime}`) : null;
                         
                         let status = 'On Time';
                         if (!attendance && schedule) status = 'Absent';
@@ -62,9 +67,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             status = `Late (${lateMinutes}m)`;
                         }
 
-                        const checkOutTime = attendance?.checkOutTime?.toDate();
-                        const breakStartTime = attendance?.breakStart?.toDate();
-                        const breakEndTime = attendance?.breakEnd?.toDate();
+                        const checkOutTime = dateUtils.fromFirestore(attendance?.checkOutTime);
+                        const breakStartTime = dateUtils.fromFirestore(attendance?.breakStart);
+                        const breakEndTime = dateUtils.fromFirestore(attendance?.breakEnd);
 
                         let workHours = 0;
                         if (checkInTime && checkOutTime) {
@@ -78,9 +83,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             id: attendance ? attendance.id : key,
                             staffId: staff.id,
                             staffName: getDisplayName(staff), // --- UPDATED ---
-                            date: dateStr,
-                            checkIn: checkInTime?.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) || '-',
-                            checkOut: checkOutTime?.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) || '-',
+                            date: dateStr, // Store as yyyy-MM-dd string
+                            checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
+                            checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
                             workHours: workHours.toFixed(2),
                             status: status,
                             fullRecord: attendance,
@@ -149,7 +154,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         {reportData.length > 0 ? reportData.map((row, index) => (
                             <tr key={index} onClick={() => handleRowClick(row)} className="hover:bg-gray-700 cursor-pointer">
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.date}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(row.date)}</td>
                                 <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${row.status === 'Absent' ? 'text-red-400' : (row.status.startsWith('Late') ? 'text-yellow-400' : 'text-gray-300')}`}>{row.status}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>

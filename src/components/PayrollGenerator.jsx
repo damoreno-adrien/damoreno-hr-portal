@@ -2,13 +2,14 @@ import React from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import usePayrollGenerator from '../hooks/usePayrollGenerator';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // Generate years dynamically
 const generateYears = (startYear = 2025) => {
-    const currentYear = new Date().getFullYear();
+    const currentYear = dateUtils.getYear(new Date()); // Use new standard
     const years = [];
     // Go up to current year + 1 to allow for planning/viewing next year if needed
     for (let year = startYear; year <= currentYear + 1; year++) {

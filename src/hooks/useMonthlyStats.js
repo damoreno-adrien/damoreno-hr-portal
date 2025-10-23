@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 export const useMonthlyStats = (db, user, companyConfig) => {
     const [monthlyStats, setMonthlyStats] = useState({
@@ -17,10 +18,13 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         const calculate = async () => {
             setIsLoading(true);
             const now = new Date();
-            const year = now.getUTCFullYear();
-            const month = now.getUTCMonth();
-            const startDate = new Date(Date.UTC(year, month, 1)).toISOString().split('T')[0];
-            const endDate = new Date(Date.UTC(year, month + 1, 0)).toISOString().split('T')[0];
+            
+            // Use standard functions for date range
+            const startOfMonth = dateUtils.startOfMonth(now);
+            const endOfMonth = dateUtils.endOfMonth(now);
+            const startDate = dateUtils.formatISODate(startOfMonth);
+            const endDate = dateUtils.formatISODate(endOfMonth);
+            const today = dateUtils.startOfToday(); // For comparison
 
             const schedulesQuery = query(collection(db, "schedules"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
             const attendanceQuery = query(collection(db, "attendance"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
@@ -34,24 +38,33 @@ export const useMonthlyStats = (db, user, companyConfig) => {
             let totalMillis = 0;
 
             schedules.forEach(schedule => {
-                if (new Date(schedule.date) > new Date()) return;
+                const scheduleDate = dateUtils.parseISODateString(schedule.date);
+                // Only count stats for days that have passed or are today
+                if (!scheduleDate || scheduleDate > today) return; 
 
                 const attendance = attendanceRecords.get(schedule.date);
                 if (!attendance) {
                     absenceCount++;
                 } else {
-                    const scheduledStart = new Date(`${schedule.date}T${schedule.startTime}`);
-                    const actualCheckIn = attendance.checkInTime.toDate();
-                    if (actualCheckIn > scheduledStart) {
+                    // Use standard parsing for schedule start time
+                    const scheduledStart = dateUtils.fromFirestore(`${schedule.date}T${schedule.startTime}`);
+                    const actualCheckIn = dateUtils.fromFirestore(attendance.checkInTime);
+                    
+                    if (actualCheckIn && scheduledStart && actualCheckIn > scheduledStart) {
                         lateCount++;
                     }
 
-                    if (attendance.checkInTime && attendance.checkOutTime) {
-                        let workMillis = attendance.checkOutTime.toDate() - attendance.checkInTime.toDate();
-                        if (attendance.breakStart && attendance.breakEnd) {
-                            workMillis -= (attendance.breakEnd.toDate() - attendance.breakStart.toDate());
+                    const actualCheckOut = dateUtils.fromFirestore(attendance.checkOutTime);
+                    const breakStart = dateUtils.fromFirestore(attendance.breakStart);
+                    const breakEnd = dateUtils.fromFirestore(attendance.breakEnd);
+
+                    if (actualCheckIn && actualCheckOut) {
+                        // Use standard difference calculation
+                        let workMillis = dateUtils.differenceInMilliseconds(actualCheckOut, actualCheckIn);
+                        if (breakStart && breakEnd) {
+                            workMillis -= dateUtils.differenceInMilliseconds(breakEnd, breakStart);
                         }
-                        totalMillis += workMillis;
+                        totalMillis += Math.max(0, workMillis); // Ensure no negative time
                     }
                 }
             });
@@ -64,14 +77,11 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                 });
             }
 
-            const hours = Math.floor(totalMillis / 3600000);
-            const minutes = Math.floor((totalMillis % 3600000) / 60000);
-
             setMonthlyStats({
                 workedDays: attendanceRecords.size,
                 lates: lateCount,
                 absences: absenceCount,
-                totalHours: `${hours}h ${minutes}m`
+                totalHours: dateUtils.formatDuration(totalMillis) // Use standard duration formatter
             });
             setIsLoading(false);
         };

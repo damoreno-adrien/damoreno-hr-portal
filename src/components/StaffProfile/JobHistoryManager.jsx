@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PlusIcon, TrashIcon } from '../Icons';
-import { formatDateForDisplay } from '../../utils/dateHelpers';
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 
 const formatRate = (job) => {
     if (typeof job?.rate !== 'number') return 'N/A';
@@ -10,7 +10,14 @@ const formatRate = (job) => {
 
 export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJob, onDeleteJob }) => {
     const [isAddingJob, setIsAddingJob] = useState(false);
-    const [newJob, setNewJob] = useState({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' });
+    // Use standard format for default date
+    const [newJob, setNewJob] = useState({ 
+        position: '', 
+        department: departments[0] || '', 
+        startDate: dateUtils.formatISODate(new Date()), 
+        payType: 'Monthly', 
+        rate: '' 
+    });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
@@ -26,7 +33,14 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
         try {
             await onAddNewJob({ ...newJob, rate: Number(newJob.rate) });
             setIsAddingJob(false);
-            setNewJob({ position: '', department: departments[0] || '', startDate: new Date().toISOString().split('T')[0], payType: 'Monthly', rate: '' }); // Reset form
+            // Reset form using standard format
+            setNewJob({ 
+                position: '', 
+                department: departments[0] || '', 
+                startDate: dateUtils.formatISODate(new Date()), 
+                payType: 'Monthly', 
+                rate: '' 
+            }); 
         } catch (err) {
             setError("Failed to add new job role.");
             console.error("Error adding job:", err);
@@ -35,7 +49,12 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
         }
     };
 
-    const sortedJobHistory = jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+    // Use standard date parsing for robust sorting
+    const sortedJobHistory = [...jobHistory].sort((a, b) => {
+        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
+        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
+        return dateA - dateB;
+    });
 
     return (
         <div className="space-y-4">
@@ -61,7 +80,8 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
                             <p className="text-sm text-amber-400">{formatRate(job)}</p>
                         </div>
                         <div className="flex items-center space-x-3">
-                            <p className="text-sm text-gray-300">{formatDateForDisplay(job.startDate)}</p>
+                            {/* Use standard display format */}
+                            <p className="text-sm text-gray-300">{dateUtils.formatDisplayDate(job.startDate)}</p>
                             <button onClick={() => onDeleteJob(job)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete this entry">
                                 <TrashIcon className="h-5 w-5"/>
                             </button>

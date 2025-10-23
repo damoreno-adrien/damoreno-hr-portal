@@ -4,6 +4,7 @@ import { getFunctions, httpsCallable } from "firebase/functions"; // Added for e
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '../components/Icons'; // Added DownloadIcon
 import ShiftModal from '../components/ShiftModal';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // Helper function to get display name
 const getDisplayName = (staff) => {
@@ -19,16 +20,18 @@ const getCurrentJob = (staff) => {
         return { position: 'N/A', department: 'Unassigned' };
     }
     // Ensure sorting is robust
-    return [...staff.jobHistory].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0))[0];
+    return [...staff.jobHistory].sort((a, b) => {
+        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
+        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
+        return dateA - dateB;
+    })[0];
 };
 
 export default function PlanningPage({ db, staffList, userRole, departments }) {
     // State for the starting date of the currently viewed week
     const [currentWeekStart, setCurrentWeekStart] = useState(() => {
-        const today = new Date();
-        const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ...
-        const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday
-        return new Date(today.setDate(diff));
+        // Use standard function
+        return dateUtils.startOfWeek(new Date());
     });
 
     // Custom hook to fetch weekly schedule data
@@ -44,23 +47,19 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     // Navigation handlers
     const handlePrevWeek = () => {
         setCurrentWeekStart(prevDate => {
-            const newDate = new Date(prevDate);
-            newDate.setDate(newDate.getDate() - 7);
-            return newDate;
+            return dateUtils.addDays(prevDate, -7);
         });
     };
 
     const handleNextWeek = () => {
         setCurrentWeekStart(prevDate => {
-            const newDate = new Date(prevDate);
-            newDate.setDate(newDate.getDate() + 7);
-            return newDate;
+            return dateUtils.addDays(prevDate, 7);
         });
     };
 
     const handleCellClick = (staffId, dateString, shift) => {
-        // Convert the date string back to a Date object (interpret as UTC)
-        const dateObject = new Date(`${dateString}T00:00:00Z`); 
+        // Use our parser to correctly interpret yyyy-MM-dd as a local date
+        const dateObject = dateUtils.parseISODateString(dateString); 
         setSelectedShiftInfo({ staffId, date: dateObject, shift }); // Pass Date object
         setIsShiftModalOpen(true);
     };
@@ -72,10 +71,10 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     };
 
     // Formatted date range string for display
-    const weekStartFormatted = currentWeekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    const weekEnd = new Date(currentWeekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    const weekEndFormatted = weekEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const weekStartFormatted = dateUtils.formatCustom(currentWeekStart, 'dd MMM');
+    const weekEnd = dateUtils.addDays(currentWeekStart, 6);
+    const weekEndFormatted = dateUtils.formatCustom(weekEnd, 'dd MMM, yyyy');
+
 
     // Filter staff list to only include active members for planning
     const activeStaff = useMemo(() => staffList.filter(s => s.status === 'active' || s.status === undefined || s.status === null), [staffList]);
@@ -104,9 +103,9 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             // Ensure the function name matches the one deployed
             const exportPlanningData = httpsCallable(functions, 'exportPlanningData'); 
 
-            // Calculate start and end dates in YYYY-MM-DD format, safely handling potential errors
-            const startDate = currentWeekStart.toISOString().split('T')[0];
-            const endDate = weekEnd.toISOString().split('T')[0];
+            // Calculate start and end dates in YYYY-MM-DD format
+            const startDate = dateUtils.formatISODate(currentWeekStart);
+            const endDate = dateUtils.formatISODate(weekEnd);
 
             const result = await exportPlanningData({ startDate, endDate });
             const csvData = result.data.csvData;

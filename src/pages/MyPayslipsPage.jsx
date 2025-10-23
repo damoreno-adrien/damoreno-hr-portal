@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import PayslipDetailView from '../components/PayslipDetailView'; // New Import
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export default function MyPayslipsPage({ db, user, companyConfig }) {
-    const [payslips, setPayslips] = useState([]);
+    const [payslips, setPayslips] =useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedPayslip, setSelectedPayslip] = useState(null);
 
@@ -51,7 +52,7 @@ export default function MyPayslipsPage({ db, user, companyConfig }) {
                             <button key={payslip.id} onClick={() => setSelectedPayslip(payslip)} className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-700 transition-colors">
                                 <div>
                                     <p className="font-bold text-white">{months[payslip.payPeriodMonth - 1]} {payslip.payPeriodYear}</p>
-                                    <p className="text-sm text-gray-400">Generated on: {payslip.generatedAt?.toDate().toLocaleDateString('en-GB')}</p>
+                                    <p className="text-sm text-gray-400">Generated on: {dateUtils.formatDisplayDate(payslip.generatedAt)}</p>
                                 </div>
                                 <div className="text-right">
                                     <p className="text-sm text-gray-300">Net Pay</p>

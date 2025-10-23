@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDateForDisplay } from '../../utils/dateHelpers'; // Import formatter, Go up two levels
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 import { BriefcaseIcon, TrashIcon } from '../Icons'; // Correct: Go up one level
 
 // Reusable StatusBadge component (can be moved to a shared location later if needed)
@@ -17,12 +17,12 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
                 <div className="flex-grow min-w-[200px]">
                     <p className="font-bold text-white">{req.displayStaffName}</p>
                     {/* Apply formatting to requestedAt */}
-                    <p className="text-sm text-gray-400">{req.leaveType} | Requested: {formatDateForDisplay(req.requestedAt?.toDate().toISOString().split('T')[0])}</p>
+                    <p className="text-sm text-gray-400">{req.leaveType} | Requested: {dateUtils.formatDisplayDate(req.requestedAt)}</p>
                 </div>
                 <div className="text-center">
                     <p className="text-sm text-gray-300">Dates:</p>
                     {/* Apply formatting to start/end dates */}
-                    <p className="font-medium text-white">{formatDateForDisplay(req.startDate)} to {formatDateForDisplay(req.endDate)}</p>
+                    <p className="font-medium text-white">{dateUtils.formatDisplayDate(req.startDate)} to {dateUtils.formatDisplayDate(req.endDate)}</p>
                 </div>
                 <div className="text-center">
                     <p className="text-sm text-gray-300">Total Days:</p>

@@ -1,14 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { ChevronLeftIcon, ChevronRightIcon } from '../components/Icons';
-
-const formatDateToYYYYMMDD = (date) => {
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // --- NEW HELPER FUNCTION ---
 const getDisplayName = (staff) => {
@@ -18,19 +11,23 @@ const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
+const getStaffCurrentJob = (staff) => {
+    if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) {
+        return null;
+    }
+    return [...staff.jobHistory].sort((a, b) => {
+        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
+        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
+        return dateA - dateB;
+    })[0];
+};
+
 export default function TeamSchedulePage({ db, user }) {
     const [staffList, setStaffList] = useState([]);
     const [myDepartment, setMyDepartment] = useState('');
     
-    const getStartOfWeek = (date) => {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        const day = d.getDay();
-        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-        return new Date(d.setDate(diff));
-    };
-
-    const [startOfWeek, setStartOfWeek] = useState(getStartOfWeek(new Date()));
+    // Use new standard function
+    const [startOfWeek, setStartOfWeek] = useState(dateUtils.startOfWeek(new Date()));
     const [weekData, setWeekData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -40,8 +37,7 @@ export default function TeamSchedulePage({ db, user }) {
         const profileRef = doc(db, 'staff_profiles', user.uid);
         getDoc(profileRef).then(docSnap => {
             if (docSnap.exists()) {
-                const jobHistory = docSnap.data().jobHistory || [];
-                const currentJob = jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+                const currentJob = getStaffCurrentJob(docSnap.data());
                 if (currentJob) {
                     setMyDepartment(currentJob.department);
                 }
@@ -66,13 +62,13 @@ export default function TeamSchedulePage({ db, user }) {
         setIsLoading(true);
 
         const departmentStaff = staffList.filter(staff => {
-            const currentJob = (staff.jobHistory || []).sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+            const currentJob = getStaffCurrentJob(staff);
             return currentJob?.department === myDepartment;
         });
 
-        const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(endOfWeek.getDate() + 6);
-        const startStr = formatDateToYYYYMMDD(startOfWeek);
-        const endStr = formatDateToYYYYMMDD(endOfWeek);
+        const endOfWeek = dateUtils.addDays(startOfWeek, 6);
+        const startStr = dateUtils.formatISODate(startOfWeek);
+        const endStr = dateUtils.formatISODate(endOfWeek);
 
         const shiftsQuery = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
         const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("endDate", ">=", startStr));
@@ -89,9 +85,8 @@ export default function TeamSchedulePage({ db, user }) {
                 const leaves = leavesSnapshot.docs.map(doc => doc.data()).filter(req => req.startDate <= endStr);
                 
                 const days = Array.from({ length: 7 }).map((_, i) => {
-                    const date = new Date(startOfWeek);
-                    date.setDate(date.getDate() + i);
-                    const dateStr = formatDateToYYYYMMDD(date);
+                    const date = dateUtils.addDays(startOfWeek, i);
+                    const dateStr = dateUtils.formatISODate(date);
                     
                     const dailyEntries = departmentStaff.map(staff => {
                         const onLeave = leaves.some(leave => leave.staffId === staff.id && dateStr >= leave.startDate && dateStr <= leave.endDate);
@@ -116,9 +111,10 @@ export default function TeamSchedulePage({ db, user }) {
         return () => unsubShifts();
     }, [db, user, startOfWeek, staffList, myDepartment]);
 
-    const changeWeek = (offset) => setStartOfWeek(prev => { const d = new Date(prev); d.setDate(d.getDate() + (7 * offset)); return d; });
-    const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(endOfWeek.getDate() + 6);
-    const weekRangeString = `${startOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${endOfWeek.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+    const changeWeek = (offset) => setStartOfWeek(prev => dateUtils.addDays(prev, 7 * offset));
+    
+    const endOfWeek = dateUtils.addDays(startOfWeek, 6);
+    const weekRangeString = `${dateUtils.formatCustom(startOfWeek, 'dd MMM')} - ${dateUtils.formatCustom(endOfWeek, 'dd MMM, yyyy')}`;
 
     return (
         <div>
@@ -134,7 +130,7 @@ export default function TeamSchedulePage({ db, user }) {
                 <div className="space-y-6">
                     {weekData.map(({ date, entries }) => (
                         <div key={date.toISOString()} className="bg-gray-800 p-4 rounded-lg">
-                            <p className="font-bold text-amber-400 border-b border-gray-700 pb-2 mb-2">{date.toLocaleDateString('en-US', { weekday: 'long' })}, {date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}</p>
+                            <p className="font-bold text-amber-400 border-b border-gray-700 pb-2 mb-2">{dateUtils.formatCustom(date, 'EEEE')}, {dateUtils.formatCustom(date, 'dd MMMM')}</p>
                             {entries.length > 0 ? (
                                 <ul className="space-y-2">
                                     {entries.map(entry => (

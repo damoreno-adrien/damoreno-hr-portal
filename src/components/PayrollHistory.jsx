@@ -2,9 +2,21 @@ import React, { useState } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import usePayrollHistory from '../hooks/usePayrollHistory';
 import { TrashIcon } from './Icons';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
-const getCurrentJob = (staff) => { if (!staff?.jobHistory || staff.jobHistory.length === 0) { return { department: 'N/A' }; } return staff.jobHistory.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0]; };
+
+// Use standard date utils for safe sorting
+const getCurrentJob = (staff) => { 
+    if (!staff?.jobHistory || staff.jobHistory.length === 0) { 
+        return { department: 'N/A' }; 
+    } 
+    return [...staff.jobHistory].sort((a, b) => {
+        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
+        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
+        return dateA - dateB;
+    })[0];
+};
 
 // --- NEW: Accept onViewHistoryDetails prop ---
 export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) {

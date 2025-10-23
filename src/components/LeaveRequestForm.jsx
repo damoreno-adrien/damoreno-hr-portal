@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -30,18 +31,15 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     }, [existingRequest]);
 
     useEffect(() => {
-        if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+        const start = dateUtils.parseISODateString(startDate);
+        const end = dateUtils.parseISODateString(endDate);
+        if (start && end && end < start) {
             setEndDate('');
         }
     }, [startDate, endDate]);
 
-    const calculateDays = (start, end) => {
-        if (!start || !end || new Date(end) < new Date(start)) return 0;
-        const diffTime = Math.abs(new Date(end) - new Date(start));
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    };
-
-    const totalDays = calculateDays(startDate, endDate);
+    // Use our new standard function for day calculation
+    const totalDays = dateUtils.differenceInCalendarDays(endDate, startDate);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -51,7 +49,11 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             setError('Please fill in all required fields.');
             return;
         }
-        if (new Date(endDate) < new Date(startDate)) {
+
+        const start = dateUtils.parseISODateString(startDate);
+        const end = dateUtils.parseISODateString(endDate);
+
+        if (end < start) {
             setError('The end date cannot be before the start date.');
             return;
         }
@@ -67,15 +69,17 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             }
         }
 
-        const newStart = new Date(startDate);
-        const newEnd = new Date(endDate);
+        const newStart = dateUtils.parseISODateString(startDate);
+        const newEnd = dateUtils.parseISODateString(endDate);
         const checkStaffId = isManagerCreating ? selectedStaffId : (existingRequest ? existingRequest.staffId : user.uid);
         
         const overlaps = existingRequests.some(req => {
             if (req.staffId !== checkStaffId) return false;
             if (existingRequest && req.id === existingRequest.id) return false;
-            const existingStart = new Date(req.startDate);
-            const existingEnd = new Date(req.endDate);
+            
+            const existingStart = dateUtils.parseISODateString(req.startDate);
+            const existingEnd = dateUtils.parseISODateString(req.endDate);
+
             return newStart <= existingEnd && newEnd >= existingStart;
         });
 
@@ -116,9 +120,9 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     };
 
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const minDate = tomorrow.toISOString().split('T')[0];
+    // Use standard date utils
+    const tomorrow = dateUtils.addDays(new Date(), 1);
+    const minDate = dateUtils.formatISODate(tomorrow);
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">

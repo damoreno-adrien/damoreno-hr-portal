@@ -3,8 +3,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ChevronUpIcon, ChevronDownIcon } from '../components/Icons';
 import Modal from '../components/Modal';
 import EditAttendanceModal from '../components/EditAttendanceModal';
-
-const getTodayString = () => new Date().toISOString().split('T')[0];
+import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -16,9 +15,12 @@ const getDisplayName = (staff) => {
 const UpcomingBirthdaysCard = ({ staffList }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const birthDate = new Date(staff.birthdate);
+        
+        const today = new Date(); // Use a fresh date object
+        today.setHours(0, 0, 0, 0); // Set to start of today
+        
+        const birthDate = dateUtils.fromFirestore(staff.birthdate);
+        if (!birthDate) return null;
         
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
         if (nextBirthday < today) {
@@ -46,7 +48,7 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
                     upcomingBirthdays.map(staff => (
                         <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md">
                             <span className="text-white font-medium">{getDisplayName(staff)}</span>
-                            <span className="text-sm text-amber-400">{staff.nextBirthday.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})</span>
+                            <span className="text-sm text-amber-400">{dateUtils.formatCustom(staff.nextBirthday, 'dd MMMM')} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})</span>
                         </div>
                     ))
                 ) : (
@@ -66,7 +68,7 @@ export default function AttendancePage({ db, staffList }) {
 
     useEffect(() => {
         if (!db) return;
-        const todayStr = getTodayString();
+        const todayStr = dateUtils.formatISODate(new Date()); // Use dateUtils
         
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
@@ -91,7 +93,7 @@ export default function AttendancePage({ db, staffList }) {
     }, [db]);
 
     const handleCardClick = (staff) => {
-        const todayStr = getTodayString();
+        const todayStr = dateUtils.formatISODate(new Date()); // Use dateUtils
         const attendanceRecord = checkIns[staff.id];
         
         const recordForModal = {
@@ -129,17 +131,12 @@ export default function AttendancePage({ db, staffList }) {
     const completed = staffWithStatus.filter(s => s.category === 'completed');
     const notPresent = staffWithStatus.filter(s => s.category === 'not-present');
 
-    const formatTime = (timestamp) => {
-        if (!timestamp?.toDate) return '';
-        return timestamp.toDate().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    };
-
     const StaffCard = ({ staff, checkInData, onClick }) => {
         let statusColor, statusText;
         switch (staff.category) {
-            case 'on-shift': statusColor = 'bg-green-500'; statusText = `Checked In: ${formatTime(checkInData?.checkInTime)}`; break;
-            case 'on-break': statusColor = 'bg-yellow-500'; statusText = `Break Started: ${formatTime(checkInData?.breakStart)}`; break;
-            case 'completed': statusColor = 'bg-gray-500'; statusText = `Checked Out: ${formatTime(checkInData?.checkOutTime)}`; break;
+            case 'on-shift': statusColor = 'bg-green-500'; statusText = `Checked In: ${dateUtils.formatCustom(checkInData?.checkInTime, 'HH:mm')}`; break;
+            case 'on-break': statusColor = 'bg-yellow-500'; statusText = `Break Started: ${dateUtils.formatCustom(checkInData?.breakStart, 'HH:mm')}`; break;
+            case 'completed': statusColor = 'bg-gray-500'; statusText = `Checked Out: ${dateUtils.formatCustom(checkInData?.checkOutTime, 'HH:mm')}`; break;
             case 'not-present':
                 statusText = staff.reason;
                 if (staff.reason === 'Absent') statusColor = 'bg-red-500';
@@ -195,7 +192,7 @@ export default function AttendancePage({ db, staffList }) {
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
                 </div>
-                <p className="text-lg text-gray-300 hidden sm:block">{new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />
