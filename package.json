@@ -13,6 +13,7 @@
     "node": "20.x"
   },
   "dependencies": {
+    "date-fns": "^4.1.0",
     "firebase": "^10.12.2",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
