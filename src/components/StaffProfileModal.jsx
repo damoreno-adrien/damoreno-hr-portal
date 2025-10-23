@@ -1,14 +1,15 @@
+// src/components/StaffProfileModal.jsx
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore'; // Import Timestamp
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../main.jsx"
+import { app } from "../App.jsx" // <-- FIX APPLIED HERE
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
 import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
 import { JobHistoryManager } from './StaffProfile/JobHistoryManager';
 import { DocumentManager } from './StaffProfile/DocumentManager';
 import { ProfileActionButtons } from './StaffProfile/ProfileActionButtons';
-import { KeyIcon } from './Icons'; // Assuming KeyIcon is in Icons.jsx
+import { KeyIcon } from './Icons.jsx'; // Assuming KeyIcon is in Icons.jsx
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE BOTH FUNCTION REGIONS ***
