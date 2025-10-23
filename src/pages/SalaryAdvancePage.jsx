@@ -8,8 +8,8 @@ import { EligibilityCard } from '../components/SalaryAdvance/EligibilityCard'; /
 import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryTable'; // Import new component
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsAsia = getFunctions(app, "asia-southeast1");
-const calculateEligibility = httpsCallable(functionsAsia, 'calculateAdvanceEligibilityHandler');
+const functionsDefault = getFunctions(app, "us-central1");
+const calculateEligibility = httpsCallable(functionsDefault, 'calculateAdvanceEligibilityHandler');
 
 export default function SalaryAdvancePage({ db, user }) {
     const [eligibility, setEligibility] = useState({ maxAdvance: 0, maxTheoreticalAdvance: 0 });

@@ -8,8 +8,8 @@ import ShiftModal from '../components/ShiftModal';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsAsia = getFunctions(app, "asia-southeast1");
-const exportPlanningData = httpsCallable(functionsAsia, 'exportPlanningDataHandler'); // Use correct handler name
+const functionsDefault = getFunctions(app, "us-central1");
+const exportPlanningData = httpsCallable(functionsDefault, 'exportPlanningDataHandler'); // Use correct handler name
 
 // Helper function to get display name
 const getDisplayName = (staff) => {

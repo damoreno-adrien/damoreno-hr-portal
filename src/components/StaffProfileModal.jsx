@@ -13,11 +13,10 @@ import { KeyIcon } from './Icons.jsx'; // Assuming KeyIcon is in Icons.jsx
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE BOTH FUNCTION REGIONS ***
-const functionsDefault = getFunctions(app); // For us-central1 functions
-const functionsAsia = getFunctions(app, "asia-southeast1"); // For asia-southeast1 functions
+const functionsDefault = getFunctions(app, "us-central1");
 
 // *** PREPARE CALLABLE REFERENCES ***
-const deleteStaffFunc = httpsCallable(functionsAsia, 'deleteStaffHandler'); // Use correct handler name
+const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaffHandler'); // Use correct handler name
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatusHandler'); // Stays in default region
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPasswordHandler'); // Stays in default region
 

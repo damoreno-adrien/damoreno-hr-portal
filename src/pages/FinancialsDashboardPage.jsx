@@ -8,8 +8,8 @@ import Modal from '../components/Modal';
 import PayslipDetailView from '../components/PayslipDetailView';
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsAsia = getFunctions(app, "asia-southeast1");
-const calculateLivePayEstimate = httpsCallable(functionsAsia, 'calculateLivePayEstimateHandler');
+const functionsDefault = getFunctions(app, "us-central1");
+const calculateLivePayEstimate = httpsCallable(functionsDefault, 'calculateLivePayEstimateHandler');
 
 export default function FinancialsDashboardPage({ user, companyConfig }) {
     const [payEstimate, setPayEstimate] = useState(null);

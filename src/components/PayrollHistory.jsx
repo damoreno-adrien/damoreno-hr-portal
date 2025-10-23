@@ -6,8 +6,8 @@ import { TrashIcon } from './Icons';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsAsia = getFunctions(app, "asia-southeast1");
-const deletePayrollRun = httpsCallable(functionsAsia, 'deletePayrollRunHandler');
+const functionsDefault = getFunctions(app, "us-central1");
+const deletePayrollRun = httpsCallable(functionsDefault, 'deletePayrollRunHandler');
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
