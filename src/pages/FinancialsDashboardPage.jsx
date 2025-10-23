@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../firebaseConfig"; // *** ADD THIS LINE (adjust path if needed) ***
+import { app } from "../App.jsx"
 import { FinancialCard } from '../components/FinancialsDashboard/FinancialCard';
 import { PayEstimateCard } from '../components/FinancialsDashboard/PayEstimateCard';
 import { SideCards } from '../components/FinancialsDashboard/SideCards';

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../firebaseConfig"; // *** ADD THIS LINE (adjust path if needed) ***
+import { app } from "../App"
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***

@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-// Correct import (FieldValue removed)
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore'; // Import Timestamp
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../firebaseConfig"; // *** ADD THIS LINE (adjust path if needed) ***
+import { app } from "../main.jsx"
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
 import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';

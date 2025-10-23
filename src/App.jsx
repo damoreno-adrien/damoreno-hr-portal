@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getFirestore, doc, onSnapshot, collection, query, where } from 'firebase/firestore';
-import { getFunctions } from "firebase/functions";
 import useAuth from './hooks/useAuth';
 import useCompanyConfig from './hooks/useCompanyConfig';
 import useStaffList from './hooks/useStaffList';
@@ -25,11 +24,36 @@ import MyProfilePage from './pages/MyProfilePage';
 import Sidebar from './components/Sidebar';
 import LoginPage from './pages/LoginPage';
 
+let app;
+let auth;
+let db;
+try {
+    const firebaseConfigString = typeof import.meta.env !== 'undefined'
+        ? import.meta.env.VITE_FIREBASE_CONFIG
+        : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
+    const firebaseConfig = JSON.parse(firebaseConfigString);
+
+    if (!firebaseConfig.apiKey) {
+        console.error("Firebase config is missing or invalid!");
+        // Handle error appropriately, maybe show an error message
+    } else {
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+        // Initialize Functions here once if needed globally, but often better locally
+        // getFunctions(app); // You might not need this line here at all
+    }
+} catch (error) {
+    console.error("Firebase Initialization Error:", error);
+    // Handle error appropriately
+}
+
+// --- Export the initialized instances ---
+export { app, auth, db };
+
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
 export default function App() {
-    const [auth, setAuth] = useState(null);
-    const [db, setDb] = useState(null);
     const [loginError, setLoginError] = useState('');
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [staffProfile, setStaffProfile] = useState(null);
@@ -44,28 +68,9 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
-    const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db);
-    const companyConfig = useCompanyConfig(db);
-    const staffList = useStaffList(db, user);
-
-    useEffect(() => {
-        try {
-            const firebaseConfigString = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_FIREBASE_CONFIG : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
-            const firebaseConfig = JSON.parse(firebaseConfigString);
-            if (!firebaseConfig.apiKey) {
-                 console.error("Firebase config is missing or invalid!");
-                 return;
-            }
-            const app = initializeApp(firebaseConfig);
-            const authInstance = getAuth(app);
-            const dbInstance = getFirestore(app);
-            getFunctions(app);
-            setAuth(authInstance);
-            setDb(dbInstance);
-        } catch (error) {
-            console.error("Firebase Initialization Error:", error);
-        }
-    }, []);
+    const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db); // Pass imported auth/db
+    const companyConfig = useCompanyConfig(db); // Pass imported db
+    const staffList = useStaffList(db, user); // Pass imported db
     
     useEffect(() => {
         if (userRole === 'staff' && db && user) {
@@ -137,18 +142,26 @@ export default function App() {
 
     const handleLogin = async (email, password) => {
         setLoginError('');
-        if (!auth) return;
+        if (!auth) { // Use imported auth
+             console.error("Firebase Auth not initialized.");
+             setLoginError('Initialization error. Please refresh.');
+             return;
+        }
         try {
-            await signInWithEmailAndPassword(auth, email, password);
+            await signInWithEmailAndPassword(auth, email, password); // Use imported auth
         } catch (error) {
             setLoginError('Invalid email or password. Please try again.');
         }
     };
-    const handleLogout = async () => { if (!auth) return; await signOut(auth); setCurrentPage('dashboard'); };
+    const handleLogout = async () => {
+        if (!auth) return; // Use imported auth
+        await signOut(auth); // Use imported auth
+        setCurrentPage('dashboard');
+    };
 
-    const isLoading = isAuthLoading || companyConfig === null;
-    if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
-    
+    const isLoading = !auth || !db || isAuthLoading || companyConfig === null;
+     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
+
     if (!user) {
         return (
             <LoginPage 
@@ -158,27 +171,29 @@ export default function App() {
         );
     }
 
-    const renderPageContent = () => {
-        if (currentPage === 'dashboard') {
-            if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-            if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} />;
-        }
-        switch(currentPage) {
-            case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
-            case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} />;
-            case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
-            case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
-            case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
-            case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
-            case 'financials-dashboard': return <FinancialsDashboardPage companyConfig={companyConfig} />;
-            case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
-            case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
-            case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
-            case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
-            case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
-            default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
-        }
-    };
+    // Pass imported db to pages/components that need it directly
+     const renderPageContent = () => {
+         if (currentPage === 'dashboard') {
+             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
+             if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} />;
+         }
+         switch(currentPage) {
+             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
+             // ... (Update other pages passing db and auth if needed) ...
+             case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} />;
+             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
+             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
+             case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
+             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
+             case 'financials-dashboard': return <FinancialsDashboardPage companyConfig={companyConfig} />; // Pass db if needed later
+             case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
+             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
+             case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
+             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
+             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
+             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
+         }
+     };
 
     return (
         <div className="relative min-h-screen md:h-screen bg-gray-900 text-white font-sans md:flex md:overflow-hidden">
