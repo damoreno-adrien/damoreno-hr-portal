@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../App.jsx"
+import { app } from "../../firebase.js" // Adjusted import path
 import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
 import { PlusIcon } from '../components/Icons';
 import RequestAdvanceModal from '../components/RequestAdvanceModal';

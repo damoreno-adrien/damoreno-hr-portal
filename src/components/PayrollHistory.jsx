@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../App.jsx"
+import { app } from "../../firebase.js" // Adjusted import path
 import usePayrollHistory from '../hooks/usePayrollHistory';
 import { TrashIcon } from './Icons';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard

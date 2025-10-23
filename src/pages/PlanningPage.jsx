@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../App.jsx"
+import { app } from "../../firebase.js" // Adjusted import path
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '../components/Icons';
 import ShiftModal from '../components/ShiftModal';
