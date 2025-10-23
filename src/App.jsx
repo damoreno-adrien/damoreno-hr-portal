@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFirestore, doc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { app, auth, db } from './firebase'; // 🔥 NEW IMPORT 🔥
 import useAuth from './hooks/useAuth';
+
 import useCompanyConfig from './hooks/useCompanyConfig';
 import useStaffList from './hooks/useStaffList';
 
@@ -23,33 +24,6 @@ import MyPayslipsPage from './pages/MyPayslipsPage';
 import MyProfilePage from './pages/MyProfilePage';
 import Sidebar from './components/Sidebar';
 import LoginPage from './pages/LoginPage';
-
-let app;
-let auth;
-let db;
-try {
-    const firebaseConfigString = typeof import.meta.env !== 'undefined'
-        ? import.meta.env.VITE_FIREBASE_CONFIG
-        : (typeof __firebase_config__ !== 'undefined' ? __firebase_config__ : '{}');
-    const firebaseConfig = JSON.parse(firebaseConfigString);
-
-    if (!firebaseConfig.apiKey) {
-        console.error("Firebase config is missing or invalid!");
-        // Handle error appropriately, maybe show an error message
-    } else {
-        app = initializeApp(firebaseConfig);
-        auth = getAuth(app);
-        db = getFirestore(app);
-        // Initialize Functions here once if needed globally, but often better locally
-        // getFunctions(app); // You might not need this line here at all
-    }
-} catch (error) {
-    console.error("Firebase Initialization Error:", error);
-    // Handle error appropriately
-}
-
-// --- Export the initialized instances ---
-export { app, auth, db };
 
 const HamburgerIcon = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>);
 
