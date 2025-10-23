@@ -22,7 +22,8 @@ const safeToDate = (value) => {
     return null;
 };
 
-exports.calculateLivePayEstimateHandler = https.onCall({ region: "asia-southeast1" }, async (request) => { // Consider region
+exports.calculateLivePayEstimateHandler = https.onCall({ region: "asia-southeast1" }, async (request) => {
+    // Force redeploy - Oct 23
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
