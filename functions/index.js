@@ -3,6 +3,7 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 // Import and re-export functions
+// Comment to get function updated
 const { createUserHandler } = require('./src/auth/createUser');
 const { setStaffAuthStatusHandler } = require('./src/auth/setStaffAuthStatus');
 const { setStaffPasswordHandler } = require('./src/auth/setStaffPassword'); 
