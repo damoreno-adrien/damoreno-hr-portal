@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { app, auth, db } from './firebase'; // 🔥 NEW IMPORT 🔥
+import { app, auth, db } from '../firebase';
 import useAuth from './hooks/useAuth';
 
 import useCompanyConfig from './hooks/useCompanyConfig';
