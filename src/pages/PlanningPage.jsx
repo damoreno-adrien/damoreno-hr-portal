@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from "firebase/functions"; // Added for export
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { app } from "../firebaseConfig"; // *** Ensure this path is correct ***
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '../components/Icons'; // Added DownloadIcon
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '../components/Icons';
 import ShiftModal from '../components/ShiftModal';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
+
+// *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
+const functionsAsia = getFunctions(app, "asia-southeast1");
+const exportPlanningData = httpsCallable(functionsAsia, 'exportPlanningDataHandler'); // Use correct handler name
 
 // Helper function to get display name
 const getDisplayName = (staff) => {
@@ -14,16 +19,16 @@ const getDisplayName = (staff) => {
     return staff.fullName || 'Unknown';
 };
 
-// Helper function to get current job
+// Helper function to get current job using standard date utils
 const getCurrentJob = (staff) => {
     if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) {
         return { position: 'N/A', department: 'Unassigned' };
     }
-    // Ensure sorting is robust
+    // Ensure sorting is robust using date-fns
     return [...staff.jobHistory].sort((a, b) => {
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
-        return dateA - dateB;
+        return dateA - dateB; // Sort descending (most recent first)
     })[0];
 };
 
@@ -35,7 +40,8 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     });
 
     // Custom hook to fetch weekly schedule data
-    const { weekData, weekDates = [], loading, refetchWeekData } = useWeeklyPlannerData(db, currentWeekStart, staffList);
+    // Removed staffList dependency as it's not directly used by the hook
+    const { weekData, weekDates = [], loading, refetchWeekData } = useWeeklyPlannerData(db, currentWeekStart);
 
     // State for the shift editing modal
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
@@ -44,22 +50,19 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     // State for export loading indicator
     const [isExporting, setIsExporting] = useState(false);
 
-    // Navigation handlers
+    // Navigation handlers using standard date utils
     const handlePrevWeek = () => {
-        setCurrentWeekStart(prevDate => {
-            return dateUtils.addDays(prevDate, -7);
-        });
+        setCurrentWeekStart(prevDate => dateUtils.addDays(prevDate, -7));
     };
 
     const handleNextWeek = () => {
-        setCurrentWeekStart(prevDate => {
-            return dateUtils.addDays(prevDate, 7);
-        });
+        setCurrentWeekStart(prevDate => dateUtils.addDays(prevDate, 7));
     };
 
+    // Click handler using standard date parsing
     const handleCellClick = (staffId, dateString, shift) => {
         // Use our parser to correctly interpret yyyy-MM-dd as a local date
-        const dateObject = dateUtils.parseISODateString(dateString); 
+        const dateObject = dateUtils.parseISODateString(dateString);
         setSelectedShiftInfo({ staffId, date: dateObject, shift }); // Pass Date object
         setIsShiftModalOpen(true);
     };
@@ -70,9 +73,9 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         setSelectedShiftInfo({ staffId: null, date: null, shift: null }); // Reset selected info
     };
 
-    // Formatted date range string for display
-    const weekStartFormatted = dateUtils.formatCustom(currentWeekStart, 'dd MMM');
+    // Formatted date range string for display using standard utils
     const weekEnd = dateUtils.addDays(currentWeekStart, 6);
+    const weekStartFormatted = dateUtils.formatCustom(currentWeekStart, 'dd MMM');
     const weekEndFormatted = dateUtils.formatCustom(weekEnd, 'dd MMM, yyyy');
 
 
@@ -99,14 +102,11 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     const handleExportWeek = async () => {
         setIsExporting(true);
         try {
-            const functions = getFunctions();
-            // Ensure the function name matches the one deployed
-            const exportPlanningData = httpsCallable(functions, 'exportPlanningData'); 
-
-            // Calculate start and end dates in YYYY-MM-DD format
+            // exportPlanningData callable defined at top level
             const startDate = dateUtils.formatISODate(currentWeekStart);
             const endDate = dateUtils.formatISODate(weekEnd);
 
+            // Use the correctly initialized callable function
             const result = await exportPlanningData({ startDate, endDate });
             const csvData = result.data.csvData;
 
@@ -145,10 +145,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                     onClose={closeModal}
                     db={db}
                     staffId={selectedShiftInfo.staffId}
-                    // --- MODIFIED: Added check for found staff ---
-                    staffName={
-                        getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId)) || 'Unknown Staff'
-                    }
+                    staffName={ getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId)) || 'Unknown Staff' }
                     date={selectedShiftInfo.date}
                     existingShift={selectedShiftInfo.shift}
                     onSaveSuccess={refetchWeekData}
@@ -203,7 +200,8 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         {sortedDepartments.map(department => (
                              <React.Fragment key={department}>
                                 <tbody>{/* Department Header Row */}
-                                    <tr className="bg-gray-700 sticky top-[calc(theme(space.12)+theme(space.px))] z-10"> {/* Adjust top based on header height */}
+                                    {/* Adjust top based on actual header height if needed */}
+                                    <tr className="bg-gray-700 sticky top-[calc(theme(space.12)+theme(space.px))] z-10">
                                         <th colSpan={weekDates.length + 1} className="sticky left-0 bg-gray-700 px-4 py-2 text-left text-sm font-semibold text-amber-400 z-20">
                                             {department}
                                         </th>

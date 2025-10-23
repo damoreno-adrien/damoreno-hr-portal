@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { app } from "../firebaseConfig"; // *** ADD THIS LINE (adjust path if needed) ***
 import usePayrollHistory from '../hooks/usePayrollHistory';
 import { TrashIcon } from './Icons';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
+// *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
+const functionsAsia = getFunctions(app, "asia-southeast1");
+const deletePayrollRun = httpsCallable(functionsAsia, 'deletePayrollRunHandler');
+
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
 // Use standard date utils for safe sorting
-const getCurrentJob = (staff) => { 
-    if (!staff?.jobHistory || staff.jobHistory.length === 0) { 
-        return { department: 'N/A' }; 
-    } 
+const getCurrentJob = (staff) => {
+    // ... (getCurrentJob function remains the same as the last version) ...
+    if (!staff?.jobHistory || staff.jobHistory.length === 0) {
+        return { department: 'N/A' };
+    }
     return [...staff.jobHistory].sort((a, b) => {
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
@@ -18,7 +24,6 @@ const getCurrentJob = (staff) => {
     })[0];
 };
 
-// --- NEW: Accept onViewHistoryDetails prop ---
 export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) {
     const { history, isLoadingHistory } = usePayrollHistory(db);
     const [expandedRunId, setExpandedRunId] = useState(null);
@@ -35,10 +40,10 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
 
         setIsDeleting(run.id);
         try {
-            const functions = getFunctions();
-            const deletePayrollRun = httpsCallable(functions, 'deletePayrollRun');
+            // Use the correctly initialized callable function
             const result = await deletePayrollRun({ payPeriod: { year: run.year, month: run.month } });
             alert(result.data.result);
+            // The hook should automatically update the history list via the listener
         } catch (error) {
             console.error("Error deleting payroll run:", error);
             alert(`Failed to delete payroll run: ${error.message}`);
@@ -67,7 +72,7 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
                                     {isDeleting === run.id ? (
                                         <div className="w-6 h-6 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
                                     ) : (
-                                        <button 
+                                        <button
                                             onClick={(e) => { e.stopPropagation(); handleDeletePayrollRun(run); }}
                                             className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
                                             title="Delete this payroll run"
@@ -91,9 +96,8 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
                                                 const staffMember = staffList.find(s => s.id === p.staffId);
                                                 const displayName = staffMember ? `${staffMember.nickname || staffMember.firstName} (${getCurrentJob(staffMember).department || 'N/A'})` : p.name;
                                                 return (
-                                                    // --- NEW: Added onClick handler and styling to the table row ---
-                                                    <tr 
-                                                        key={p.id} 
+                                                    <tr
+                                                        key={p.id}
                                                         onClick={() => onViewHistoryDetails(p, run)}
                                                         className="hover:bg-gray-700 cursor-pointer"
                                                     >

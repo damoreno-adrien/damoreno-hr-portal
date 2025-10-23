@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { app } from "../firebaseConfig"; // *** ADD THIS LINE (adjust path if needed) ***
 import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
 import { PlusIcon } from '../components/Icons';
 import RequestAdvanceModal from '../components/RequestAdvanceModal';
 import { EligibilityCard } from '../components/SalaryAdvance/EligibilityCard'; // Import new component
 import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryTable'; // Import new component
 
+// *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
+const functionsAsia = getFunctions(app, "asia-southeast1");
+const calculateEligibility = httpsCallable(functionsAsia, 'calculateAdvanceEligibilityHandler');
 
 export default function SalaryAdvancePage({ db, user }) {
     const [eligibility, setEligibility] = useState({ maxAdvance: 0, maxTheoreticalAdvance: 0 });
@@ -18,9 +22,7 @@ export default function SalaryAdvancePage({ db, user }) {
     const fetchEligibility = useCallback(() => {
         setIsLoadingEligibility(true);
         setError(''); // Clear previous errors
-        const functions = getFunctions();
-        const calculateEligibility = httpsCallable(functions, 'calculateAdvanceEligibility');
-        
+        // Use the correctly initialized callable function
         calculateEligibility()
             .then((result) => setEligibility(result.data))
             .catch((err) => {
@@ -28,13 +30,13 @@ export default function SalaryAdvancePage({ db, user }) {
                 setError("Could not determine eligibility. " + err.message);
             })
             .finally(() => setIsLoadingEligibility(false));
-    }, []); 
+    }, []); // Removed calculateEligibility from dependency array
 
     useEffect(() => {
         fetchEligibility();
 
         const q = query(
-            collection(db, 'salary_advances'), 
+            collection(db, 'salary_advances'),
             where('staffId', '==', user.uid),
             orderBy('createdAt', 'desc')
         );
@@ -64,7 +66,7 @@ export default function SalaryAdvancePage({ db, user }) {
     return (
         <div>
             {isModalOpen && (
-                <RequestAdvanceModal 
+                <RequestAdvanceModal
                     isOpen={isModalOpen}
                     onClose={() => setIsModalOpen(false)}
                     db={db}
@@ -75,7 +77,7 @@ export default function SalaryAdvancePage({ db, user }) {
             )}
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Salary Advance</h2>
-                <button 
+                <button
                     onClick={() => setIsModalOpen(true)}
                     disabled={isLoadingEligibility || eligibility.maxAdvance <= 0}
                     className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500 disabled:cursor-not-allowed"
@@ -89,7 +91,7 @@ export default function SalaryAdvancePage({ db, user }) {
 
             {/* Use the new EligibilityCard component */}
             <EligibilityCard eligibility={eligibility} isLoading={isLoadingEligibility} />
-            
+
             {/* Use the new RequestHistoryTable component */}
             <RequestHistoryTable requests={requests} isLoading={isLoadingRequests} />
         </div>

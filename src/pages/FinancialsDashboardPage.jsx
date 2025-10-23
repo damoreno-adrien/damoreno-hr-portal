@@ -1,102 +1,93 @@
-import React, { useState, useEffect } from 'react';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import Modal from '../components/Modal';
-import PayslipDetailView from '../components/PayslipDetailView';
+import React, { useState, useEffect, useCallback } from 'react';
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { app } from "../firebaseConfig"; // *** ADD THIS LINE (adjust path if needed) ***
 import { FinancialCard } from '../components/FinancialsDashboard/FinancialCard';
 import { PayEstimateCard } from '../components/FinancialsDashboard/PayEstimateCard';
 import { SideCards } from '../components/FinancialsDashboard/SideCards';
+import Modal from '../components/Modal';
+import PayslipDetailView from '../components/PayslipDetailView';
 
-const Spinner = () => (
-    <div className="flex justify-center items-center p-8">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-    </div>
-);
+// *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
+const functionsAsia = getFunctions(app, "asia-southeast1");
+const calculateLivePayEstimate = httpsCallable(functionsAsia, 'calculateLivePayEstimateHandler');
 
-const formatMonthYear = (payslip) => {
-    if (!payslip || !payslip.payPeriodYear || !payslip.payPeriodMonth) return "Invalid Date";
-    const date = new Date(payslip.payPeriodYear, payslip.payPeriodMonth - 1);
-    return date.toLocaleString('default', { month: 'long', year: 'numeric' });
-};
+export default function FinancialsDashboardPage({ user, companyConfig }) {
+    const [payEstimate, setPayEstimate] = useState(null);
+    const [isLoadingEstimate, setIsLoadingEstimate] = useState(true);
+    const [errorEstimate, setErrorEstimate] = useState('');
+    const [latestPayslipForModal, setLatestPayslipForModal] = useState(null);
 
-export default function FinancialsDashboardPage({ companyConfig }) {
-    const [estimate, setEstimate] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [selectedPayslip, setSelectedPayslip] = useState(null);
-
-    const [visibility, setVisibility] = useState({
-        payEstimate: false,
-        latestPayslip: false,
-        salaryAdvance: false,
-        activeLoans: false,
-    });
-
-    const handleToggleVisibility = (card) => {
-        setVisibility(prev => ({ ...prev, [card]: !prev[card] }));
-    };
+    const fetchPayEstimate = useCallback(() => {
+        setIsLoadingEstimate(true);
+        setErrorEstimate('');
+        calculateLivePayEstimate()
+            .then(result => setPayEstimate(result.data))
+            .catch(err => {
+                console.error("Error fetching pay estimate:", err);
+                setErrorEstimate(`Failed to load pay estimate: ${err.message}`);
+            })
+            .finally(() => setIsLoadingEstimate(false));
+    }, []); // Removed calculateLivePayEstimate from dependency array as it's stable
 
     useEffect(() => {
-        const fetchPayEstimate = async () => {
-            try {
-                const functions = getFunctions();
-                const calculateLivePayEstimate = httpsCallable(functions, 'calculateLivePayEstimate');
-                const result = await calculateLivePayEstimate();
-                setEstimate(result.data);
-            } catch (err) {
-                console.error("Error fetching pay estimate:", err);
-                setError(err.message || "An error occurred while calculating your pay.");
-            } finally {
-                setIsLoading(false);
-            }
-        };
         fetchPayEstimate();
-    }, []);
+    }, [fetchPayEstimate]);
 
-    const renderContent = () => {
-        if (isLoading) { return <Spinner />; }
-        if (error) { return <p className="text-center text-red-400 bg-red-500/10 p-4 rounded-lg">{error}</p>; }
-        if (!estimate) { return <p className="text-center text-gray-400">Could not retrieve pay estimate data.</p>; }
+    const handleViewLatestPayslip = () => {
+        if (payEstimate?.latestPayslip) {
+            // Need to construct the payPeriod object for the modal
+            const payslip = payEstimate.latestPayslip;
+            const period = {
+                month: payslip.payPeriodMonth,
+                year: payslip.payPeriodYear
+            };
+            setLatestPayslipForModal({ details: payslip, payPeriod: period });
+        }
+    };
 
-        return (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2">
-                    <FinancialCard
-                        title="Live Pay Estimate (so far this month)"
-                        isVisible={visibility.payEstimate}
-                        onToggle={() => handleToggleVisibility('payEstimate')}
-                    >
-                        <PayEstimateCard estimate={estimate} isVisible={visibility.payEstimate} />
-                    </FinancialCard>
-                </div>
-
-                <SideCards 
-                    estimate={estimate} 
-                    visibility={visibility} 
-                    onToggleVisibility={handleToggleVisibility}
-                    onSelectPayslip={setSelectedPayslip}
-                />
-            </div>
-        );
+    const closeModal = () => {
+        setLatestPayslipForModal(null);
     };
 
     return (
         <div>
-            {selectedPayslip && (
-                <Modal 
-                    isOpen={true} 
-                    onClose={() => setSelectedPayslip(null)} 
-                    title={`Payslip for ${formatMonthYear(selectedPayslip)}`}
-                >
-                    <PayslipDetailView 
-                        details={selectedPayslip} 
-                        companyConfig={companyConfig} 
-                        payPeriod={{ month: selectedPayslip.payPeriodMonth, year: selectedPayslip.payPeriodYear }} 
+            {latestPayslipForModal && (
+                 <Modal isOpen={true} onClose={closeModal} title={`Latest Payslip (${latestPayslipForModal.payPeriod.month}/${latestPayslipForModal.payPeriod.year})`}>
+                    <PayslipDetailView
+                        details={latestPayslipForModal.details}
+                        companyConfig={companyConfig}
+                        payPeriod={latestPayslipForModal.payPeriod}
                     />
                 </Modal>
             )}
 
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Financials Dashboard</h2>
-            {renderContent()}
+            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Financials</h2>
+
+            {errorEstimate && (
+                <div className="bg-red-500/20 text-red-300 p-4 rounded-lg mb-8">{errorEstimate}</div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Main Content Area */}
+                <div className="lg:col-span-2 space-y-8">
+                    <PayEstimateCard
+                        payEstimate={payEstimate}
+                        isLoading={isLoadingEstimate}
+                    />
+
+                    {/* Placeholder for future components if needed */}
+                    {/* <FinancialCard title="Upcoming Deductions">
+                        <p className="text-gray-400">Placeholder for upcoming loan payments, etc.</p>
+                    </FinancialCard> */}
+                </div>
+
+                {/* Sidebar Area */}
+                <SideCards
+                    payEstimate={payEstimate}
+                    isLoading={isLoadingEstimate}
+                    onViewLatestPayslip={handleViewLatestPayslip}
+                />
+            </div>
         </div>
     );
-}
+};
