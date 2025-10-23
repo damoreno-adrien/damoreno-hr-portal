@@ -10,7 +10,7 @@
         "firebase-debug.*.log",
         "*.local"
       ],
-      "region": "asia-southeast1",
+      "region": "us-central1",
       "cors": [
         "https://damoreno-hr-portal.vercel.app",
         "http://localhost:5173"

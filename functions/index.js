@@ -1,4 +1,5 @@
 const admin = require("firebase-admin");
+const functions = require('firebase-functions'); // IMPORT ADDED HERE
 
 admin.initializeApp();
 
@@ -17,16 +18,17 @@ const { exportStaffDataHandler } = require('./src/staff/exportStaffData');
 const { importStaffDataHandler } = require('./src/staff/importStaffData');
 const { exportPlanningDataHandler } = require('./src/planning/exportPlanningData');
 
-exports.createUser = createUserHandler;
-exports.setStaffAuthStatus = setStaffAuthStatusHandler;
-exports.setStaffPassword = setStaffPasswordHandler; 
-exports.autoCheckout = autoCheckoutHandler;
-exports.calculateAdvanceEligibility = calculateAdvanceEligibilityHandler;
-exports.calculateLivePayEstimate = calculateLivePayEstimateHandler;
-exports.calculateBonus = calculateBonusHandler;
-exports.deletePayrollRun = deletePayrollRunHandler;
-exports.finalizeAndStorePayslips = finalizeAndStorePayslipsHandler;
-exports.deleteStaff = deleteStaffHandler;
-exports.exportStaffData = exportStaffDataHandler;
-exports.importStaffData = importStaffDataHandler;
-exports.exportPlanningData = exportPlanningDataHandler;
+// --- Explicitly export functions as 'callable' functions ---
+exports.createUser = functions.https.onCall(createUserHandler);
+exports.setStaffAuthStatus = functions.https.onCall(setStaffAuthStatusHandler);
+exports.setStaffPassword = functions.https.onCall(setStaffPasswordHandler); 
+exports.autoCheckout = functions.https.onCall(autoCheckoutHandler);
+exports.calculateAdvanceEligibility = functions.https.onCall(calculateAdvanceEligibilityHandler);
+exports.calculateLivePayEstimate = functions.https.onCall(calculateLivePayEstimateHandler);
+exports.calculateBonus = functions.https.onCall(calculateBonusHandler);
+exports.deletePayrollRun = functions.https.onCall(deletePayrollRunHandler);
+exports.finalizeAndStorePayslips = functions.https.onCall(finalizeAndStorePayslipsHandler);
+exports.deleteStaff = functions.https.onCall(deleteStaffHandler);
+exports.exportStaffData = functions.https.onCall(exportStaffDataHandler);
+exports.importStaffData = functions.https.onCall(importStaffDataHandler);
+exports.exportPlanningData = functions.https.onCall(exportPlanningDataHandler);
