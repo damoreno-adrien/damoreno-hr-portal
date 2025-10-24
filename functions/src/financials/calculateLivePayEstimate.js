@@ -1,5 +1,5 @@
 const { HttpsError, https } = require("firebase-functions/v2");
-const { getFirestore, Timestamp } = require('firebase-admin/firestore'); // Import Timestamp
+const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { utcToZonedTime, format, zonedTimeToUtc } = require('date-fns-tz');
 const { getYear, getMonth, getDate, getDaysInMonth, startOfMonth, parseISO, isValid } = require('date-fns');
 
@@ -23,13 +23,24 @@ const safeToDate = (value) => {
 };
 
 exports.calculateLivePayEstimateHandler = https.onCall({ region: "asia-southeast1" }, async (request) => {
-    // Force redeploy - Oct 23
+    // --- START LOGGING ---
+    console.log("calculateLivePayEstimateHandler: Function execution started.");
+    console.log("calculateLivePayEstimateHandler: Auth context:", JSON.stringify(request.auth || null));
+    // --- END LOGGING ---
+
+    // Force redeploy comment - Oct 24 (can be removed later)
     if (!request.auth) {
+        console.error("calculateLivePayEstimateHandler: Unauthenticated access attempt."); // Log specific error
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
     const staffId = request.auth.uid;
+    console.log(`calculateLivePayEstimateHandler: Processing request for staffId: ${staffId}`); // Log staff ID
 
     try {
+        // --- START LOGGING ---
+        console.log("calculateLivePayEstimateHandler: Inside try block, fetching data...");
+        // --- END LOGGING ---
+
         // --- Standardized Date Handling ---
         const nowUtc = new Date();
         const nowZoned = utcToZonedTime(nowUtc, timeZone); // Today's date in Bangkok time
@@ -46,6 +57,7 @@ exports.calculateLivePayEstimateHandler = https.onCall({ region: "asia-southeast
         // --- End Standardized Date Handling ---
 
         // --- Parallel Firestore Fetches ---
+        console.log(`calculateLivePayEstimateHandler: Fetching data for ${staffId} between ${startDateOfMonthStr} and ${todayStr}`); // Log date range
         const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
         const configRef = db.collection("settings").doc("company_config").get();
         // Queries use standardized date strings
@@ -59,13 +71,21 @@ exports.calculateLivePayEstimateHandler = https.onCall({ region: "asia-southeast
         const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([
             staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipQuery
         ]);
+        console.log("calculateLivePayEstimateHandler: Firestore fetches completed."); // Log fetch success
         // --- End Firestore Fetches ---
 
-        if (!staffProfileSnap.exists) throw new HttpsError("not-found", "Staff profile not found.");
-        if (!configSnap.exists) throw new HttpsError("not-found", "Company config not found.");
+        if (!staffProfileSnap.exists) {
+            console.error(`calculateLivePayEstimateHandler: Staff profile not found for ${staffId}`);
+            throw new HttpsError("not-found", "Staff profile not found.");
+        }
+        if (!configSnap.exists) {
+            console.error(`calculateLivePayEstimateHandler: Company config not found`);
+            throw new HttpsError("not-found", "Company config not found.");
+        }
 
         const staffProfile = staffProfileSnap.data();
         const companyConfig = configSnap.data();
+        console.log("calculateLivePayEstimateHandler: Profile and config loaded."); // Log data load
 
         // --- Standardized Job History Sorting ---
         const jobHistory = staffProfile.jobHistory || [];
@@ -79,117 +99,85 @@ exports.calculateLivePayEstimateHandler = https.onCall({ region: "asia-southeast
         // --- End Standardized Job History Sorting ---
 
         if (!latestJob || latestJob.payType !== 'Monthly' || !latestJob.rate) {
+            console.error(`calculateLivePayEstimateHandler: Staff ${staffId} is not eligible (not monthly or no rate). Job:`, latestJob);
             throw new HttpsError("failed-precondition", "Pay estimation is only available for monthly salary staff.");
         }
+        console.log("calculateLivePayEstimateHandler: Latest job identified:", latestJob); // Log job info
 
         const baseSalary = latestJob.rate || 0;
         const dailyRate = daysInMonth > 0 ? baseSalary / daysInMonth : 0;
 
         // --- Process Fetched Data ---
+        // ...(rest of the calculation logic remains the same)...
         const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
-        // Find the most recent advance if multiple exist (unlikely but possible)
-        const currentAdvance = advancesSnap.docs.length > 0
-            ? advancesSnap.docs.sort((a, b) => b.data().createdAt.toMillis() - a.data().createdAt.toMillis())[0].data()
-            : null;
-
+        const currentAdvance = advancesSnap.docs.length > 0 ? advancesSnap.docs.sort((a, b) => b.data().createdAt.toMillis() - a.data().createdAt.toMillis())[0].data() : null;
         const activeLoans = loansSnap.docs.map(doc => doc.data());
-        const loanRepayment = activeLoans.reduce((sum, loan) => sum + (loan.monthlyRepayment || loan.recurringPayment || 0), 0); // Use monthlyRepayment if available
-
+        const loanRepayment = activeLoans.reduce((sum, loan) => sum + (loan.monthlyRepayment || loan.recurringPayment || 0), 0);
         const baseSalaryEarned = dailyRate * daysPassed;
-
         const bonusRules = companyConfig.attendanceBonus || {};
         const schedules = schedulesSnap.docs.map(doc => doc.data());
         const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
-        // Filter leave records relevant up to today *after* fetching
         const approvedLeave = leaveSnap.docs.map(doc => doc.data()).filter(l => l.startDate <= todayStr);
-
         let lateCount = 0;
-        let absenceCount = 0; // Counts scheduled days missed (excluding leave/holidays)
-        let unpaidAbsencesCount = 0; // Counts for deduction calculation
-
-        const publicHolidays = companyConfig.publicHolidays ? companyConfig.publicHolidays.map(h => h.date) : []; // Assumes yyyy-MM-dd
+        let absenceCount = 0;
+        let unpaidAbsencesCount = 0;
+        const publicHolidays = companyConfig.publicHolidays ? companyConfig.publicHolidays.map(h => h.date) : [];
 
         schedules.forEach(schedule => {
-            // Only consider schedules up to and including today
             if (schedule.date > todayStr) return;
-
             const attendance = attendanceRecords.get(schedule.date);
             const isOnLeave = approvedLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
             const isPublicHoliday = publicHolidays.includes(schedule.date);
-
             if (!attendance) {
-                 if (!isOnLeave && !isPublicHoliday) {
-                    absenceCount++; // Counts towards bonus eligibility
-                    unpaidAbsencesCount++; // Counts towards deduction
-                 }
+                 if (!isOnLeave && !isPublicHoliday) { absenceCount++; unpaidAbsencesCount++; }
             } else {
-                // Check for lateness using standardized date handling
                 const actualCheckIn = safeToDate(attendance.checkInTime);
                 if (actualCheckIn && schedule.startTime) {
                     try {
-                        // Combine schedule date and time, parse in local timezone
                         const scheduledStartString = `${schedule.date} ${schedule.startTime}`;
                         const scheduledStart = zonedTimeToUtc(scheduledStartString, timeZone);
-
-                        if (actualCheckIn > scheduledStart) {
-                            lateCount++;
-                        }
-                    } catch (parseError) {
-                         console.error(`Error parsing schedule start time for late check: ${schedule.date} ${schedule.startTime}`, parseError);
-                    }
+                        if (actualCheckIn > scheduledStart) { lateCount++; }
+                    } catch (parseError) { console.error(`Error parsing schedule start time for late check: ${schedule.date} ${schedule.startTime}`, parseError); }
                 }
             }
         });
 
-        // --- Calculate Bonus ---
         let potentialBonus = 0;
         const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences ?? 0) && lateCount <= (bonusRules.allowedLates ?? 0);
         if (bonusOnTrack) {
             const currentStreak = staffProfile.bonusStreak || 0;
-            // Bonus is awarded *at the end* of the month, so estimate is based on current streak + 1
             const projectedStreak = currentStreak + 1;
             if (projectedStreak === 1) potentialBonus = bonusRules.month1 || 0;
             else if (projectedStreak === 2) potentialBonus = bonusRules.month2 || 0;
-            else potentialBonus = bonusRules.month3 || 0; // Applies to 3rd month and beyond
+            else potentialBonus = bonusRules.month3 || 0;
         }
 
-        // --- Calculate Deductions ---
         const absenceDeductions = unpaidAbsencesCount * dailyRate;
-
-        // Use correct SSO config names
         const ssoRatePercent = companyConfig.ssoRate || 0;
-        const ssoCapAmount = companyConfig.ssoCap || 0; // Check actual field name in your config
+        const ssoCapAmount = companyConfig.ssoCap || 0;
         const ssoDeduction = Math.min(baseSalary * (ssoRatePercent / 100), ssoCapAmount);
-
-        // --- Estimate Totals ---
-        // Estimate uses salary earned *so far* + *potential* full bonus
         const totalEstimatedEarnings = baseSalaryEarned + potentialBonus;
-        // Estimate uses absence deductions *so far* + *full* potential SSO/Loan/Advance
         const totalEstimatedDeductions = absenceDeductions + ssoDeduction + advancesAlreadyTaken + loanRepayment;
-
         const estimatedNetPay = totalEstimatedEarnings - totalEstimatedDeductions;
-
-        // --- Find Latest Payslip ---
         const latestPayslipDoc = latestPayslipSnap.docs.length > 0 ? latestPayslipSnap.docs[0] : null;
         const latestPayslip = latestPayslipDoc ? { id: latestPayslipDoc.id, ...latestPayslipDoc.data() } : null;
+
+        console.log(`calculateLivePayEstimateHandler: Calculation complete for ${staffId}. Est Net: ${estimatedNetPay}`); // Log final estimate
 
         return {
             baseSalaryEarned: baseSalaryEarned,
             potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
-            deductions: {
-                absences: absenceDeductions, // Deductions *so far*
-                socialSecurity: ssoDeduction, // Full month potential SSO
-                salaryAdvances: advancesAlreadyTaken, // Advances taken *this month*
-                loanRepayment: loanRepayment // Full month potential loan repayment
-            },
-            activeLoans: activeLoans, // List of active loans
-            estimatedNetPay: estimatedNetPay, // Estimated final net pay
-            currentAdvance: currentAdvance, // Details of the most recent advance this month
-            latestPayslip: latestPayslip, // Full data of the last finalized payslip
+            deductions: { absences: absenceDeductions, socialSecurity: ssoDeduction, salaryAdvances: advancesAlreadyTaken, loanRepayment: loanRepayment },
+            activeLoans: activeLoans,
+            estimatedNetPay: estimatedNetPay,
+            currentAdvance: currentAdvance,
+            latestPayslip: latestPayslip,
         };
 
     } catch (error) {
-        console.error("Error in calculateLivePayEstimate:", error);
+        // --- START LOGGING ---
+        console.error(`Error in calculateLivePayEstimate for ${staffId}:`, error); // Log the caught error
+        // --- END LOGGING ---
         if (error instanceof HttpsError) throw error;
         throw new HttpsError("internal", "An unexpected error occurred while calculating your pay estimate.", error.message);
     }
