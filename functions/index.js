@@ -1,12 +1,13 @@
 const admin = require("firebase-admin");
-const functions = require('firebase-functions'); // IMPORT ADDED HERE
+// Remove the v1 functions import:
+// const functions = require('firebase-functions'); // REMOVE THIS
 
 admin.initializeApp();
 
-// Import and re-export functions
+// Import the v2 function handlers directly
 const { createUserHandler } = require('./src/auth/createUser');
 const { setStaffAuthStatusHandler } = require('./src/auth/setStaffAuthStatus');
-const { setStaffPasswordHandler } = require('./src/auth/setStaffPassword'); 
+const { setStaffPasswordHandler } = require('./src/auth/setStaffPassword');
 const { autoCheckoutHandler } = require('./src/attendance/autoCheckout');
 const { calculateAdvanceEligibilityHandler } = require('./src/financials/calculateAdvanceEligibility');
 const { calculateLivePayEstimateHandler } = require('./src/financials/calculateLivePayEstimate');
@@ -18,17 +19,18 @@ const { exportStaffDataHandler } = require('./src/staff/exportStaffData');
 const { importStaffDataHandler } = require('./src/staff/importStaffData');
 const { exportPlanningDataHandler } = require('./src/planning/exportPlanningData');
 
-// --- Explicitly export functions as 'callable' functions ---
-exports.createUser = functions.https.onCall(createUserHandler);
-exports.setStaffAuthStatus = functions.https.onCall(setStaffAuthStatusHandler);
-exports.setStaffPassword = functions.https.onCall(setStaffPasswordHandler); 
-exports.autoCheckout = functions.https.onCall(autoCheckoutHandler);
-exports.calculateAdvanceEligibility = functions.https.onCall(calculateAdvanceEligibilityHandler);
-exports.calculateLivePayEstimate = functions.https.onCall(calculateLivePayEstimateHandler);
-exports.calculateBonus = functions.https.onCall(calculateBonusHandler);
-exports.deletePayrollRun = functions.https.onCall(deletePayrollRunHandler);
-exports.finalizeAndStorePayslips = functions.https.onCall(finalizeAndStorePayslipsHandler);
-exports.deleteStaff = functions.https.onCall(deleteStaffHandler);
-exports.exportStaffData = functions.https.onCall(exportStaffDataHandler);
-exports.importStaffData = functions.https.onCall(importStaffDataHandler);
-exports.exportPlanningData = functions.https.onCall(exportPlanningDataHandler);
+// --- Directly export the handlers defined with v2 syntax ---
+// The names here (e.g., createUser) become the callable function names
+exports.createUser = createUserHandler;
+exports.setStaffAuthStatus = setStaffAuthStatusHandler;
+exports.setStaffPassword = setStaffPasswordHandler;
+exports.autoCheckout = autoCheckoutHandler; // Note: This is onSchedule, not onCall, but export is similar
+exports.calculateAdvanceEligibility = calculateAdvanceEligibilityHandler;
+exports.calculateLivePayEstimate = calculateLivePayEstimateHandler;
+exports.calculateBonus = calculateBonusHandler;
+exports.deletePayrollRun = deletePayrollRunHandler;
+exports.finalizeAndStorePayslips = finalizeAndStorePayslipsHandler;
+exports.deleteStaff = deleteStaffHandler;
+exports.exportStaffData = exportStaffDataHandler;
+exports.importStaffData = importStaffDataHandler;
+exports.exportPlanningData = exportPlanningDataHandler;
