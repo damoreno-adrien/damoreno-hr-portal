@@ -10,8 +10,7 @@ import PayslipDetailView from '../components/PayslipDetailView';
 
 // *** CORRECT INITIALIZATION FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1"); // Use correct region AND variable name
-const calculateLivePayEstimate = httpsCallable(functionsAsia, 'calculateLivePayEstimateHandler'); // Use functionsAsia
-
+const calculateLivePayEstimate = httpsCallable(functionsAsia, 'calculateLivePayEstimate');
 export default function FinancialsDashboardPage({ user, companyConfig }) { // Removed unused 'user' prop if not needed
     const [payEstimate, setPayEstimate] = useState(null);
     const [isLoadingEstimate, setIsLoadingEstimate] = useState(true);
