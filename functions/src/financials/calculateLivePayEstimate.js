@@ -4,16 +4,17 @@ const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore } = require('firebase-admin/firestore');
 
-// *** REMOVE date-fns-tz require block completely ***
-/*
-console.log("Attempting to require date-fns-tz...");
-let utcToZonedTime, formatTZ, zonedTimeToUtc;
-try { ... } catch (e) { ... }
-*/
+let DateTime, Interval;
+try {
+    const luxon = require('luxon');
+    DateTime = luxon.DateTime;
+    Interval = luxon.Interval;
+} catch(e) {
+    console.error("FAILED to require luxon:", e);
+    // Throwing error during initialization might prevent deployment or detailed logging
+}
 
-// *** Log BEFORE requiring date-fns ***
-console.log("Attempting to require date-fns...");
-let getYear, getMonth, getDate, getDaysInMonth, startOfMonth, parseISO, isValid, formatDFNS; // Keep formatDFNS
+let getYear, getMonth, getDate, getDaysInMonth, startOfMonth, parseISO, isValid;
 try {
     const dfns = require('date-fns');
     getYear = dfns.getYear;
@@ -23,64 +24,113 @@ try {
     startOfMonth = dfns.startOfMonth;
     parseISO = dfns.parseISO;
     isValid = dfns.isValid;
-    formatDFNS = dfns.format; // Keep format from date-fns
-    console.log("Successfully required date-fns.");
 } catch (e) {
     console.error("FAILED to require date-fns:", e);
-    // Let the check below handle it
 }
-// *** End Logging Block ***
-
 
 const db = getFirestore();
-// const timeZone = "Asia/Bangkok"; // No longer used in this version
+const timeZone = "Asia/Bangkok";
 
-// ...(safeToDate function remains the same)...
-const safeToDate = (value) => { /* ... same as previous ... */ };
+const safeToDate = (value) => {
+    if (!value) return null;
+    if (typeof value === 'object' && value !== null && typeof value.toDate === 'function' && typeof value.nanoseconds === 'number') {
+        try { return value.toDate(); }
+        catch (e) { console.error("safeToDate - Error calling .toDate() on potential Timestamp:", value, e); return null; }
+    }
+    try {
+        if (value instanceof Date && !isNaN(value)) {
+            return value;
+        }
+    } catch(e) { console.error("safeToDate - Error during 'instanceof Date' check:", e); }
+    if (typeof value === 'string') {
+        if (parseISO && isValid) {
+            const parsed = parseISO(value);
+            if (isValid(parsed)) {
+                return parsed;
+            }
+        } else {
+             console.error("safeToDate - date-fns functions not loaded, cannot parse string.");
+        }
+    }
+    console.warn("safeToDate - Could not convert value to Date:", value);
+    return null;
+};
 
 exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, async (request) => {
     console.log("calculateLivePayEstimateHandler: Function execution started.");
     console.log("calculateLivePayEstimateHandler: Auth context:", JSON.stringify(request.auth || null));
 
-    // *** REMOVE the date-fns-tz check ***
-    /*
-    if (!utcToZonedTime || !formatTZ || !zonedTimeToUtc) { ... }
-    */
-
-    // Ensure date-fns functions are loaded
-     if (!getYear || !getMonth || !getDate || !getDaysInMonth || !startOfMonth || !parseISO || !isValid || !formatDFNS) {
+    if (!DateTime || !Interval) {
+        console.error("CRITICAL: Luxon library not loaded!");
+        throw new OnCallHttpsError("internal", "Date/Time library failed to load (luxon).");
+    }
+     if (!getYear || !getMonth || !getDate || !getDaysInMonth || !startOfMonth || !parseISO || !isValid) {
          console.error("CRITICAL: date-fns functions not loaded!");
          throw new OnCallHttpsError("internal", "Core Date library failed to load.");
      }
 
-    if (!request.auth) { /* ... error handling ... */ }
+    if (!request.auth) {
+         console.error("calculateLivePayEstimateHandler: Unauthenticated access attempt.");
+         throw new OnCallHttpsError("unauthenticated", "You must be logged in to perform this action.");
+     }
     const staffId = request.auth.uid;
     console.log(`calculateLivePayEstimateHandler: Processing request for staffId: ${staffId}`);
 
     try {
         console.log("calculateLivePayEstimateHandler: Inside try block, fetching data...");
 
-        // --- Use Basic Date Handling (NO Timezone) ---
-        const nowUtc = new Date();
-        const nowZoned = nowUtc; // Use UTC directly
+        const nowZoned = DateTime.now().setZone(timeZone);
+        const year = nowZoned.year;
+        const month = nowZoned.month;
+        const daysInMonth = nowZoned.daysInMonth;
+        const daysPassed = nowZoned.day;
+        const startOfMonthDt = nowZoned.startOf('month');
+        const startDateOfMonthStr = startOfMonthDt.toISODate();
+        const todayStr = nowZoned.toISODate();
 
-        const year = getYear(nowZoned); // Use date-fns
-        const monthIndex = getMonth(nowZoned); // Use date-fns
-        const month = monthIndex + 1;
-        const daysInMonth = getDaysInMonth(nowZoned); // Use date-fns
-        const daysPassed = getDate(nowZoned); // Use date-fns
-        const startOfMonthDate = startOfMonth(nowZoned); // Use date-fns
-        // Use basic format from date-fns (no timezone option)
-        const startDateOfMonthStr = formatDFNS(startOfMonthDate, 'yyyy-MM-dd');
-        const todayStr = formatDFNS(nowZoned, 'yyyy-MM-dd');
-        // --- End Basic Date Handling ---
-
-        // --- Parallel Firestore Fetches ---
-        // ...(Fetches remain the same)...
         console.log(`calculateLivePayEstimateHandler: Fetching data for ${staffId} between ${startDateOfMonthStr} and ${todayStr}`);
-        // ...(Promise.all remains the same)...
-        const [staffProfileSnap, configSnap, advancesSnap, loansSnap, schedulesSnap, attendanceSnap, leaveSnap, latestPayslipSnap] = await Promise.all([ /* ...promises... */ ]);
-        console.log("calculateLivePayEstimateHandler: Firestore fetches completed.");
+        const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
+        const configRef = db.collection("settings").doc("company_config").get();
+        const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month).where("status", "in", ["approved", "pending"]).get();
+        const loansQuery = db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get();
+        const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
+        const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
+        const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("endDate", ">=", startDateOfMonthStr).get();
+        const latestPayslipQuery = db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get();
+
+        const results = await Promise.allSettled([
+            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipQuery
+        ]);
+
+        const [staffProfileRes, configRes, advancesRes, loansRes, schedulesRes, attendanceRes, leaveRes, latestPayslipRes] = results;
+
+        console.log("Promise.allSettled Results:", JSON.stringify(results.map(r => r.status)));
+
+        if (staffProfileRes.status === 'rejected') {
+            console.error("Failed to fetch staff profile:", staffProfileRes.reason);
+            throw new OnCallHttpsError("internal", "Failed to fetch staff profile.", staffProfileRes.reason?.message);
+        }
+        if (configRes.status === 'rejected') {
+            console.error("Failed to fetch company config:", configRes.reason);
+            throw new OnCallHttpsError("internal", "Failed to fetch company config.", configRes.reason?.message);
+        }
+        if (advancesRes.status === 'rejected') { console.error("Failed to fetch advances:", advancesRes.reason); }
+        if (loansRes.status === 'rejected') { console.error("Failed to fetch loans:", loansRes.reason); }
+        if (schedulesRes.status === 'rejected') { console.error("Failed to fetch schedules:", schedulesRes.reason); throw new OnCallHttpsError("internal", "Failed to fetch schedules.", schedulesRes.reason?.message); }
+        if (attendanceRes.status === 'rejected') { console.error("Failed to fetch attendance:", attendanceRes.reason); throw new OnCallHttpsError("internal", "Failed to fetch attendance.", attendanceRes.reason?.message); }
+        if (leaveRes.status === 'rejected') { console.error("Failed to fetch leave requests:", leaveRes.reason); }
+        if (latestPayslipRes.status === 'rejected') { console.error("Failed to fetch latest payslip:", latestPayslipRes.reason); }
+
+        const staffProfileSnap = staffProfileRes.value;
+        const configSnap = configRes.value;
+        const advancesSnap = advancesRes.status === 'fulfilled' ? advancesRes.value : { docs: [] };
+        const loansSnap = loansRes.status === 'fulfilled' ? loansRes.value : { docs: [] };
+        const schedulesSnap = schedulesRes.value;
+        const attendanceSnap = attendanceRes.value;
+        const leaveSnap = leaveRes.status === 'fulfilled' ? leaveRes.value : { docs: [] };
+        const latestPayslipSnap = latestPayslipRes.status === 'fulfilled' ? latestPayslipRes.value : { docs: [] };
+
+        console.log("calculateLivePayEstimateHandler: Firestore fetches processed.");
 
         if (!staffProfileSnap.exists) { throw new OnCallHttpsError("not-found", "Staff profile not found."); }
         if (!configSnap.exists) { throw new OnCallHttpsError("not-found", "Company config not found."); }
@@ -89,17 +139,18 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const companyConfig = configSnap.data();
         console.log("calculateLivePayEstimateHandler: Profile and config loaded.");
 
-        // --- Standardized Job History Sorting ---
-        // ...(Job history sorting remains the same)...
         const jobHistory = staffProfile.jobHistory || [];
-        const latestJob = [...jobHistory].sort((a, b) => { const dateA = a.startDate ? parseISO(a.startDate) : new Date(0); const dateB = b.startDate ? parseISO(b.startDate) : new Date(0); const timeA = !isNaN(dateA) ? dateA.getTime() : 0; const timeB = !isNaN(dateB) ? dateB.getTime() : 0; return timeB - timeA; })[0];
-
+        const latestJob = [...jobHistory].sort((a, b) => {
+            const dateA = a.startDate ? parseISO(a.startDate) : new Date(0);
+            const dateB = b.startDate ? parseISO(b.startDate) : new Date(0);
+            const timeA = !isNaN(dateA) ? dateA.getTime() : 0;
+            const timeB = !isNaN(dateB) ? dateB.getTime() : 0;
+            return timeB - timeA;
+         })[0];
 
         if (!latestJob || latestJob.payType !== 'Monthly' || !latestJob.rate) { throw new OnCallHttpsError("failed-precondition", "Pay estimation is only available for monthly salary staff."); }
         console.log("calculateLivePayEstimateHandler: Latest job identified:", latestJob);
 
-        // --- Process Fetched Data & Calculations ---
-        // ...(Calculations remain mostly the same, but timezone accuracy is reduced)...
         const baseSalary = latestJob.rate || 0;
         const dailyRate = daysInMonth > 0 ? baseSalary / daysInMonth : 0;
         const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
@@ -124,21 +175,29 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
              if (!attendance) {
                   if (!isOnLeave && !isPublicHoliday) { absenceCount++; unpaidAbsencesCount++; }
              } else {
-                 const actualCheckIn = safeToDate(attendance.checkInTime);
-                 if (actualCheckIn && schedule.startTime) {
+                 const actualCheckInJS = safeToDate(attendance.checkInTime);
+                 if (actualCheckInJS && schedule.startTime) {
                      try {
-                         // *** TEMPORARY Lateness Check (No Timezone) ***
-                         const scheduledStart = new Date(schedule.date + 'T' + schedule.startTime); // Basic parse
-
-                         if (actualCheckIn > scheduledStart) { lateCount++; }
-                     } catch (parseError) { console.error(`Error parsing schedule start time for late check: ${schedule.date} ${schedule.startTime}`, parseError); }
+                         const actualCheckInLuxon = DateTime.fromJSDate(actualCheckInJS).setZone(timeZone);
+                         const scheduledStartLuxon = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: timeZone });
+                         if (actualCheckInLuxon > scheduledStartLuxon) {
+                             lateCount++;
+                         }
+                     } catch (parseError) { console.error(`Error parsing schedule start time for late check with Luxon: ${schedule.date} ${schedule.startTime}`, parseError); }
                  }
              }
          });
-        // ...(rest of calculations)...
+
         let potentialBonus = 0;
         const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences ?? 0) && lateCount <= (bonusRules.allowedLates ?? 0);
-        if (bonusOnTrack) { /* ... bonus calc ... */ }
+        if (bonusOnTrack) {
+            const currentStreak = staffProfile.bonusStreak || 0;
+            const projectedStreak = currentStreak + 1;
+            if (projectedStreak === 1) potentialBonus = bonusRules.month1 || 0;
+            else if (projectedStreak === 2) potentialBonus = bonusRules.month2 || 0;
+            else potentialBonus = bonusRules.month3 || 0;
+        }
+
         const absenceDeductions = unpaidAbsencesCount * dailyRate;
         const ssoRatePercent = companyConfig.ssoRate || 0;
         const ssoCapAmount = companyConfig.ssoCap || 0;
@@ -151,15 +210,15 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
 
         console.log(`calculateLivePayEstimateHandler: Calculation complete for ${staffId}. Est Net: ${estimatedNetPay}`);
 
-        return { /* ... return object (calculations might be slightly off due to no timezone) ... */
-             baseSalaryEarned: baseSalaryEarned,
-             potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
-             deductions: { absences: absenceDeductions, socialSecurity: ssoDeduction, salaryAdvances: advancesAlreadyTaken, loanRepayment: loanRepayment },
-             activeLoans: activeLoans,
-             estimatedNetPay: estimatedNetPay,
-             currentAdvance: currentAdvance,
-             latestPayslip: latestPayslip,
-         };
+        return {
+            baseSalaryEarned: baseSalaryEarned,
+            potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
+            deductions: { absences: absenceDeductions, socialSecurity: ssoDeduction, salaryAdvances: advancesAlreadyTaken, loanRepayment: loanRepayment },
+            activeLoans: activeLoans,
+            estimatedNetPay: estimatedNetPay,
+            currentAdvance: currentAdvance,
+            latestPayslip: latestPayslip,
+        };
 
     } catch (error) {
         console.error(`Error in calculateLivePayEstimate for ${staffId}:`, error);

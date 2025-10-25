@@ -1,79 +1,131 @@
 const { HttpsError, https } = require("firebase-functions/v2");
-const { getFirestore, Timestamp } = require('firebase-admin/firestore'); // Import Timestamp
-const { utcToZonedTime, format, zonedTimeToUtc } = require('date-fns-tz');
-const { startOfMonth, endOfMonth, parseISO, isValid } = require('date-fns');
+const { onCall } = require("firebase-functions/v2/https"); // Import onCall
+const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https"); // Import HttpsError for onCall
+const { getFirestore } = require('firebase-admin/firestore');
+
+// *** Use Luxon for Timezone Handling ***
+console.log("calculateBonus: Attempting to require luxon...");
+let DateTime;
+try {
+    const luxon = require('luxon');
+    DateTime = luxon.DateTime;
+    console.log("calculateBonus: Successfully required luxon.");
+} catch(e) {
+    console.error("calculateBonus: FAILED to require luxon:", e);
+    throw new Error("Critical dependency luxon failed to load.");
+}
+// *** End Luxon Block ***
+
+// *** Require date-fns for non-timezone parts (parseISO for job history dates) ***
+console.log("calculateBonus: Attempting to require date-fns...");
+let parseISO, isValid;
+try {
+    const dfns = require('date-fns');
+    parseISO = dfns.parseISO;
+    isValid = dfns.isValid;
+    console.log("calculateBonus: Successfully required date-fns.");
+} catch (e) {
+    console.error("calculateBonus: FAILED to require date-fns:", e);
+    throw new Error("Critical dependency date-fns failed to load.");
+}
+// *** End date-fns Block ***
 
 // Initialize Firestore Admin SDK
 const db = getFirestore();
 
 // Define the target timezone
-const timeZone = "Asia/Bangkok"; // Phuket Time
+const timeZone = "Asia/Bangkok"; // IANA timezone string for Luxon
 
 // Helper to safely convert Firestore Timestamp or string to JS Date
 const safeToDate = (value) => {
+    // ...(safeToDate function remains the same as previous versions)...
     if (!value) return null;
-    if (value instanceof Timestamp) return value.toDate();
-    if (typeof value === 'string') {
-        const parsed = parseISO(value); // Try ISO string first
-        if (isValid(parsed)) return parsed;
+    if (typeof value === 'object' && value !== null && typeof value.toDate === 'function' && typeof value.nanoseconds === 'number') {
+        try { return value.toDate(); }
+        catch (e) { console.error("safeToDate (bonus) - Error calling .toDate():", value, e); return null; }
     }
-    console.warn("Could not convert value to Date:", value);
+    try {
+        if (value instanceof Date && !isNaN(value)) { return value; }
+    } catch(e) { console.error("safeToDate (bonus) - Error during 'instanceof Date':", e); }
+    if (typeof value === 'string') {
+        if (parseISO && isValid) {
+            const parsed = parseISO(value);
+            if (isValid(parsed)) { return parsed; }
+        } else { console.error("safeToDate (bonus) - date-fns not loaded."); }
+    }
+    console.warn("safeToDate (bonus) - Could not convert:", value);
     return null;
 };
 
-exports.calculateBonusHandler = https.onCall({ region: "asia-southeast1" }, async (request) => { // Consider region
+
+exports.calculateBonusHandler = onCall({ region: "asia-southeast1" }, async (request) => { // Use onCall, region
+    console.log("calculateBonusHandler: Function execution started.");
+
+    // Ensure Luxon loaded
+    if (!DateTime) {
+        console.error("CRITICAL: Luxon library not loaded!");
+        throw new OnCallHttpsError("internal", "Date/Time library failed to load (luxon).");
+    }
+     // Ensure date-fns functions loaded (optional)
+     if (!parseISO || !isValid) {
+         console.error("CRITICAL: date-fns functions not loaded!");
+         throw new OnCallHttpsError("internal", "Core Date library failed to load.");
+     }
+
     // 1. Authentication & Input Validation
     if (!request.auth || !request.data.staffId || !request.data.payPeriod) {
-        throw new HttpsError("invalid-argument", "Authentication, staff ID, and pay period are required.");
+        throw new OnCallHttpsError("invalid-argument", "Authentication, staff ID, and pay period are required.");
     }
     const { staffId, payPeriod } = request.data;
-    const { year, month } = payPeriod; // month is expected to be 1-indexed
+    const { year, month } = payPeriod; // month is 1-indexed
 
-    // Basic validation for year and month
     if (typeof year !== 'number' || typeof month !== 'number' || month < 1 || month > 12) {
-        throw new HttpsError("invalid-argument", "Invalid pay period provided.");
+        throw new OnCallHttpsError("invalid-argument", "Invalid pay period provided.");
     }
+    console.log(`calculateBonusHandler: Processing for ${staffId}, Period: ${year}-${month}`);
 
     try {
         // 2. Fetch Configuration and Staff Data
-        const configDoc = await db.collection("settings").doc("company_config").get();
-        if (!configDoc.exists) {
-            throw new HttpsError("not-found", "Company configuration not found.");
-        }
-        const bonusRules = configDoc.data().attendanceBonus;
+        const configRef = db.collection("settings").doc("company_config").get();
+        const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
+        const [configSnap, staffProfileSnap] = await Promise.all([configRef, staffProfileRef]);
+
+        if (!configSnap.exists) { throw new OnCallHttpsError("not-found", "Company configuration not found."); }
+        const bonusRules = configSnap.data().attendanceBonus;
         if (!bonusRules || typeof bonusRules.allowedAbsences !== 'number' || typeof bonusRules.allowedLates !== 'number') {
-            throw new HttpsError("failed-precondition", "Attendance bonus rules are not configured correctly.");
+            throw new OnCallHttpsError("failed-precondition", "Attendance bonus rules are not configured correctly.");
         }
 
-        const staffProfileDoc = await db.collection("staff_profiles").doc(staffId).get();
-        if (!staffProfileDoc.exists) {
-            throw new HttpsError("not-found", "Staff profile not found.");
-        }
-        const currentStreak = staffProfileDoc.data().bonusStreak || 0;
+        if (!staffProfileSnap.exists) { throw new OnCallHttpsError("not-found", "Staff profile not found."); }
+        const currentStreak = staffProfileSnap.data().bonusStreak || 0;
+        console.log(`calculateBonusHandler: Current streak for ${staffId}: ${currentStreak}`);
 
-        // 3. Date Range Calculation (Standardized)
-        // Create a date representing the start of the pay period month
-        // We use UTC functions here to construct the date without local timezone interference,
-        // then format it correctly for querying.
-        const payPeriodStartDate = new Date(Date.UTC(year, month - 1, 1)); // Month is 0-indexed for JS Date
-
-        const startDate = startOfMonth(payPeriodStartDate); // Use date-fns startOfMonth
-        const endDate = endOfMonth(payPeriodStartDate); // Use date-fns endOfMonth
-
-        const startDateStr = format(startDate, 'yyyy-MM-dd'); // Format for query
-        const endDateStr = format(endDate, 'yyyy-MM-dd'); // Format for query
+        // 3. Date Range Calculation (Luxon)
+        // Create Luxon DateTime for the start of the target month IN UTC to avoid local shifts
+        const startOfMonthUtc = DateTime.utc(year, month, 1);
+        // Get start and end dates as YYYY-MM-DD strings
+        const startDateStr = startOfMonthUtc.toISODate();
+        const endDateStr = startOfMonthUtc.endOf('month').toISODate();
+        console.log(`calculateBonusHandler: Querying between ${startDateStr} and ${endDateStr}`);
 
         // 4. Fetch Schedules and Attendance for the Period
         const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateStr).where("date", "<=", endDateStr);
         const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateStr).where("date", "<=", endDateStr);
+        // Optional: Fetch leave/holidays if they affect bonus eligibility
+        // const leaveQuery = ...;
+        // const publicHolidays = configSnap.data().publicHolidays?.map(h => h.date) || [];
 
         const [schedulesSnapshot, attendanceSnapshot] = await Promise.all([
             schedulesQuery.get(),
             attendanceQuery.get()
+            // leaveQuery?.get() // Add if needed
         ]);
 
         const schedules = schedulesSnapshot.docs.map(doc => doc.data());
         const attendanceRecords = new Map(attendanceSnapshot.docs.map(doc => [doc.data().date, doc.data()]));
+        // const approvedLeave = leaveSnap?.docs?.map(doc => doc.data()) || []; // Process if needed
+
+        console.log(`calculateBonusHandler: Fetched ${schedules.length} schedules, ${attendanceRecords.size} attendance records.`);
 
         // 5. Calculate Lates and Absences
         let lateCount = 0;
@@ -81,27 +133,26 @@ exports.calculateBonusHandler = https.onCall({ region: "asia-southeast1" }, asyn
 
         schedules.forEach(schedule => {
             const attendance = attendanceRecords.get(schedule.date);
+            // Optional: Add checks for leave/holidays here if they negate absences/lates
+            // const isOnLeave = approvedLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
+            // const isPublicHoliday = publicHolidays.includes(schedule.date);
+            // if (isOnLeave || isPublicHoliday) return; // Skip check if excused
 
             if (!attendance) {
-                // Consider checking for approved leave or public holidays if absences shouldn't count then
-                // For simplicity, this version counts any missed schedule as an absence for bonus calc.
                 absenceCount++;
             } else {
-                // Check for lateness using standardized date handling
-                const actualCheckIn = safeToDate(attendance.checkInTime);
-                if (actualCheckIn && schedule.startTime) {
+                // Check for lateness using Luxon
+                const actualCheckInJS = safeToDate(attendance.checkInTime);
+                if (actualCheckInJS && schedule.startTime) {
                     try {
-                        // Combine schedule date and time, parse in local timezone
-                        const scheduledStartString = `${schedule.date} ${schedule.startTime}`;
-                        const scheduledStart = zonedTimeToUtc(scheduledStartString, timeZone);
+                        const actualCheckInLuxon = DateTime.fromJSDate(actualCheckInJS).setZone(timeZone);
+                        const scheduledStartLuxon = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: timeZone });
 
-                        // Compare actual check-in (already UTC Date object) with scheduled start (converted to UTC Date object)
-                        if (actualCheckIn > scheduledStart) {
+                        if (actualCheckInLuxon > scheduledStartLuxon) {
                             lateCount++;
                         }
                     } catch (parseError) {
-                        console.error(`Error parsing schedule start time for late check: ${schedule.date} ${schedule.startTime}`, parseError);
-                        // Decide how to handle parse errors - count as late? ignore? log?
+                        console.error(`Error parsing schedule start time for late check (bonus): ${schedule.date} ${schedule.startTime}`, parseError);
                     }
                 }
             }
@@ -120,16 +171,15 @@ exports.calculateBonusHandler = https.onCall({ region: "asia-southeast1" }, asyn
             // Streak resets if conditions aren't met
             newStreak = 0;
             bonusAmount = 0;
+            console.log(`calculateBonusHandler: Bonus conditions not met for ${staffId}. Absences: ${absenceCount}/${bonusRules.allowedAbsences}, Lates: ${lateCount}/${bonusRules.allowedLates}`);
         }
 
-        console.log(`Bonus calculation for ${staffId} (${year}-${month}): Absences=${absenceCount}, Lates=${lateCount}. Result: Amount=${bonusAmount}, NewStreak=${newStreak}`);
-
+        console.log(`calculateBonusHandler: Bonus calculation SUCCESS for ${staffId} (${year}-${month}): Amount=${bonusAmount}, NewStreak=${newStreak}`);
         return { bonusAmount, newStreak };
 
     } catch (error) {
-        console.error("Error calculating bonus:", error);
-        // Ensure HttpsError is thrown for client-side handling
-        if (error instanceof HttpsError) throw error;
-        throw new HttpsError("internal", "An unexpected error occurred while calculating the bonus.", error.message);
+        console.error(`Error calculating bonus for ${staffId}, Period: ${year}-${month}:`, error);
+        if (error instanceof OnCallHttpsError) throw error; // Re-throw specific errors
+        throw new OnCallHttpsError("internal", "An unexpected error occurred while calculating the bonus.", error.message);
     }
 });
