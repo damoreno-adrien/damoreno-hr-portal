@@ -1,16 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react'; // *** Corrected: useState added ***
 import { FinancialCard } from './FinancialCard';
+import * as dateUtils from '../../utils/dateUtils'; // Import date utils
 
 const formatCurrency = (num) => num != null ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const censor = '*,***.**';
 
+// Use date-fns for formatting month/year
 const formatMonthYear = (payslip) => {
     if (!payslip || !payslip.payPeriodYear || !payslip.payPeriodMonth) return "Invalid Date";
-    const date = new Date(payslip.payPeriodYear, payslip.payPeriodMonth - 1);
-    return date.toLocaleString('default', { month: 'long', year: 'numeric' });
+    // Create a date assuming year and month (month is 1-based)
+    const date = dateUtils.parseISODateString(`${payslip.payPeriodYear}-${String(payslip.payPeriodMonth).padStart(2, '0')}-01`);
+    if (!date) return "Invalid Date";
+    return dateUtils.formatCustom(date, 'MMMM yyyy'); // Format as "October 2025"
 };
 
 const StatusBadge = ({ status }) => {
+    // ... (StatusBadge component remains the same) ...
     const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full capitalize";
     const statusMap = {
         pending: "bg-yellow-500/20 text-yellow-300",
@@ -21,73 +26,109 @@ const StatusBadge = ({ status }) => {
 };
 
 
-export const SideCards = ({ payEstimate, visibility, onToggleVisibility, onSelectPayslip, isLoading }) => {
-    
-    // 💥 CRITICAL FIX: Early return if data is still loading or not available
-    if (isLoading || !payEstimate) {
+// Manage visibility state internally or receive as props if controlled externally
+export const SideCards = ({ payEstimate, isLoading, onViewLatestPayslip }) => { // Renamed onSelectPayslip to onViewLatestPayslip to match prop name used in parent
+
+    // Internal state for visibility toggles
+    const [visibility, setVisibility] = useState({
+        latestPayslip: false,
+        salaryAdvance: false,
+        activeLoans: false,
+    });
+
+    const handleToggleVisibility = (card) => {
+        setVisibility(prev => ({ ...prev, [card]: !prev[card] }));
+    };
+
+    // Handle loading state
+    if (isLoading) {
         return (
-            <div className="lg:col-span-1 space-y-8">
-                <div className="bg-gray-800 p-6 rounded-xl text-center text-gray-400">
-                    Loading Financial Summaries...
-                </div>
+            <div className="space-y-8">
+                <FinancialCard title="Latest Payslip"><p className="text-gray-400 text-center py-4">Loading...</p></FinancialCard>
+                <FinancialCard title="Current Salary Advance"><p className="text-gray-400 text-center py-4">Loading...</p></FinancialCard>
+                <FinancialCard title="Active Loans"><p className="text-gray-400 text-center py-4">Loading...</p></FinancialCard>
             </div>
         );
     }
-    
-    // Rename prop for cleaner use in the component body
-    const estimate = payEstimate;
+
+    // Handle state after loading finishes but data might be missing/null
+    if (!payEstimate) {
+         return (
+             <div className="space-y-8">
+                <FinancialCard title="Latest Payslip"><p className="text-gray-400 text-center py-4">Data unavailable.</p></FinancialCard>
+                <FinancialCard title="Current Salary Advance"><p className="text-gray-400 text-center py-4">Data unavailable.</p></FinancialCard>
+                <FinancialCard title="Active Loans"><p className="text-gray-400 text-center py-4">Data unavailable.</p></FinancialCard>
+            </div>
+         );
+    }
 
     return (
         <div className="space-y-8">
             {/* Latest Payslip Card */}
-            {estimate.latestPayslip && (
+            {/* Check if latestPayslip exists before rendering */}
+            {payEstimate?.latestPayslip ? (
                 <FinancialCard
                     title="Latest Payslip"
                     isVisible={visibility.latestPayslip}
-                    onToggle={() => onToggleVisibility('latestPayslip')}
-                    onClick={() => onSelectPayslip(estimate.latestPayslip)}
+                    onToggle={() => handleToggleVisibility('latestPayslip')}
+                    // Ensure onViewLatestPayslip is only called if it's a function
+                    onClick={typeof onViewLatestPayslip === 'function' ? onViewLatestPayslip : undefined}
                 >
                     <div className="flex justify-between items-center">
                         <div>
-                            <p className="text-gray-400 text-sm">{formatMonthYear(estimate.latestPayslip)}</p>
-                            <p className="text-xl font-bold text-amber-400">{visibility.latestPayslip ? `฿${formatCurrency(estimate.latestPayslip.netPay)}` : `฿${censor}`}</p>
+                            <p className="text-gray-400 text-sm">{formatMonthYear(payEstimate.latestPayslip)}</p>
+                            {/* Use optional chaining */}
+                            <p className="text-xl font-bold text-amber-400">{visibility.latestPayslip ? `฿${formatCurrency(payEstimate.latestPayslip?.netPay)}` : `฿${censor}`}</p>
                         </div>
-                        <div className="text-blue-400 text-xs font-semibold">VIEW DETAILS</div>
+                        {/* Only show View Details if handler exists */}
+                        {typeof onViewLatestPayslip === 'function' && (
+                             <div className="text-blue-400 text-xs font-semibold cursor-pointer">VIEW DETAILS</div>
+                        )}
                     </div>
                 </FinancialCard>
+            ) : (
+                 <FinancialCard title="Latest Payslip">
+                      <p className="text-gray-400 text-center py-4">No payslip history found.</p>
+                 </FinancialCard>
             )}
+
 
             {/* Current Salary Advance Card */}
             <FinancialCard
                 title="Current Salary Advance"
                 isVisible={visibility.salaryAdvance}
-                onToggle={() => onToggleVisibility('salaryAdvance')}
+                onToggle={() => handleToggleVisibility('salaryAdvance')}
             >
-                {estimate.currentAdvance ? (
+                {/* Check if currentAdvance exists */}
+                {payEstimate?.currentAdvance ? (
                     <div className="flex justify-between items-center">
                         <div>
                             <p className="text-gray-400 text-sm">Amount</p>
-                            <p className="text-xl font-bold text-amber-400">{visibility.salaryAdvance ? `฿${formatCurrency(estimate.currentAdvance.amount)}` : `฿${censor}`}</p>
+                            {/* Use optional chaining */}
+                            <p className="text-xl font-bold text-amber-400">{visibility.salaryAdvance ? `฿${formatCurrency(payEstimate.currentAdvance?.amount)}` : `฿${censor}`}</p>
                         </div>
-                        <StatusBadge status={estimate.currentAdvance.status} />
+                        {/* Use optional chaining */}
+                        <StatusBadge status={payEstimate.currentAdvance?.status} />
                     </div>
                 ) : (
                     <p className="text-gray-400 text-center py-4">No active advance this month.</p>
                 )}
             </FinancialCard>
-            
+
             {/* Active Loans Card */}
             <FinancialCard
                 title="Active Loans"
                 isVisible={visibility.activeLoans}
-                onToggle={() => onToggleVisibility('activeLoans')}
+                onToggle={() => handleToggleVisibility('activeLoans')}
             >
-                {estimate.activeLoans && estimate.activeLoans.length > 0 ? (
+                {/* Check if activeLoans exists and has items */}
+                {payEstimate?.activeLoans && payEstimate.activeLoans.length > 0 ? (
                     <div className="space-y-4">
-                        {estimate.activeLoans.map((loan, index) => (
-                            <div key={index} className="bg-gray-700/50 p-3 rounded-md">
-                                <p className="font-bold text-white">{visibility.activeLoans ? `Loan of ฿${formatCurrency(loan.totalAmount)}` : `Loan of ฿${censor}`}</p>
-                                <p className="text-sm text-gray-400">Next payment: <span className="text-amber-400">{visibility.activeLoans ? `฿${formatCurrency(loan.recurringPayment)}` : `฿${censor}`}</span></p>
+                        {payEstimate.activeLoans.map((loan, index) => (
+                            <div key={loan.id || index} className="bg-gray-700/50 p-3 rounded-md">
+                                {/* Use optional chaining */}
+                                <p className="font-bold text-white">{visibility.activeLoans ? `Loan of ฿${formatCurrency(loan?.totalAmount)}` : `Loan of ฿${censor}`}</p>
+                                <p className="text-sm text-gray-400">Next payment: <span className="text-amber-400">{visibility.activeLoans ? `฿${formatCurrency(loan?.monthlyRepayment || loan?.recurringPayment)}` : `฿${censor}`}</span></p>
                             </div>
                         ))}
                     </div>
