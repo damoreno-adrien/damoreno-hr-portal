@@ -8,7 +8,7 @@ import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
 import { JobHistoryManager } from './StaffProfile/JobHistoryManager';
 import { DocumentManager } from './StaffProfile/DocumentManager';
 import { ProfileActionButtons } from './StaffProfile/ProfileActionButtons';
-import { KeyIcon } from '../Icons'; // Go up one level from StaffProfile
+import { KeyIcon } from '../components/Icons.jsx'; // Go up one level from StaffProfile
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // Initialize Functions
