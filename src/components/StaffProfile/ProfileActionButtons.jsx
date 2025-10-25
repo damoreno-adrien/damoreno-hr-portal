@@ -1,5 +1,5 @@
 import React from 'react';
-import { SaveIcon, EditIcon, XIcon, ArchiveIcon, UserCheckIcon, TrashIcon, KeyIcon } from '../Icons'; // Assuming icons are here
+import { SaveIcon, EditIcon, XIcon, ArchiveIcon, UserCheckIcon, TrashIcon, KeyIcon } from '../../components/Icons';
 
 export const ProfileActionButtons = ({
     isEditing,
