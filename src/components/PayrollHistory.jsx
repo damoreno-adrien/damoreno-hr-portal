@@ -7,7 +7,7 @@ import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsDefault = getFunctions(app, "us-central1");
-const deletePayrollRun = httpsCallable(functionsDefault, 'deletePayrollRunHandler');
+const deletePayrollRun = httpsCallable(functionsDefault, 'deletePayrollRun');
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 

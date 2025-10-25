@@ -6,8 +6,8 @@ import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1"); // Use correct region
-const calculateBonus = httpsCallable(functionsAsia, 'calculateBonusHandler'); // Use functionsAsia
-const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslipsHandler'); // Use functionsAsia
+const calculateBonus = httpsCallable(functionsAsia, 'calculateBonus'); // Use functionsAsia
+const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips'); // Use functionsAsia
 
 // Use standard date utils for safe sorting
 const getCurrentJob = (staff) => {

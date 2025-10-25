@@ -16,9 +16,9 @@ import * as dateUtils from '../utils/dateUtils'; // Use new standard
 const functionsDefault = getFunctions(app, "us-central1");
 
 // *** PREPARE CALLABLE REFERENCES ***
-const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaffHandler'); // Use correct handler name
-const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatusHandler'); // Stays in default region
-const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPasswordHandler'); // Stays in default region
+const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff'); // Use correct handler name
+const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus'); // Stays in default region
+const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword'); // Stays in default region
 
 // Helper to get initial form data
 const getInitialFormData = (staff) => {
