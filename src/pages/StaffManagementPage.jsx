@@ -112,38 +112,45 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
 
     const handleExport = async () => {
-        setIsExporting(true);
-        try {
-            const functions = getFunctions();
-            const exportStaffData = httpsCallable(functions, 'exportStaffData');
-            const result = await exportStaffData();
-            const csvData = result.data.csvData;
+    setIsExporting(true);
+    try {
+        // Ensure 'app' is imported if needed for getFunctions
+        // Example: import { app } from "../../firebase.js";
+        const functions = getFunctions(app); // Or just getFunctions() if app isn't explicitly needed by getFunctions in your setup
+        const exportStaffData = httpsCallable(functions, 'exportStaffData'); // Use correct exported name
+        const result = await exportStaffData(); // Call the function
 
-            if (!csvData) {
-                alert("No staff data to export.");
-                setIsExporting(false); // Reset state even if no data
-                return;
-            }
+        // --- Get csvData AND filename from result ---
+        const csvData = result.data.csvData;
+        // Use filename from response, provide a fallback just in case
+        const filename = result.data.filename || `staff_export_${dateUtils.formatISODate(new Date())}_fallback.csv`;
 
-            const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' }); // Add BOM for Excel UTF-8 compatibility
-            const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
-            const today = dateUtils.formatISODate(new Date()); // Use dateUtils
-            link.setAttribute("download", `staff_export_${today}.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url); // Clean up blob URL
-
-        } catch (error) {
-            console.error("Error exporting data:", error);
-            alert("Failed to export staff data. Please try again.");
-        } finally {
-            setIsExporting(false);
+        if (!csvData) {
+            alert("No staff data to export.");
+            // No need to setIsExporting(false) here, 'finally' block handles it
+            return; // Exit early
         }
-    };
+
+        const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        // *** Use the filename from the function result ***
+        link.setAttribute("download", filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click(); // Trigger download
+        document.body.removeChild(link); // Clean up link element
+        URL.revokeObjectURL(url); // Clean up blob URL
+
+    } catch (error) {
+        console.error("Error exporting data:", error);
+        alert(`Failed to export staff data: ${error.message}`); // Show more specific error
+    } finally {
+        // This block always runs, whether try succeeds or fails
+        setIsExporting(false);
+    }
+};
 
     // --- Handlers for Import ---
     const handleImportClick = () => {
