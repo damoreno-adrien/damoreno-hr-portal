@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../firebase.js" // Adjusted import path
+// *** Correct import path for firebase.js (assuming it's in root) ***
+import { app } from "../../firebase.js";
 import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
 import { PlusIcon } from '../components/Icons';
 import RequestAdvanceModal from '../components/RequestAdvanceModal';
-import { EligibilityCard } from '../components/SalaryAdvance/EligibilityCard'; // Import new component
-import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryTable'; // Import new component
+import { EligibilityCard } from '../components/SalaryAdvance/EligibilityCard';
+import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryTable';
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsDefault = getFunctions(app, "us-central1");
-const calculateEligibility = httpsCallable(functionsDefault, 'calculateAdvanceEligibilityHandler');
+const functionsAsia = getFunctions(app, "asia-southeast1"); // Use correct region
+const calculateEligibility = httpsCallable(functionsAsia, 'calculateAdvanceEligibilityHandler'); // Use functionsAsia and correct handler name
 
 export default function SalaryAdvancePage({ db, user }) {
     const [eligibility, setEligibility] = useState({ maxAdvance: 0, maxTheoreticalAdvance: 0 });
@@ -21,19 +22,28 @@ export default function SalaryAdvancePage({ db, user }) {
 
     const fetchEligibility = useCallback(() => {
         setIsLoadingEligibility(true);
-        setError(''); // Clear previous errors
+        setError('');
         // Use the correctly initialized callable function
         calculateEligibility()
             .then((result) => setEligibility(result.data))
             .catch((err) => {
-                console.error(err);
-                setError("Could not determine eligibility. " + err.message);
+                console.error("Error fetching eligibility:", err); // Log specific error
+                // Provide clearer error message to user
+                setError(`Could not determine eligibility. Please try again later.`);
             })
             .finally(() => setIsLoadingEligibility(false));
-    }, []); // Removed calculateEligibility from dependency array
+    }, []); // Empty dependency array
 
     useEffect(() => {
         fetchEligibility();
+
+        // Ensure user ID exists before querying
+        if (!user?.uid) {
+             setIsLoadingRequests(false);
+             setError("User not identified, cannot load request history.");
+             return;
+        }
+
 
         const q = query(
             collection(db, 'salary_advances'),
@@ -52,16 +62,16 @@ export default function SalaryAdvancePage({ db, user }) {
                 unreadDocs.forEach(doc => {
                     batch.update(doc.ref, { isReadByStaff: true });
                 });
-                batch.commit().catch(err => console.error("Error marking advances as read:", err)); // Add error handling
+                batch.commit().catch(err => console.error("Error marking advances as read:", err));
             }
         }, (err) => {
-            console.error(err);
+            console.error("Error fetching request history:", err); // Log specific error
             setError("Could not load request history.");
             setIsLoadingRequests(false);
         });
 
         return () => unsubscribe();
-    }, [db, user, fetchEligibility]);
+    }, [db, user, fetchEligibility]); // fetchEligibility added back
 
     return (
         <div>
@@ -79,7 +89,8 @@ export default function SalaryAdvancePage({ db, user }) {
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Salary Advance</h2>
                 <button
                     onClick={() => setIsModalOpen(true)}
-                    disabled={isLoadingEligibility || eligibility.maxAdvance <= 0}
+                    // Disable if loading, or eligibility not yet calculated, or maxAdvance is 0 or less
+                    disabled={isLoadingEligibility || !eligibility || eligibility.maxAdvance <= 0}
                     className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500 disabled:cursor-not-allowed"
                 >
                     <PlusIcon className="h-5 w-5 mr-2" />
@@ -87,7 +98,7 @@ export default function SalaryAdvancePage({ db, user }) {
                 </button>
             </div>
 
-            {error && <div className="bg-red-500/20 text-red-300 p-4 rounded-lg mb-8">{error}</div>}
+            {error && <div className="bg-red-900/30 border border-red-700 text-red-300 p-4 rounded-lg mb-8">{error}</div>}
 
             {/* Use the new EligibilityCard component */}
             <EligibilityCard eligibility={eligibility} isLoading={isLoadingEligibility} />
