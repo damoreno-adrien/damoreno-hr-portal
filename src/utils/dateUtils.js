@@ -12,15 +12,14 @@ import {
   getMonth as dfnsGetMonth,
   getYear as dfnsGetYear,
   differenceInCalendarDays as dfnsDifferenceInCalendarDays,
-  formatDistanceStrict as dfnsFormatDistanceStrict,
   differenceInYears as dfnsDifferenceInYears,
   differenceInMonths as dfnsDifferenceInMonths,
   startOfMonth as dfnsStartOfMonth,
   endOfMonth as dfnsEndOfMonth,
   differenceInMilliseconds as dfnsDifferenceInMilliseconds,
-  formatDuration as dfnsFormatDuration,
   intervalToDuration,
-  getDaysInMonth as dfnsGetDaysInMonth, // Added
+  getDaysInMonth as dfnsGetDaysInMonth,
+  differenceInYears as dfnsDifferenceInYears,
 } from 'date-fns';
 
 /**
@@ -282,4 +281,12 @@ export const getDaysInMonth = (date) => {
     const dateObj = fromFirestore(date);
     if (!dateObj) return 0;
     return dfnsGetDaysInMonth(dateObj);
+};
+
+// *** ADD EXPLICIT EXPORT FOR differenceInYears ***
+export const differenceInYears = (dateLeft, dateRight) => {
+    const left = fromFirestore(dateLeft);
+    const right = fromFirestore(dateRight);
+    if (!left || !right) return 0; // Or handle error appropriately
+    return dfnsDifferenceInYears(left, right);
 };

@@ -5,9 +5,9 @@ import { app } from "../../firebase"
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsDefault = getFunctions(app, "us-central1");
-const calculateBonus = httpsCallable(functionsDefault, 'calculateBonusHandler');
-const finalizeAndStorePayslips = httpsCallable(functionsDefault, 'finalizeAndStorePayslipsHandler');
+const functionsAsia = getFunctions(app, "asia-southeast1"); // Use correct region
+const calculateBonus = httpsCallable(functionsAsia, 'calculateBonusHandler'); // Use functionsAsia
+const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslipsHandler'); // Use functionsAsia
 
 // Use standard date utils for safe sorting
 const getCurrentJob = (staff) => {
