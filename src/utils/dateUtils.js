@@ -12,7 +12,6 @@ import {
   getMonth as dfnsGetMonth,
   getYear as dfnsGetYear,
   differenceInCalendarDays as dfnsDifferenceInCalendarDays,
-  differenceInYears as dfnsDifferenceInYears,
   differenceInMonths as dfnsDifferenceInMonths,
   startOfMonth as dfnsStartOfMonth,
   endOfMonth as dfnsEndOfMonth,
