@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../App.jsx"; // Ensure path is correct relative to components/
+import { app } from "../../firebase.js"; // Ensure path is correct relative to components/
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
 import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
