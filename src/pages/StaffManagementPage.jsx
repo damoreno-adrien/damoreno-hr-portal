@@ -3,7 +3,6 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/Modal';
 import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
-// Added UploadIcon, assuming it exists in Icons.jsx
 import { PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
