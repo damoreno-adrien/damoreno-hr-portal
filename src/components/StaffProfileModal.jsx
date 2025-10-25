@@ -1,47 +1,54 @@
-// src/components/StaffProfileModal.jsx
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore'; // Import Timestamp
+import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../firebase.js" // Adjusted import path
+import { app } from "../App.jsx"; // Ensure path is correct relative to components/
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
 import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
 import { JobHistoryManager } from './StaffProfile/JobHistoryManager';
 import { DocumentManager } from './StaffProfile/DocumentManager';
 import { ProfileActionButtons } from './StaffProfile/ProfileActionButtons';
-import { KeyIcon } from './Icons.jsx'; // Assuming KeyIcon is in Icons.jsx
+import { KeyIcon } from '../Icons'; // Go up one level from StaffProfile
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
-// *** INITIALIZE BOTH FUNCTION REGIONS ***
-const functionsDefault = getFunctions(app, "us-central1");
+// Initialize Functions
+const functionsDefault = getFunctions(app); // For us-central1
+const functionsAsia = getFunctions(app, "asia-southeast1"); // For asia-southeast1
 
-// *** PREPARE CALLABLE REFERENCES ***
-const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff'); // Use correct handler name
-const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus'); // Stays in default region
-const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword'); // Stays in default region
+// Prepare Callable References
+const deleteStaffFunc = httpsCallable(functionsAsia, 'deleteStaff'); // Use exported name
+const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus'); // Use exported name
+const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword'); // Use exported name
 
-// Helper to get initial form data
+
+// Helper to get initial form data, FORMATTING DATES for input
 const getInitialFormData = (staff) => {
-    // ... (getInitialFormData function remains the same) ...
+    // Attempt to parse/format dates into YYYY-MM-DD for the input fields
+    // Handles various potential inputs (Timestamp, ISO string, yyyy-MM-dd, potentially others)
+    const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
+    const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
+
     let initialData = {
         email: staff.email || '',
         phoneNumber: staff.phoneNumber || '',
-        birthdate: staff.birthdate || '', // Should be yyyy-MM-dd string or empty
+        // Use formatted dates, fallback to empty string if formatting failed
+        birthdate: formattedBirthdate || '',
+        startDate: formattedStartDate || '',
         bankAccount: staff.bankAccount || '',
-        startDate: staff.startDate || '', // Should be yyyy-MM-dd string or empty
         address: staff.address || '',
         emergencyContactName: staff.emergencyContactName || '',
         emergencyContactPhone: staff.emergencyContactPhone || '',
     };
+
+    // Handle name variations
     if (staff.firstName || staff.lastName) {
         return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
     }
-    // Handle legacy fullName
+    // Handle legacy fullName if firstName/lastName are missing
     const nameParts = (staff.fullName || '').split(' ');
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
-    // If nickname doesn't exist but fullname does, don't default nickname
-    return { ...initialData, firstName, lastName, nickname: staff.nickname || '' };
+    return { ...initialData, firstName, lastName, nickname: staff.nickname || '' }; // Keep existing nickname if present
 };
 
 export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
@@ -54,9 +61,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
     // Reset form when staff prop changes
     useEffect(() => {
-        setFormData(getInitialFormData(staff));
+        setFormData(getInitialFormData(staff)); // Will now use formatted dates
         setBonusStreak(staff.bonusStreak || 0);
-        setIsEditing(false); // Ensure edit mode resets if modal content changes
+        setIsEditing(false); // Reset edit mode
         setError('');      // Clear errors
     }, [staff]);
 
@@ -77,14 +84,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            // Prepare update data, ensuring dates are valid yyyy-MM-dd or null
+            // Ensure dates are valid yyyy-MM-dd or null before saving
             const updateData = {
                 firstName: formData.firstName || null,
                 lastName: formData.lastName || null,
                 nickname: formData.nickname || null,
                 email: formData.email || null,
                 phoneNumber: formData.phoneNumber || null,
-                // Ensure date strings are valid or null before saving
+                // Validate date string format before saving
                 birthdate: dateUtils.parseISODateString(formData.birthdate) ? formData.birthdate : null,
                 startDate: dateUtils.parseISODateString(formData.startDate) ? formData.startDate : null,
                 bankAccount: formData.bankAccount || null,
@@ -92,7 +99,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 emergencyContactName: formData.emergencyContactName || null,
                 emergencyContactPhone: formData.emergencyContactPhone || null,
             };
-            // Only clear fullName if firstName exists (avoids clearing if only fullName was present)
+            // Only clear fullName if firstName exists
             if (updateData.firstName) {
                 updateData.fullName = null;
             }
@@ -119,7 +126,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}" started on ${displayStartDate}?`)) {
             try {
                 const staffDocRef = doc(db, 'staff_profiles', staff.id);
-                // arrayRemove relies on exact object match, should be okay here
                 await updateDoc(staffDocRef, { jobHistory: arrayRemove(jobToDelete) });
             } catch (err) { alert("Failed to delete job history entry."); console.error("Delete Job Error:", err); }
         }
@@ -129,8 +135,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This will erase all their data and cannot be undone.`) && window.confirm("Final confirmation: Delete this staff member?")) {
             setIsSaving(true);
             try {
-                // Use the correct callable reference
-                await deleteStaffFunc({ staffId: staff.id });
+                await deleteStaffFunc({ staffId: staff.id }); // Use callable reference
                 onClose(); // Close modal on success
             } catch (err) { alert(`Error deleting staff: ${err.message}`); console.error("Delete Staff Error:", err); }
             finally { setIsSaving(false); }
@@ -141,13 +146,11 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         setIsSaving(true);
         setError(''); // Clear previous errors
         try {
-            // setStaffAuthStatus callable defined at top level
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             let updateData = {};
             let authDisabled = false;
 
             if (newStatus === 'inactive') {
-                // Use standard function for today's date string
                 const todayStr = dateUtils.formatISODate(new Date());
                 const endDate = window.prompt(`To archive ${displayName}, enter their last day (YYYY-MM-DD):`, todayStr);
 
@@ -156,25 +159,22 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     if (endDate !== null) { // Only alert if they entered something invalid, not if they cancelled
                        alert("Invalid date format. Please use YYYY-MM-DD.");
                     }
-                    setIsSaving(false);
-                    return;
+                    setIsSaving(false); return;
                 }
                 updateData = { status: 'inactive', endDate: endDate };
                 authDisabled = true;
             } else { // Setting back to active
                  if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
-                    setIsSaving(false);
-                    return;
+                    setIsSaving(false); return;
                  }
-                 // Set status and endDate to null to clear them
-                 updateData = { status: null, endDate: null };
+                 updateData = { status: null, endDate: null }; // Use null to clear
                  authDisabled = false;
             }
 
             // Perform Firestore update and Auth update in parallel
             await Promise.all([
                 updateDoc(staffDocRef, updateData),
-                setStaffAuthStatus({ staffId: staff.id, disabled: authDisabled }) // Use callable here
+                setStaffAuthStatus({ staffId: staff.id, disabled: authDisabled }) // Use callable reference
             ]);
             onClose(); // Close modal on success
         } catch (err) {
@@ -187,110 +187,68 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleUploadFile = async (fileToUpload) => {
-        setIsSaving(true); // Indicate activity
-        setError('');
+        setIsSaving(true); setError('');
         try {
             const storage = getStorage();
-            // Sanitize filename slightly (replace spaces, etc.) - more robust sanitization recommended
             const safeFileName = fileToUpload.name.replace(/\s+/g, '_');
-            const storageRef = ref(storage, `staff_documents/${staff.id}/${Date.now()}_${safeFileName}`); // Add timestamp prefix for uniqueness
-
+            const storageRef = ref(storage, `staff_documents/${staff.id}/${Date.now()}_${safeFileName}`);
             await uploadBytes(storageRef, fileToUpload);
             const downloadURL = await getDownloadURL(storageRef);
-
-            // Use Firestore Timestamp for uploadedAt
-            const fileMetadata = {
-                name: fileToUpload.name, // Store original name for display
-                url: downloadURL,
-                path: storageRef.fullPath,
-                uploadedAt: Timestamp.now() // Use Firestore Timestamp
-            };
-
+            const fileMetadata = { name: fileToUpload.name, url: downloadURL, path: storageRef.fullPath, uploadedAt: Timestamp.now() }; // Use Timestamp
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
-            // Let the listener update the UI implicitly
         } catch(err) {
              alert(`Failed to upload file: ${err.message}`);
              setError(`Failed to upload file: ${err.message}`);
              console.error("File Upload Error:", err);
-        } finally {
-             setIsSaving(false);
-        }
+        } finally { setIsSaving(false); }
     };
 
     const handleDeleteFile = async (fileToDelete) => {
-        // Double-check using the file path for deletion confirmation
         if (!window.confirm(`Are you sure you want to delete "${fileToDelete.name}"?`)) return;
-        setIsSaving(true); // Indicate activity
-        setError('');
+        setIsSaving(true); setError('');
         try {
             const storage = getStorage();
-            // Ensure path exists before attempting deletion
-            if (!fileToDelete.path) {
-                throw new Error("File path is missing, cannot delete from storage.");
-            }
+            if (!fileToDelete.path) { throw new Error("File path is missing."); }
             const fileRef = ref(storage, fileToDelete.path);
-
-            // Delete from Storage first
             await deleteObject(fileRef);
-            console.log(`Deleted ${fileToDelete.path} from storage.`);
-
-            // Then remove from Firestore array
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            // arrayRemove requires the exact object match from the array
             await updateDoc(staffDocRef, { documents: arrayRemove(fileToDelete) });
-            console.log(`Removed file metadata from profile for ${fileToDelete.name}.`);
-            // Let the listener update the UI
         } catch (error) {
-            // Handle specific errors like 'object-not-found' gracefully if needed
             console.error("File deletion error:", error);
             alert(`Failed to delete file: ${error.message}`);
             setError(`Failed to delete file: ${error.message}`);
-        } finally {
-            setIsSaving(false);
-        }
+        } finally { setIsSaving(false); }
     };
 
 
     const handleResetPassword = async (staffId) => {
         const newPassword = window.prompt(`Enter a new temporary password for ${displayName} (minimum 6 characters):`);
-
         if (!newPassword) return; // User cancelled
-        if (newPassword.length < 6) {
-            alert("Password must be at least 6 characters long.");
-            return;
-        }
+        if (newPassword.length < 6) { alert("Password must be at least 6 characters long."); return; }
 
-        setIsSaving(true);
-        setError('');
+        setIsSaving(true); setError('');
         try {
-            // setStaffPassword callable defined at top level
-            const result = await setStaffPassword({ staffId: staffId, newPassword: newPassword }); // Use callable here
+            const result = await setStaffPassword({ staffId: staffId, newPassword: newPassword }); // Use callable reference
             alert(result.data.result); // Show success message from function
         } catch (err) {
-            // Error handling is done via HttpsError, message is accessible
             alert(`Failed to reset password: ${err.message}`);
             setError(`Failed to reset password: ${err.message}`);
             console.error("Password Reset Error:", err);
-        } finally {
-            setIsSaving(false);
-        }
+        } finally { setIsSaving(false); }
     };
 
     const handleSetBonusStreak = async () => {
          const staffDocRef = doc(db, 'staff_profiles', staff.id);
-         const streakValue = Number(bonusStreak); // Ensure it's a number
+         const streakValue = Number(bonusStreak);
          if (isNaN(streakValue) || streakValue < 0) {
              alert("Please enter a valid non-negative number for the bonus streak.");
              return;
          }
-         setIsSaving(true);
-         setError('');
+         setIsSaving(true); setError('');
          try {
              await updateDoc(staffDocRef, { bonusStreak: streakValue });
              alert(`Bonus streak for ${displayName} has been set to ${streakValue}.`);
-             // State might update via listener, or manually update if needed:
-             // setBonusStreak(streakValue); // if passed staff object doesn't update immediately
          } catch (err) {
              alert("Failed to update bonus streak.");
              setError("Failed to update bonus streak.");
@@ -319,7 +277,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     {isEditing ? (
                         <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} />
                     ) : (
-                        // Pass staff directly, ProfileDetailsView handles currentJob internally now
                         <ProfileDetailsView staff={staff} currentJob={currentJob} />
                     )}
                     <JobHistoryManager
@@ -354,7 +311,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                     documents={staff.documents}
                     onUploadFile={handleUploadFile}
                     onDeleteFile={handleDeleteFile}
-                    isSaving={isSaving} // Pass saving state for UI feedback
+                    isSaving={isSaving}
                 />
             )}
 
@@ -363,14 +320,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 isEditing={isEditing}
                 isSaving={isSaving}
                 staffStatus={staff.status}
-                staffId={staff.id} // Pass staffId for password reset
-                onSetEditing={(editingState) => { setIsEditing(editingState); setError(''); }} // Clear error on edit toggle
+                staffId={staff.id}
+                onSetEditing={(editingState) => { setIsEditing(editingState); setError(''); }}
                 onSave={handleSaveDetails}
                 onArchiveStaff={handleArchiveStaff}
-                onDeleteStaff={handleDeleteStaff} // Pass delete handler
-                onResetPassword={handleResetPassword} // Pass password reset handler
+                onDeleteStaff={handleDeleteStaff}
+                onResetPassword={handleResetPassword}
                 onClose={onClose}
-                activeTab={activeTab} // Pass activeTab to conditionally show buttons if needed
+                activeTab={activeTab}
             />
         </div>
     );
