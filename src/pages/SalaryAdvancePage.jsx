@@ -10,7 +10,7 @@ import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryT
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1"); // Use correct region
-const calculateEligibility = httpsCallable(functionsAsia, 'calculateAdvanceEligibilityHandler'); // Use functionsAsia and correct handler name
+const calculateEligibility = httpsCallable(functionsAsia, 'calculateAdvanceEligibility'); // Use the shorter, exported name
 
 export default function SalaryAdvancePage({ db, user }) {
     const [eligibility, setEligibility] = useState({ maxAdvance: 0, maxTheoreticalAdvance: 0 });
