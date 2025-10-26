@@ -178,10 +178,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         if (!file) return;
         event.target.value = ''; // Reset file input
 
-        if (!file.name.toLowerCase().endsWith('.csv') || file.type !== 'text/csv') {
+        // ... (file type check remains the same) ...
+         if (!file.name.toLowerCase().endsWith('.csv') || file.type !== 'text/csv') {
             alert("Invalid file type. Please upload a CSV file (.csv).");
             return;
         }
+
 
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -194,6 +196,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             setIsImporting(true); // Indicate analysis is running
             setAnalysisResult(null);
             setImportResult(null); // Clear previous final results
+            console.log("Import Step 1: Calling importStaffData with confirm: false (Dry Run)..."); // <-- ADD LOG
 
             try {
                 const functions = getFunctions();
@@ -201,29 +204,39 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 // *** Call with confirm: false for dry run ***
                 const result = await importStaffData({ csvData, confirm: false });
 
-                // Check specifically for the 'analysis' key in the response
+                // *** ADD LOGS TO INSPECT RESPONSE ***
+                console.log("Import Step 1: Received response from dry run:", result);
+                console.log("Import Step 1: Checking result.data:", result.data);
+                console.log("Import Step 1: Checking result.data.analysis:", result.data?.analysis);
+                // *** END ADDED LOGS ***
+
+                // Check specifically for the 'analysis' key in the response data
                 if (result.data && result.data.analysis) {
+                    console.log("Import Step 1: Analysis data found. Opening confirmation modal."); // <-- ADD LOG
                     setAnalysisResult(result.data.analysis); // Store analysis result
                     setCsvDataToConfirm(csvData); // Store CSV data for confirmation step
                     setIsConfirmModalOpen(true); // Open confirmation modal
                 } else {
-                     // Handle cases where analysis might fail, return errors, or have unexpected structure
-                     console.error("Import analysis did not return expected 'analysis' object:", result.data);
+                     // Handle cases where analysis might fail or return unexpected structure
+                     console.error("Import Step 1: Analysis data MISSING in response. Setting final result.", result.data); // <-- ADD LOG
                      setImportResult({
-                         message: result.data?.result || "Analysis failed or returned unexpected data.",
-                         errors: result.data?.errors || ["Unknown analysis error."]
+                         message: result.data?.result || "Analysis failed or returned no data.", // Use optional chaining
+                         errors: result.data?.errors || ["Unknown analysis error."] // Use optional chaining
                      });
                 }
 
             } catch (error) {
-                console.error("Error during import analysis call:", error);
+                console.error("Import Step 1: Error during import analysis call:", error); // <-- ENHANCED LOG
+                 // Try to get more specific error details
                  const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
                 setImportResult({
                     message: `Import analysis failed: ${error.message}`,
-                    errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)] // Ensure errors is an array
+                    // Ensure errors is always an array
+                    errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
                 });
             } finally {
                 setIsImporting(false); // Analysis finished
+                 console.log("Import Step 1: Analysis phase finished."); // <-- ADD LOG
             }
         };
         reader.onerror = () => {
