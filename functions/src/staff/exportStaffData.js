@@ -1,3 +1,5 @@
+/* functions/src/staff/exportStaffData.js */
+
 const { HttpsError, https } = require("firebase-functions/v2");
 const { onCall } = require("firebase-functions/v2/https");
 const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
@@ -34,7 +36,6 @@ const formatDateForExport = (dateString) => {
     dateObj = parseISO(dateString);
     if (isValid(dateObj)) {
         return format(dateObj, 'dd/MM/yyyy'); // Your preferred format
-        // Or use: return format(dateObj, 'dd-MM-yyyy'); // For hyphenated format
     }
 
     // 2. Try DD-MM-YY
@@ -136,6 +137,9 @@ exports.exportStaffDataHandler = onCall({ region: "us-central1" }, async (reques
             const latestJob = getCurrentJob(staff);
 
             return {
+                // *** ADDED staffId ***
+                staffId: doc.id, 
+                // ---
                 FirstName: staff.firstName || '',
                 LastName: staff.lastName || '',
                 Nickname: staff.nickname || '',
@@ -157,6 +161,9 @@ exports.exportStaffDataHandler = onCall({ region: "us-central1" }, async (reques
         });
 
         const fields = [
+            // *** ADDED staffId ***
+            'staffId', 
+            // ---
             'FirstName', 'LastName', 'Nickname', 'Email', 'PhoneNumber', 'Birthdate',
             'StartDate', 'Status', 'EndDate',
             'Address', 'EmergencyContactName', 'EmergencyContactPhone',
