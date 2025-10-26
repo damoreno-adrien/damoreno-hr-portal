@@ -10,285 +10,287 @@ const { parse: dateParse, isValid: isDateValid, isEqual: isDateEqual } = require
 const db = getFirestore();
 
 // --- Configuration ---
-const REQUIRED_HEADERS = [ /* ... keep as is ... */
-    'email', 'firstname', 'lastname', 'nickname', 'startdate',
-    'department', 'position', 'paytype', 'rate'
+// *** JOB FIELDS REMOVED from required headers ***
+const REQUIRED_HEADERS = [
+    'email', 'firstname', 'lastname', 'nickname', 'startdate'
+    // 'department', 'position', 'paytype', 'rate' // Removed
 ];
-const OPTIONAL_PROFILE_FIELDS = [ /* ... keep as is ... */
+const OPTIONAL_PROFILE_FIELDS = [
     'phoneNumber', 'birthdate', 'bankAccount', 'address',
     'emergencyContactName', 'emergencyContactPhone', 'status', 'endDate'
 ];
-const JOB_FIELDS = ['position', 'department', 'payType', 'rate', 'startDate'];
+// const JOB_FIELDS = [...] // Removed
 const DEFAULT_PASSWORD = "Welcome123!";
 
 
 // --- Helpers ---
 const parseImportDate = (dateString) => { /* ... keep as is ... */
-    if (!dateString) return null;
+     if (!dateString) return null;
     try {
         const parsedDate = dateParse(dateString, 'dd/MM/yyyy', new Date());
-        if (isDateValid(parsedDate)) {
-            return Timestamp.fromDate(parsedDate);
-        }
-        console.warn(`Invalid date format encountered: "${dateString}"`);
-        return null;
-    } catch (e) {
-        console.warn(`Error parsing date: "${dateString}"`, e);
-        return null;
-    }
+        if (isDateValid(parsedDate)) return Timestamp.fromDate(parsedDate);
+        console.warn(`Invalid date format encountered: "${dateString}"`); return null;
+    } catch (e) { console.warn(`Error parsing date: "${dateString}"`, e); return null; }
 };
-
 const areValuesEqual = (val1, val2) => { /* ... keep as is ... */
-    if (val1 instanceof Timestamp && val2 instanceof Timestamp) {
+     if (val1 instanceof Timestamp && val2 instanceof Timestamp) {
         try {
-            if (isDateValid(val1.toDate()) && isDateValid(val2.toDate())) {
-                return isDateEqual(val1.toDate(), val2.toDate());
-            }
-        } catch (e) { /* Fallback */ }
-        return val1.isEqual(val2);
+            if (isDateValid(val1.toDate()) && isDateValid(val2.toDate())) return isDateEqual(val1.toDate(), val2.toDate());
+        } catch (e) {} return val1.isEqual(val2);
     }
-    if (typeof val1 === 'number' || typeof val2 === 'number') {
-        return Number(val1) === Number(val2);
-    }
+    if (typeof val1 === 'number' || typeof val2 === 'number') return Number(val1) === Number(val2);
     const v1IsEmpty = val1 === null || val1 === undefined || val1 === '';
     const v2IsEmpty = val2 === null || val2 === undefined || val2 === '';
     if (v1IsEmpty && v2IsEmpty) return true;
     return val1 === val2;
 };
+// const getCurrentJob = (...) // Removed - No longer needed here
 
-const getCurrentJob = (jobHistory) => { /* ... keep as is ... */
-    if (!jobHistory || jobHistory.length === 0) return null;
-    return [...jobHistory].sort((a, b) => {
-        const timeA = a.startDate instanceof Timestamp ? a.startDate.toMillis() : 0;
-        const timeB = b.startDate instanceof Timestamp ? b.startDate.toMillis() : 0;
-        return timeB - timeA;
-    })[0];
-};
 
 // --- Main Function ---
-
 exports.importStaffDataHandler = functions.https.onCall({
     region: "us-central1",
     timeoutSeconds: 540,
     memory: "1GiB"
 }, async (request) => {
-    // --- Auth Checks ---
-    if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
-    const callerDoc = await db.collection("users").doc(request.auth.uid).get();
-    if (!callerDoc.exists || callerDoc.data().role !== "manager") throw new HttpsError("permission-denied", "Only managers can import staff data.");
+    // --- Auth Checks --- (remain the same)
+     if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
+    // ... (rest of auth/role check) ...
+     const callerUid = request.auth.uid;
+    try {
+        const callerDoc = await db.collection("users").doc(callerUid).get();
+        if (!callerDoc.exists || callerDoc.data().role !== "manager") throw new HttpsError("permission-denied", "Only managers can import staff data.");
+        console.log(`importStaffData: Authorized manager ${callerUid}.`);
+    } catch(err) { throw new HttpsError("internal", "Failed to verify user role.", err.message); }
 
-    // --- Input Validation ---
-    const { csvData, confirm } = request.data;
+
+    // --- Input Validation --- (remains the same)
+     const { csvData, confirm } = request.data;
     if (!csvData || typeof csvData !== 'string') throw new HttpsError("invalid-argument", "CSV data string is required.");
     const isDryRun = !confirm;
+    console.log(`importStaffData: Running in ${isDryRun ? 'dry run' : 'execution'} mode.`);
 
-    // --- Variables for Results ---
+
+    // --- Variables for Results --- (remain the same)
     let analysisResults = [];
-    let errors = []; // Overall function errors, distinct from row analysis errors
+    let overallErrors = [];
 
     try {
-        // --- Parse CSV ---
+        // --- Parse CSV & Header Validation --- (updates required headers check)
+        console.log("importStaffData: Parsing CSV data...");
         const records = csvParseSync(csvData, { columns: true, skip_empty_lines: true, trim: true });
         if (records.length === 0) return { result: "CSV file was empty.", analysis: { creates: [], updates: [], noChanges: [], errors: [] } };
+        console.log(`importStaffData: Parsed ${records.length} records.`);
 
-        // --- Header Validation ---
+        console.log("importStaffData: Validating CSV headers...");
         const headers = Object.keys(records[0]).map(h => h.toLowerCase());
-        const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h));
+        const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h.toLowerCase())); // Use updated REQUIRED_HEADERS
         if (missingHeaders.length > 0) throw new HttpsError("invalid-argument", `Missing required CSV columns: ${missingHeaders.join(', ')}`);
         const hasStaffIdColumn = headers.includes('staffid');
+        console.log(`importStaffData: Headers validated. Has staffId column: ${hasStaffIdColumn}`);
+
 
         // --- Analyze Each Record ---
+        console.log("importStaffData: Analyzing records...");
         for (let index = 0; index < records.length; index++) {
             const record = records[index];
             const rowNum = index + 2;
-            // Initialize analysis object with staffId placeholder
             let analysis = { rowNum, action: 'error', details: null, errors: [], staffId: null, email: null, displayName: null };
 
             try {
-                // --- Get & Validate Row Data ---
-                 const getRecordValue = (key) => { /* ... keep as is ... */
+                // Helper to get value
+                const getRecordValue = (key) => { /* ... keep as is ... */
                     const actualHeader = Object.keys(record).find(h => h.toLowerCase() === key.toLowerCase());
                     return actualHeader ? record[actualHeader]?.trim() : undefined;
-                 };
+                };
+
+                // Basic Row Validation (uses updated REQUIRED_HEADERS)
                 const missingRequiredCheck = REQUIRED_HEADERS.filter(h => { /* ... keep as is ... */
                     const value = getRecordValue(h);
                     return value === null || value === undefined || value === '';
                 });
                 if (missingRequiredCheck.length > 0) throw new Error(`Missing/empty required data for: ${missingRequiredCheck.join(', ')}`);
 
+                // Extract Key Fields (No job fields needed here)
                 const staffIdFromCsv = hasStaffIdColumn ? getRecordValue('staffId') : undefined;
                 const email = getRecordValue('email');
-                const payType = getRecordValue('payType');
                 if (typeof email !== 'string' || !email.includes('@')) throw new Error(`Invalid email format`);
-                if (!['Monthly', 'Hourly'].includes(payType)) throw new Error(`Invalid payType`);
-                const rate = Number(getRecordValue('rate'));
-                if (isNaN(rate)) throw new Error(`Invalid rate (must be a number)`);
 
-                // Store email/name early for error reporting if needed
                 analysis.email = email;
                 analysis.displayName = getRecordValue('nickname') || `${getRecordValue('firstName')} ${getRecordValue('lastName')}`;
 
-
-                // --- Prepare Potential Data ---
-                const csvProfileData = { /* ... keep as is ... */
+                // --- Prepare Potential Profile Data (NO jobData) ---
+                const csvProfileData = {
                     firstName: getRecordValue('firstName'),
                     lastName: getRecordValue('lastName'),
                     nickname: getRecordValue('nickname'),
                     email: email,
                     startDate: parseImportDate(getRecordValue('startDate')),
-                    ...(OPTIONAL_PROFILE_FIELDS.reduce((acc, field) => {
+                    ...(OPTIONAL_PROFILE_FIELDS.reduce((acc, field) => { /* ... keep as is ... */
                         const csvValue = getRecordValue(field);
-                        if (field === 'birthdate' || field === 'endDate') {
-                            const parsedDate = parseImportDate(csvValue);
-                            if (parsedDate !== null) acc[field] = parsedDate;
-                        } else if (csvValue !== undefined) {
-                            acc[field] = csvValue === '' ? null : csvValue;
-                        }
-                        return acc;
+                        if (csvValue !== undefined) {
+                             if (field === 'birthdate' || field === 'endDate') { acc[field] = parseImportDate(csvValue); }
+                             else { acc[field] = csvValue === '' ? null : csvValue; }
+                        } return acc;
                     }, {}))
                 };
-                 if (!csvProfileData.status) csvProfileData.status = 'active';
+                if (csvProfileData.status === undefined || csvProfileData.status === null) csvProfileData.status = 'active';
 
-                const csvJobData = { /* ... keep as is ... */
-                    position: getRecordValue('position'),
-                    department: getRecordValue('department'),
-                    startDate: parseImportDate(getRecordValue('startDate')),
-                    payType: payType,
-                    rate: rate,
-                };
+                // const csvJobData = { ... }; // REMOVED
 
-                // --- Find Existing User/Profile ---
+                // --- Find Existing User/Profile --- (remains the same logic)
                 let existingProfile = null;
                 let existingUid = null;
-
-                if (staffIdFromCsv) {
-                    const profileSnap = await db.collection('staff_profiles').doc(staffIdFromCsv).get();
-                    if (profileSnap.exists) {
-                        existingProfile = profileSnap.data();
-                        existingUid = staffIdFromCsv;
-                    } else throw new Error(`staffId "${staffIdFromCsv}" not found`);
-                } else {
-                     try {
+                if (staffIdFromCsv) { /* ... find by ID ... */
+                     const profileSnap = await db.collection('staff_profiles').doc(staffIdFromCsv).get();
+                     if (profileSnap.exists) { existingProfile = profileSnap.data(); existingUid = staffIdFromCsv; }
+                     else throw new Error(`staffId "${staffIdFromCsv}" not found`);
+                } else { /* ... find by email ... */
+                      try {
                         const authUser = await admin.auth().getUserByEmail(email);
                         existingUid = authUser.uid;
                         const profileSnap = await db.collection('staff_profiles').doc(existingUid).get();
                         if (profileSnap.exists) existingProfile = profileSnap.data();
-                    } catch (error) {
-                        if (error.code !== 'auth/user-not-found') throw error;
-                    }
-                }
+                        else existingProfile = null; // Mark as null if profile doc missing
+                      } catch (error) { if (error.code !== 'auth/user-not-found') throw error; }
+                 }
+                analysis.staffId = existingUid; // Store found UID or null
 
-                 // Store found staffId in analysis for execution phase
-                 if (existingUid) analysis.staffId = existingUid;
+                // --- Determine Action & Changes (Profile Only) ---
+                if (existingUid) { // User exists
+                    if (existingProfile) { // Profile also exists -> Update or No Change
+                        analysis.action = 'update';
+                        analysis.displayName = existingProfile.nickname || `${existingProfile.firstName} ${existingProfile.lastName}`;
 
+                        let changes = {};
+                        let requiresProfileUpdate = false;
 
-                // --- Determine Action & Changes ---
-                if (existingProfile && existingUid) { // Potential Update
-                    analysis.action = 'update';
-                    // Update display name from existing profile if available
-                    analysis.displayName = existingProfile.nickname || `${existingProfile.firstName} ${existingProfile.lastName}`;
+                        // Compare ONLY profile fields
+                        Object.keys(csvProfileData).forEach(key => {
+                            if (!areValuesEqual(csvProfileData[key], existingProfile[key])) {
+                                changes[key] = { from: existingProfile[key] ?? null, to: csvProfileData[key] };
+                                requiresProfileUpdate = true;
+                            }
+                        });
 
-                    let changes = {};
-                    let requiresProfileUpdate = false;
-                    let newJobDataForHistory = null;
+                        // *** REMOVED Job Comparison Logic ***
 
-                    Object.keys(csvProfileData).forEach(key => { /* ... compare profile, keep as is ... */
-                        if (!areValuesEqual(csvProfileData[key], existingProfile[key])) {
-                            changes[key] = { from: existingProfile[key] ?? null, to: csvProfileData[key] };
-                            requiresProfileUpdate = true;
+                        if (requiresProfileUpdate) { // Only check profile update flag
+                            analysis.details = changes;
+                            analysis.dataForUpdate = {
+                               profileData: csvProfileData, // Store intended data
+                               // newJobData removed
+                            };
+                            console.log(`importStaffData: Row ${rowNum} - Marked for UPDATE. Changes:`, changes);
+                        } else {
+                            analysis.action = 'nochange';
+                            analysis.details = null;
+                            console.log(`importStaffData: Row ${rowNum} - Marked as NO CHANGE.`);
                         }
-                    });
-
-                    const currentJob = getCurrentJob(existingProfile.jobHistory);
-                    let requiresJobHistoryUpdate = false;
-                    if (!currentJob || JOB_FIELDS.some(key => !areValuesEqual(csvJobData[key], currentJob[key]))) { /* ... compare job, keep as is ... */
-                        changes['job'] = { from: currentJob ?? 'None', to: csvJobData };
-                        requiresJobHistoryUpdate = true;
-                        newJobDataForHistory = csvJobData;
+                    } else { // Auth User exists, Profile doc does NOT -> Create Profile
+                         analysis.action = 'create';
+                         analysis.details = { ...csvProfileData }; // Details only contain profile data
+                         analysis.dataForCreate = {
+                           profileData: csvProfileData,
+                           // jobData removed
+                         };
+                         console.log(`importStaffData: Row ${rowNum} - Marked for CREATE profile for UID: ${existingUid}`);
                     }
-
-                    if (requiresProfileUpdate || requiresJobHistoryUpdate) {
-                        analysis.details = changes;
-                        // *** FIX: DO NOT STORE staffRef HERE ***
-                        analysis.dataForUpdate = {
-                           profileData: csvProfileData, // Store full intended data
-                           newJobData: newJobDataForHistory,
-                           // staffRef is removed
-                        };
-                    } else {
-                        analysis.action = 'nochange';
-                    }
-
-                } else { // Create
+                } else { // User does NOT exist -> Create User & Profile
                     analysis.action = 'create';
-                    analysis.details = { ...csvProfileData, job: csvJobData };
+                    analysis.details = { ...csvProfileData }; // Details only contain profile data
                     analysis.dataForCreate = {
                        profileData: csvProfileData,
-                       jobData: csvJobData
+                       // jobData removed
                     };
+                    console.log(`importStaffData: Row ${rowNum} - Marked for CREATE new user and profile.`);
                 }
 
-            } catch (error) {
+            } catch (error) { // Row-specific error handling remains the same
                 analysis.action = 'error';
-                analysis.errors.push(error.message || 'Unknown processing error');
+                const errorMessage = error.message || 'Unknown processing error';
+                analysis.errors.push(errorMessage);
                 console.error(`Error processing row ${rowNum}:`, error);
-                errors.push(`Row ${rowNum}: ${error.message}`); // Add to overall errors list as well
+                overallErrors.push(`Row ${rowNum}: ${errorMessage}`);
             }
             analysisResults.push(analysis);
-        } // End of loop
+        } // End of record processing loop
+        console.log("importStaffData: Finished analyzing all records.");
 
-        // --- Dry Run vs Execution ---
+
+        // --- Dry Run vs Execution Phase ---
         if (isDryRun) {
-            // --- Return Analysis Summary (safe to return now) ---
-            const summary = analysisResults.reduce((acc, cur) => {
-                 // Group by action type for the frontend modal
-                const key = cur.action + (cur.action.endsWith('s') ? '' : 's'); // creates, updates, noChanges, errors
-                 if (!acc[key]) acc[key] = [];
-                 acc[key].push(cur);
-                 return acc;
+            // Return Analysis Summary (remains the same structure)
+            console.log("importStaffData: Dry run complete. Returning analysis.");
+             const summary = analysisResults.reduce((acc, cur) => { /* ... keep as is ... */
+                const key = cur.action + (cur.action.endsWith('s') ? '' : 's');
+                 if (!acc[key]) acc[key] = []; acc[key].push(cur); return acc;
             }, { creates: [], updates: [], noChanges: [], errors: [] });
-
-            return { analysis: summary }; // Return the structured summary
+            return { analysis: summary };
 
         } else {
-            // --- Execute Confirmed Actions ---
+            // --- Execute Confirmed Actions (Simplified) ---
+            console.log("importStaffData: Executing confirmed import...");
             let recordsCreated = 0;
             let recordsUpdated = 0;
             const writePromises = [];
-            const finalErrorsList = []; // Collect errors during execution
+            const finalExecutionErrors = [];
 
             analysisResults.forEach(res => {
-                if (res.action === 'create' && res.dataForCreate) {
-                     writePromises.push((async () => { /* ... create logic, keep as is ... */
-                        const { profileData, jobData } = res.dataForCreate;
+                // --- EXECUTE CREATE USER + PROFILE ---
+                if (res.action === 'create' && res.dataForCreate && res.staffId === null) {
+                    writePromises.push((async () => {
+                        const { profileData } = res.dataForCreate; // No jobData needed
+                        console.log(`importStaffData: Executing CREATE for row ${res.rowNum}, email: ${profileData.email}`);
                         const batch = db.batch();
                         const newUserRecord = await admin.auth().createUser({ /* ... */
-                            email: profileData.email,
-                            password: DEFAULT_PASSWORD,
-                            displayName: profileData.nickname,
+                             email: profileData.email, password: DEFAULT_PASSWORD, displayName: profileData.nickname || `${profileData.firstName} ${profileData.lastName}`,
                         });
                         const newUserId = newUserRecord.uid;
                         batch.set(db.collection('users').doc(newUserId), { role: 'staff' });
-                        batch.set(db.collection('staff_profiles').doc(newUserId), { /* ... */
-                            ...profileData,
+                        batch.set(db.collection('staff_profiles').doc(newUserId), {
+                            ...profileData, // Contains all parsed profile fields
                             uid: newUserId,
-                            jobHistory: [jobData],
+                            jobHistory: [], // *** Initialize jobHistory as EMPTY array ***
                             bonusStreak: 0,
                             createdAt: FieldValue.serverTimestamp(),
                         });
                         await batch.commit();
                         recordsCreated++;
-                    })().catch(err => {
-                        finalErrorsList.push(`Row ${res.rowNum} (Create Failed): ${err.message}`);
-                        console.error(`Row ${res.rowNum} Create Failed:`, err);
+                        console.log(`importStaffData: Row ${res.rowNum} - Successfully committed create.`);
+                    })().catch(err => { /* ... error handling ... */
+                         const errorMsg = `Row ${res.rowNum} (Create Failed): ${err.message}`; finalExecutionErrors.push(errorMsg); console.error(errorMsg, err);
                     }));
-                } else if (res.action === 'update' && res.dataForUpdate && res.staffId) { // Check staffId exists
+                }
+                // --- EXECUTE CREATE PROFILE ONLY ---
+                else if (res.action === 'create' && res.dataForCreate && res.staffId !== null) {
+                     writePromises.push((async () => {
+                        const { profileData } = res.dataForCreate; // No jobData needed
+                        const userId = res.staffId;
+                        console.log(`importStaffData: Executing CREATE PROFILE for row ${res.rowNum}, UID: ${userId}`);
+                        const staffRef = db.collection('staff_profiles').doc(userId);
+                         await staffRef.set({ // Use set since doc doesn't exist
+                            ...profileData,
+                            uid: userId,
+                            jobHistory: [], // *** Initialize jobHistory as EMPTY array ***
+                            bonusStreak: 0,
+                            createdAt: FieldValue.serverTimestamp(),
+                         });
+                         recordsUpdated++; // Count as update overall
+                         console.log(`importStaffData: Row ${res.rowNum} - Successfully committed create profile.`);
+                     })().catch(err => { /* ... error handling ... */
+                          const errorMsg = `Row ${res.rowNum} (Create Profile Failed): ${err.message}`; finalExecutionErrors.push(errorMsg); console.error(errorMsg, err);
+                     }));
+                }
+                // --- EXECUTE UPDATE PROFILE ---
+                else if (res.action === 'update' && res.dataForUpdate && res.staffId) {
                     writePromises.push((async () => {
-                         // *** FIX: Get staffRef HERE using staffId from analysis ***
-                         const staffRef = db.collection('staff_profiles').doc(res.staffId);
-                         const { profileData, newJobData } = res.dataForUpdate;
+                         const userId = res.staffId;
+                         console.log(`importStaffData: Executing UPDATE for row ${res.rowNum}, UID: ${userId}`);
+                         const staffRef = db.collection('staff_profiles').doc(userId);
+                         const { profileData } = res.dataForUpdate; // No newJobData
 
-                         // Fetch the profile *again* right before update to get the latest jobHistory
+                         // Fetch profile again for safety check (optional but recommended)
                          const currentSnap = await staffRef.get();
                          if (!currentSnap.exists) throw new Error("Profile disappeared before update");
                          const currentProfile = currentSnap.data();
@@ -296,7 +298,7 @@ exports.importStaffDataHandler = functions.https.onCall({
                          let updatePayload = {};
                          let requiresUpdate = false;
 
-                         // Re-check profile changes against current data
+                         // Re-check profile changes ONLY
                          Object.keys(profileData).forEach(key => {
                              if (!areValuesEqual(profileData[key], currentProfile[key])) {
                                  updatePayload[key] = profileData[key];
@@ -304,52 +306,36 @@ exports.importStaffDataHandler = functions.https.onCall({
                              }
                          });
 
+                          // *** REMOVED Job update check ***
 
-                         // Re-check job changes against current data
-                          if (newJobData) {
-                               const currentJob = getCurrentJob(currentProfile.jobHistory);
-                               // Double check if job still needs adding (in case of rapid changes)
-                               if (!currentJob || JOB_FIELDS.some(key => !areValuesEqual(newJobData[key], currentJob[key]))) {
-                                    updatePayload.jobHistory = FieldValue.arrayUnion(newJobData);
-                                    requiresUpdate = true;
-                               }
-                          }
-
-                         if (requiresUpdate) { // Only update if there's still something to change
+                         if (requiresUpdate) {
+                            console.log(`importStaffData: Row ${res.rowNum} - Applying update payload:`, updatePayload);
                             await staffRef.update(updatePayload);
+                            recordsUpdated++;
+                         } else {
+                             console.log(`importStaffData: Row ${res.rowNum} - No update applied on final check.`);
                          }
-                         recordsUpdated++;
-                    })().catch(err => {
-                         finalErrorsList.push(`Row ${res.rowNum} (Update Failed): ${err.message}`);
-                          console.error(`Row ${res.rowNum} Update Failed:`, err);
-                     }));
-                } else if (res.action === 'error') {
-                    // Collect analysis errors into final errors
-                     finalErrorsList.push(`Row ${res.rowNum}: ${res.errors.join('; ')}`);
+                    })().catch(err => { /* ... error handling ... */
+                         const errorMsg = `Row ${res.rowNum} (Update Failed): ${err.message}`; finalExecutionErrors.push(errorMsg); console.error(errorMsg, err);
+                    }));
+                } else if (res.action === 'error') { // Collect analysis errors (remains same)
+                     res.errors.forEach(errMsg => { /* ... */ const fullMsg = `Row ${res.rowNum}: ${errMsg}`; if (!finalExecutionErrors.includes(fullMsg)) finalExecutionErrors.push(fullMsg); });
                 }
             });
 
-            await Promise.allSettled(writePromises); // Wait for all writes
-
-            // --- Return Final Execution Summary ---
-            const finalSummaryMessage = `Import finished. Processed: ${records.length}. Created: ${recordsCreated}. Updated: ${recordsUpdated}. Errors: ${finalErrorsList.length}.`;
+            // Wait for writes and return summary (remains same structure)
+            await Promise.allSettled(writePromises);
+            console.log("importStaffData: All write operations settled.");
+            const allErrors = [...overallErrors.filter(e => !finalExecutionErrors.some(fe => fe.startsWith(e.split(':')[0]))), ...finalExecutionErrors];
+            const finalSummaryMessage = `Import finished. Processed: ${records.length}. Created: ${recordsCreated}. Updated: ${recordsUpdated}. Errors: ${allErrors.length}.`;
             console.log(finalSummaryMessage);
-             if (finalErrorsList.length > 0) console.error("Final import errors:", finalErrorsList);
-
-            return {
-                result: finalSummaryMessage,
-                errors: finalErrorsList, // Return only execution/analysis errors
-                defaultPassword: (recordsCreated > 0) ? DEFAULT_PASSWORD : null
-            };
+             if (allErrors.length > 0) console.error("importStaffData: Final import errors:", allErrors);
+            return { result: finalSummaryMessage, errors: allErrors, defaultPassword: (recordsCreated > 0) ? DEFAULT_PASSWORD : null };
         }
 
-    } catch (error) {
-        console.error("Critical error during staff import process:", error);
+    } catch (error) { // General error handling (remains same)
+        console.error("importStaffData: Critical error during import process:", error);
         if (error instanceof HttpsError) throw error;
-         return {
-            result: `Import failed with a critical error: ${error.message}`,
-            errors: [`General Error: ${error.message}`, ...errors],
-             analysis: null // Should not happen if parsing failed, but good practice
-        };
+         return { result: `Import failed with a critical error: ${error.message}`, errors: [`General Error: ${error.message}`, ...overallErrors], analysis: null };
     }
 });
