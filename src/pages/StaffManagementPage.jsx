@@ -1,6 +1,6 @@
 // src/pages/StaffManagementPage.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getFunctions, httpsCallable } from "firebase-functions";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/Modal';
 import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
