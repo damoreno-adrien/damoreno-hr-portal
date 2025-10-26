@@ -146,7 +146,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             } else if (schedule && schedule.type === 'Off') {
                                 status = 'Off'; // Scheduled off, no attendance
                             } else {
-                                // Neither attendance, schedule, nor leave.
+                                status = 'No Schedule'; // Neither attendance, schedule, nor leave.
                                 // This case should ideally not generate a row based on the outer `if`
                                 // but could be set to 'No Schedule' if needed.
                                 continue; // Skip this day if no relevant data
