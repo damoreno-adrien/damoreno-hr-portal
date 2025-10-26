@@ -1,13 +1,13 @@
 // src/pages/AttendanceReportsPage.jsx
-import React, { useState, useRef, useEffect } from 'react'; // Added useEffect
+import React, { useState, useRef, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from "firebase/functions"; // Import Firebase Functions
+import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/Modal';
 import EditAttendanceModal from '../components/EditAttendanceModal';
-import ImportConfirmationModal from '../components/ImportConfirmationModal'; // Import confirmation modal
-import { DownloadIcon, UploadIcon } from '../components/Icons'; // Import icons
+import ImportConfirmationModal from '../components/ImportConfirmationModal';
+import { DownloadIcon, UploadIcon } from '../components/Icons';
 import * as dateUtils from '../utils/dateUtils';
-import { app } from "../../firebase.js"; // Import Firebase app
+import { app } from "../../firebase.js";
 
 // Helper function for display name
 const getDisplayName = (staff) => {
@@ -112,19 +112,37 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key); // Check if on approved leave
 
+                    // --- ADD LOGGING ---
+                    if (attendance && !schedule && !approvedLeave) {
+                        console.log(`DEBUG: Attendance found, but NO schedule/leave for ${getDisplayName(staff)} on ${dateStr}. Schedule lookup result:`, schedule);
+                    }
+                    if (attendance && schedule && schedule.type?.toLowerCase() !== 'work') {
+                         console.log(`DEBUG: Attendance found, schedule type NOT 'work' for ${getDisplayName(staff)} on ${dateStr}. Schedule:`, schedule);
+                    }
+                     if (attendance && schedule && schedule.type?.toLowerCase() === 'work' && !schedule.startTime) {
+                         console.log(`DEBUG: Attendance found, schedule type IS 'work' but startTime MISSING for ${getDisplayName(staff)} on ${dateStr}. Schedule:`, schedule);
+                     }
+                    // --- END LOGGING ---
+
                     // Determine if a row should be generated for this day
                     // Include if scheduled, attended, or on approved leave
                     if (schedule || attendance || approvedLeave) {
                         // --- Calculate Status ---
                         let status = 'Unknown'; // Default status
                         const checkInTime = dateUtils.fromFirestore(attendance?.checkInTime); // Convert Timestamp to JS Date or null
-                        const scheduledTime = schedule ? dateUtils.fromFirestore(`${dateStr}T${schedule.startTime}`) : null; // Construct JS Date from schedule
+
+                        // Make schedule checks more robust (case-insensitive type, check startTime exists)
+                        const isWorkSchedule = schedule?.type?.toLowerCase() === 'work';
+                        const isOffSchedule = schedule?.type?.toLowerCase() === 'off';
+                        const scheduledStartTimeStr = (isWorkSchedule && schedule?.startTime) ? schedule.startTime : null;
+                        const scheduledTime = scheduledStartTimeStr ? dateUtils.fromFirestore(`${dateStr}T${scheduledStartTimeStr}`) : null; // Construct JS Date from schedule
+
 
                         if (attendance) { // Attendance record exists
-                            if (schedule && schedule.type === 'Work' && schedule.startTime) { // Scheduled for work
+                            if (scheduledTime) { // Scheduled Time Exists (implies type was 'work' and startTime existed)
                                 if (checkInTime) {
-                                    if (scheduledTime && checkInTime > scheduledTime) { // Check for lateness
-                                        // Calculate difference in minutes, rounding up slightly for buffer if needed
+                                    if (checkInTime > scheduledTime) { // Check for lateness
+                                        // Calculate difference in minutes, rounding up
                                         const lateMinutes = Math.ceil((checkInTime.getTime() - scheduledTime.getTime()) / 60000);
                                         status = `Late (${lateMinutes}m)`;
                                     } else {
@@ -133,23 +151,22 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                 } else {
                                      status = 'Present (No Check-in?)'; // Data issue: Attendance exists but check-in missing
                                 }
-                            } else if (schedule && schedule.type === 'Off') {
-                                 status = 'Worked on Day Off'; // Attended despite schedule saying 'Off'
-                            } else {
-                                status = 'Present (Unscheduled)'; // Attended without a 'Work' schedule entry
+                            } else if (isOffSchedule) { // Scheduled Off but attended
+                                 status = 'Worked on Day Off';
+                            } else { // Attended, but not scheduled for work (or schedule missing details)
+                                status = 'Present (Unscheduled)';
                             }
                         } else { // No attendance record found
                             if (approvedLeave) {
                                 status = 'Leave'; // Confirmed approved leave overrides other statuses
-                            } else if (schedule && schedule.type === 'Work') {
+                            } else if (isWorkSchedule) {
                                 status = 'Absent'; // Scheduled for work, no attendance, not on leave
-                            } else if (schedule && schedule.type === 'Off') {
+                            } else if (isOffSchedule) {
                                 status = 'Off'; // Scheduled off, no attendance
                             } else {
-                                status = 'No Schedule'; // Neither attendance, schedule, nor leave.
-                                // This case should ideally not generate a row based on the outer `if`
-                                // but could be set to 'No Schedule' if needed.
-                                continue; // Skip this day if no relevant data
+                                // Neither attendance, schedule, nor leave.
+                                // This case should be skipped by the outer `if` condition.
+                                continue;
                             }
                         }
 
@@ -171,7 +188,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
                         // --- Add Processed Row to Report Data ---
                         generatedData.push({
-                            // Use attendance doc ID if available for editing, otherwise construct a unique key for display/row click
+                            // Use attendance doc ID if available for editing, otherwise construct unique key
                             id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
                             staffId: staff.id,
                             staffName: getDisplayName(staff), // Use helper for consistent naming
@@ -571,7 +588,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     <tbody className="divide-y divide-gray-700">
                         {/* Conditional rendering based on loading state and data presence */}
                         {isLoading ? (
-                             <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">Generating report...</td></tr>
+                             <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr>
                         ) : reportData.length > 0 ? (
                             // Map through report data to create table rows
                             reportData.map((row) => (
@@ -586,9 +603,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                     <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${
                                         row.status === 'Absent' ? 'text-red-400' :
                                         row.status.startsWith('Late') ? 'text-yellow-400' :
-                                        row.status === 'Leave' ? 'text-blue-400' :
-                                        row.status === 'Off' ? 'text-gray-500' :
-                                        row.status.includes('Worked on Day Off') ? 'text-orange-400' : // Example additional status
+                                        row.status === 'Leave' ? 'text-blue-400' : // Color for Leave
+                                        row.status === 'Off' ? 'text-gray-500' : // Color for Off
+                                        row.status.includes('Worked on Day Off') ? 'text-orange-400' : // Color for working on day off
                                         'text-gray-300' // Default/Present/Unscheduled etc.
                                     }`}>{row.status}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
