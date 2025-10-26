@@ -5,6 +5,7 @@ import AddStaffForm from '../components/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfileModal';
 import { PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import { app } from "../../firebase.js"; // Ensure app is imported for functions
 
 const StatusBadge = ({ status }) => {
     // Determine status text and classes
