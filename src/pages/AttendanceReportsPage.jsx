@@ -112,35 +112,29 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key); // Check if on approved leave
 
-                    // --- ADD LOGGING ---
-                    if (attendance && !schedule && !approvedLeave) {
-                        console.log(`DEBUG: Attendance found, but NO schedule/leave for ${getDisplayName(staff)} on ${dateStr}. Schedule lookup result:`, schedule);
-                    }
-                    if (attendance && schedule && schedule.type?.toLowerCase() !== 'work') {
-                         console.log(`DEBUG: Attendance found, schedule type NOT 'work' for ${getDisplayName(staff)} on ${dateStr}. Schedule:`, schedule);
-                    }
-                     if (attendance && schedule && schedule.type?.toLowerCase() === 'work' && !schedule.startTime) {
-                         console.log(`DEBUG: Attendance found, schedule type IS 'work' but startTime MISSING for ${getDisplayName(staff)} on ${dateStr}. Schedule:`, schedule);
-                     }
-                    // --- END LOGGING ---
+                    // Debugging logs (Optional: keep or remove as needed)
+                    // if (attendance && !schedule && !approvedLeave) console.log(`DEBUG: ...`);
+                    // if (attendance && schedule && schedule.type?.toLowerCase() !== 'work') console.log(`DEBUG: ...`);
+                    // if (attendance && schedule && schedule.type?.toLowerCase() === 'work' && !schedule.startTime) console.log(`DEBUG: ...`);
 
-                    // Determine if a row should be generated for this day
-                    // Include if scheduled, attended, or on approved leave
+
+                    // Determine if a row should be generated (if any relevant data exists)
                     if (schedule || attendance || approvedLeave) {
                         // --- Calculate Status ---
                         let status = 'Unknown'; // Default status
                         const checkInTime = dateUtils.fromFirestore(attendance?.checkInTime); // Convert Timestamp to JS Date or null
 
-                        // Make schedule checks more robust (case-insensitive type, check startTime exists)
-                        const isWorkSchedule = schedule?.type?.toLowerCase() === 'work';
-                        const isOffSchedule = schedule?.type?.toLowerCase() === 'off';
-                        const scheduledStartTimeStr = (isWorkSchedule && schedule?.startTime) ? schedule.startTime : null;
+                        // More robust schedule type checks (case-insensitive, handle null/undefined)
+                        const isWorkSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'work';
+                        const isOffSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'off';
+                        // Get start time ONLY if it's a valid work schedule
+                        const scheduledStartTimeStr = (isWorkSchedule && schedule.startTime) ? schedule.startTime : null;
                         const scheduledTime = scheduledStartTimeStr ? dateUtils.fromFirestore(`${dateStr}T${scheduledStartTimeStr}`) : null; // Construct JS Date from schedule
 
 
-                        if (attendance) { // Attendance record exists
-                            if (scheduledTime) { // Scheduled Time Exists (implies type was 'work' and startTime existed)
-                                if (checkInTime) {
+                        if (attendance) { // Attendance record EXISTS for this day
+                            if (scheduledTime) { // Scheduled Time Exists (implies valid work schedule)
+                                 if (checkInTime) { // Check-in time exists
                                     if (checkInTime > scheduledTime) { // Check for lateness
                                         // Calculate difference in minutes, rounding up
                                         const lateMinutes = Math.ceil((checkInTime.getTime() - scheduledTime.getTime()) / 60000);
@@ -149,24 +143,29 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                         status = 'Present'; // On time or early
                                     }
                                 } else {
-                                     status = 'Present (No Check-in?)'; // Data issue: Attendance exists but check-in missing
+                                     status = 'Present (No Check-in?)'; // Data inconsistency
                                 }
-                            } else if (isOffSchedule) { // Scheduled Off but attended
+                            } else if (isOffSchedule) { // Attended but was scheduled Off
                                  status = 'Worked on Day Off';
-                            } else { // Attended, but not scheduled for work (or schedule missing details)
-                                status = 'Present (Unscheduled)';
+                            } else { // Attended without a known 'Work' schedule (or schedule missing details)
+                                 status = 'Present (Unscheduled)';
                             }
-                        } else { // No attendance record found
+                        } else { // No attendance record FOUND for this day
                             if (approvedLeave) {
-                                status = 'Leave'; // Confirmed approved leave overrides other statuses
+                                status = 'Leave'; // Primary status if on approved leave
                             } else if (isWorkSchedule) {
                                 status = 'Absent'; // Scheduled for work, no attendance, not on leave
                             } else if (isOffSchedule) {
                                 status = 'Off'; // Scheduled off, no attendance
                             } else {
-                                // Neither attendance, schedule, nor leave.
-                                // This case should be skipped by the outer `if` condition.
-                                continue;
+                                // If schedule exists but isn't Work/Off, or no schedule exists (and not on leave)
+                                // Skip these rows as they don't represent a clear status relevant to attendance/absence
+                                 if (schedule && !isWorkSchedule && !isOffSchedule) {
+                                     console.log(`Skipping row for ${getDisplayName(staff)} on ${dateStr} - schedule type is '${schedule.type}'`);
+                                     continue; // Skip row
+                                 }
+                                 // If reached here, it means no attendance, no leave, no schedule - skipped by outer 'if' check already.
+                                 continue;
                             }
                         }
 
@@ -187,22 +186,25 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         }
 
                         // --- Add Processed Row to Report Data ---
-                        generatedData.push({
-                            // Use attendance doc ID if available for editing, otherwise construct unique key
-                            id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
-                            staffId: staff.id,
-                            staffName: getDisplayName(staff), // Use helper for consistent naming
-                            date: dateStr, // Keep as yyyy-MM-dd string
-                            // Format times as HH:mm for display, show '-' if null
-                            checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
-                            checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
-                            // Format work hours, show N/A for Leave/Off days
-                            workHours: (status === 'Leave' || status === 'Off') ? 'N/A' : (workHours > 0 ? workHours.toFixed(2) : '0.00'),
-                            status: status, // The calculated status (Present, Late, Absent, Leave, Off, etc.)
-                            // Pass full attendance record (or placeholder) to Edit modal
-                            // Include staffId/date even if no record exists, useful for creating one manually
-                            fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null }, // Ensure id is null if creating
-                        });
+                        // Add row only if status was determined (i.e., not skipped)
+                         if (status !== 'Unknown') {
+                            generatedData.push({
+                                // Use attendance doc ID if available for editing, otherwise construct unique key
+                                id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
+                                staffId: staff.id,
+                                staffName: getDisplayName(staff), // Use helper for consistent naming
+                                date: dateStr, // Keep as yyyy-MM-dd string
+                                // Format times as HH:mm for display, show '-' if null
+                                checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
+                                checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
+                                // Format work hours, show N/A for Leave/Off days
+                                workHours: (status === 'Leave' || status === 'Off') ? 'N/A' : (workHours > 0 ? workHours.toFixed(2) : '0.00'),
+                                status: status, // The calculated status (Present, Late, Absent, Leave, Off, etc.)
+                                // Pass full attendance record (or placeholder) to Edit modal
+                                // Include staffId/date even if no record exists, useful for creating one manually
+                                fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null }, // Ensure id is null if creating
+                            });
+                        }
                     } // End if (schedule || attendance || approvedLeave)
                 } // End date loop
             } // End staff loop
@@ -249,6 +251,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
             if (!csvData) {
                 alert("No attendance data found for the selected period to export.");
+                setIsExporting(false); // Ensure loading state is reset
                 return;
             }
 
@@ -431,6 +434,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
     // --- Render Component JSX ---
     return (
         <div>
+             {/* --- Modals --- */}
             {/* Edit/Create Attendance Modal Instance */}
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}>
@@ -444,9 +448,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                      />
                 </Modal>
             )}
-
-             {/* Import Confirmation Modal Instance */}
-             <ImportConfirmationModal
+            {/* Import Confirmation Modal Instance */}
+            <ImportConfirmationModal
                 isOpen={isConfirmModalOpen}
                 onClose={handleCancelImport} // Use cancel handler
                 analysisResult={analysisResult} // Pass analysis data
@@ -454,15 +457,15 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 isConfirming={isConfirmingImport} // Pass execution loading state
             />
 
-            {/* Page Title */}
+            {/* --- Page Title --- */}
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
 
-             {/* Filter Controls & Action Buttons Panel */}
+            {/* --- Filter Controls & Action Buttons Panel --- */}
             <div className="bg-gray-800 rounded-lg shadow-lg p-4 md:p-6 mb-8">
                  {/* Filter Row */}
                  <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
-                    {/* Start Date Input */}
-                    <div className="flex-grow">
+                     {/* Start Date Input */}
+                     <div className="flex-grow">
                         <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                         <input
                             id="startDate"
@@ -472,8 +475,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:ring-amber-500 focus:border-amber-500 text-gray-200"
                          />
                     </div>
-                    {/* End Date Input */}
-                    <div className="flex-grow">
+                     {/* End Date Input */}
+                     <div className="flex-grow">
                         <label htmlFor="endDate" className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
                         <input
                             id="endDate"
@@ -484,8 +487,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:ring-amber-500 focus:border-amber-500 text-gray-200"
                          />
                     </div>
-                    {/* Staff Selector Dropdown */}
-                    <div className="flex-grow">
+                     {/* Staff Selector Dropdown */}
+                     <div className="flex-grow">
                         <label htmlFor="staffSelect" className="block text-sm font-medium text-gray-300 mb-1">Staff Member</label>
                         <select
                             id="staffSelect"
@@ -505,8 +508,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             }
                         </select>
                     </div>
-                    {/* Generate Report Button */}
-                    <button
+                     {/* Generate Report Button */}
+                     <button
                         onClick={handleGenerateReport}
                         // Disable if any operation is in progress
                         disabled={isLoading || isImporting || isConfirmingImport || isExporting}
@@ -515,7 +518,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         {isLoading ? 'Generating...' : 'Generate Report'}
                     </button>
                  </div>
-
                  {/* Action Buttons Row (Export/Import) */}
                 <div className="flex flex-col sm:flex-row sm:justify-end gap-3 mt-4 border-t border-gray-700 pt-4">
                      {/* Export Button */}
@@ -528,8 +530,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         <DownloadIcon className="h-5 w-5 mr-2" />
                         {isExporting ? 'Exporting...' : 'Export CSV'}
                     </button>
-                    {/* Import Button */}
-                    <button
+                     {/* Import Button */}
+                     <button
                         onClick={handleImportClick}
                         // Disable if any operation is in progress
                         disabled={isImporting || isConfirmingImport || isLoading || isExporting}
@@ -539,7 +541,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         {/* Show appropriate loading text */}
                         {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
                     </button>
-                    {/* Hidden File Input Element */}
+                     {/* Hidden File Input Element */}
                      <input
                         type="file"
                         ref={fileInputRef}
@@ -550,8 +552,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 </div>
             </div>
 
-
-             {/* FINAL Import Results Display Area */}
+             {/* --- Import Results --- */}
              {importResult && (
                 <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
                     <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}>
@@ -571,8 +572,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 </div>
              )}
 
-
-            {/* Attendance Report Table */}
+            {/* --- Report Table --- */}
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
@@ -619,7 +619,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         )}
                     </tbody>
                 </table>
-            </div>
-        </div>
+            </div> {/* End Table Wrapper */}
+        </div> // End Page Wrapper
     );
 }

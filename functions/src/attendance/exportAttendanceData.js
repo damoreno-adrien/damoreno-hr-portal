@@ -4,12 +4,15 @@ const { HttpsError, https } = require("firebase-functions/v2");
 const { onCall } = require("firebase-functions/v2/https");
 const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const { getFirestore, Timestamp, collection, query, where, getDocs } = require('firebase-admin/firestore'); // Added collection, query, where, getDocs
+// Use specific imports needed
+const { getFirestore, Timestamp, collection, query, where, getDocs } = require('firebase-admin/firestore');
 const { Parser } = require('json2csv');
 const { DateTime } = require('luxon'); // Use Luxon
 
 const db = getFirestore();
-const THAILAND_TIMEZONE = 'Asia/Bangkok'; // Ensure this matches import
+const THAILAND_TIMEZONE = 'Asia/Bangkok';
+
+// --- Helpers ---
 
 /**
  * Helper to format Firestore Timestamp into HH:mm:ss string in local timezone using Luxon.
@@ -18,22 +21,14 @@ const THAILAND_TIMEZONE = 'Asia/Bangkok'; // Ensure this matches import
 const formatTimeForExportLuxon = (timestamp) => {
     if (!timestamp || !(timestamp instanceof Timestamp)) return '';
     try {
-        // Convert Firestore Timestamp to JS Date (represents UTC moment)
         const jsDate = timestamp.toDate();
-
-        // Create Luxon DateTime object FROM the JS Date (interprets it as UTC)
         const dtUtc = DateTime.fromJSDate(jsDate);
         if (!dtUtc.isValid) {
             console.warn("formatTimeLuxon: Could not create valid DateTime from JSDate:", jsDate);
             return '';
         }
-
-        // Convert the UTC DateTime object TO the desired local timezone
         const dtLocal = dtUtc.setZone(THAILAND_TIMEZONE);
-
-        // Format the local time as HH:mm:ss (24-hour format)
-        return dtLocal.toFormat('HH:mm:ss');
-
+        return dtLocal.toFormat('HH:mm:ss'); // 24-hour format with seconds
     } catch (e) {
         console.error("Error formatting timestamp with Luxon:", timestamp, e);
         return '';
@@ -42,73 +37,66 @@ const formatTimeForExportLuxon = (timestamp) => {
 
 /**
  * Fetches staff names in bulk to minimize Firestore reads.
- * @param {Set<string>} staffIds Set of unique staff IDs to fetch names for.
- * @returns {Promise<Map<string, string>>} A Map where keys are staff IDs and values are display names.
+ * @param {Set<string>} staffIds Set of unique staff IDs.
+ * @returns {Promise<Map<string, string>>} A Map: staffId -> displayName.
  */
 const getStaffNames = async (staffIds) => {
     const namesMap = new Map();
-    if (staffIds.size === 0) return namesMap; // Return empty map if no IDs provided
+    if (staffIds.size === 0) return namesMap;
 
-    // Firestore 'in' query supports up to 30 elements per query batch
     const staffIdArray = Array.from(staffIds);
-    const MAX_IN_QUERY_SIZE = 30;
-    const promises = []; // Array to hold promises for each query batch
+    const MAX_IN_QUERY_SIZE = 30; // Firestore 'in' query limit
+    const promises = [];
 
-    // Batch the queries
+    // Batch queries for Firestore 'in' limit
     for (let i = 0; i < staffIdArray.length; i += MAX_IN_QUERY_SIZE) {
         const batchIds = staffIdArray.slice(i, i + MAX_IN_QUERY_SIZE);
-        // Query the 'staff_profiles' collection using the document ID (which is the staff ID)
         const q = query(collection(db, 'staff_profiles'), where(admin.firestore.FieldPath.documentId(), 'in', batchIds));
-        promises.push(getDocs(q)); // Add the query promise to the array
+        promises.push(getDocs(q));
     }
 
     try {
-        // Execute all batched queries concurrently
         const querySnapshots = await Promise.all(promises);
-        // Process results from all snapshots
         querySnapshots.forEach(snapshot => {
             snapshot.forEach(doc => {
                 const data = doc.data();
-                // Determine the best display name (nickname > first+last > first > unknown)
                 const name = data.nickname
                           || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : null)
                           || data.firstName
                           || 'Unknown';
-                namesMap.set(doc.id, name.trim()); // Store staffId -> name mapping
+                namesMap.set(doc.id, name.trim());
             });
         });
     } catch (error) {
-        // Log error but continue, so export doesn't completely fail if name lookup has issues
         console.error("Error fetching staff names:", error);
+        // Continue without names if lookup fails, but log the error
     }
     return namesMap;
 };
 
 /**
- * Generates an array of date strings (YYYY-MM-DD) for a given date range using Luxon.
+ * Generates an array of date strings (YYYY-MM-DD) for a given range using Luxon.
  * @param {string} startDateStr Start date in YYYY-MM-DD format.
  * @param {string} endDateStr End date in YYYY-MM-DD format.
  * @returns {string[]} Array of date strings or empty array if dates are invalid.
  */
 const generateDateRange = (startDateStr, endDateStr) => {
     const dates = [];
-    // Parse start and end dates using the local timezone
     let current = DateTime.fromISO(startDateStr, { zone: THAILAND_TIMEZONE });
     const end = DateTime.fromISO(endDateStr, { zone: THAILAND_TIMEZONE });
 
-    // Validate parsed dates
     if (!current.isValid || !end.isValid || current > end) {
         console.error("Invalid date range provided to generateDateRange:", startDateStr, endDateStr);
-        return []; // Return empty array for invalid range
+        return [];
     }
 
-    // Loop from start date to end date (inclusive)
     while (current <= end) {
         dates.push(current.toISODate()); // Add date in YYYY-MM-DD format
-        current = current.plus({ days: 1 }); // Move to the next day
+        current = current.plus({ days: 1 });
     }
     return dates;
 };
+// --- End Helpers ---
 
 
 // --- Main Export Cloud Function ---
@@ -126,8 +114,9 @@ exports.exportAttendanceDataHandler = onCall({
     }
     const callerUid = request.auth.uid;
     try {
-        const callerDoc = await getDocs(query(collection(db, "users"), where(admin.firestore.FieldPath.documentId(), '==', callerUid)));
-        if (callerDoc.empty || callerDoc.docs[0].data().role !== "manager") {
+        // Use simpler .doc().get() for single document fetch
+        const callerDoc = await db.collection("users").doc(callerUid).get();
+        if (!callerDoc.exists || callerDoc.data().role !== "manager") {
             console.error(`exportAttendanceDataHandler: Permission denied for user ${callerUid}. Role check failed.`);
             throw new OnCallHttpsError("permission-denied", "Manager role required.");
         }
@@ -135,7 +124,8 @@ exports.exportAttendanceDataHandler = onCall({
     } catch(err) {
          console.error(`exportAttendanceDataHandler: Error verifying manager role for ${callerUid}:`, err);
          if (err instanceof OnCallHttpsError) throw err; // Re-throw specific errors
-         throw new OnCallHttpsError("internal", "Failed to verify user role.", err.message);
+         // Pass original error message for clarity
+         throw new OnCallHttpsError("internal", `Failed to verify user role. ${err.message}`, err.stack);
     }
 
     // 2. --- Input Validation (Date Range) ---
@@ -156,10 +146,11 @@ exports.exportAttendanceDataHandler = onCall({
     try {
         // --- 3. Fetch All Necessary Data Concurrently ---
         const dateRange = generateDateRange(startDate, endDate); // Generate date strings for the period
-        if (dateRange.length === 0) { // Handle invalid date range from helper
+        const filename = `attendance_export_${startDate}_to_${endDate}_${DateTime.now().setZone(THAILAND_TIMEZONE).toFormat('yyyyMMddHHmmss')}.csv`; // Define filename early
+
+        if (dateRange.length === 0) {
              console.log("exportAttendanceDataHandler: Invalid date range resulted in zero days.");
-             const filename = `attendance_export_${startDate}_to_${endDate}_${DateTime.now().setZone(THAILAND_TIMEZONE).toFormat('yyyyMMddHHmmss')}.csv`;
-             return { csvData: "", filename: filename };
+             return { csvData: "", filename: filename }; // Return empty CSV if range is invalid
         }
 
         const attendancePromise = getDocs(query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate)));
@@ -194,10 +185,9 @@ exports.exportAttendanceDataHandler = onCall({
         schedulesMap.forEach((val, key) => staffIdsInPeriod.add(key.split('_')[0]));
         leaveMap.forEach((val, key) => staffIdsInPeriod.add(key.split('_')[0]));
 
-        // Handle case where no data exists for the period
+        // Handle case where no relevant data exists for the period
         if (staffIdsInPeriod.size === 0) {
             console.log("exportAttendanceDataHandler: No attendance, schedule, or leave data found for any staff in the period.");
-            const filename = `attendance_export_${startDate}_to_${endDate}_${DateTime.now().setZone(THAILAND_TIMEZONE).toFormat('yyyyMMddHHmmss')}.csv`;
             return { csvData: "", filename: filename }; // Return empty CSV
         }
 
@@ -229,16 +219,17 @@ exports.exportAttendanceDataHandler = onCall({
                     let status = 'Unknown'; // Default status
                     const checkInTs = attendance?.checkInTime; // Get Timestamp or undefined
 
-                    // Make schedule type checks robust (case-insensitive, handle null/undefined)
-                    const isWorkSchedule = schedule?.type?.toLowerCase() === 'work';
-                    const isOffSchedule = schedule?.type?.toLowerCase() === 'off';
-                    const scheduledStartTimeStr = (isWorkSchedule && schedule?.startTime) ? schedule.startTime : null;
+                    // More robust schedule type checks (case-insensitive, handle null/undefined)
+                    const isWorkSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'work';
+                    const isOffSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'off';
+                    // Get start time ONLY if it's a valid work schedule
+                    const scheduledStartTimeStr = (isWorkSchedule && schedule.startTime) ? schedule.startTime : null;
 
                     if (attendance) { // Attendance record EXISTS for this day
-                        if (scheduledStartTimeStr) { // Scheduled Time Exists (implies work schedule)
+                        if (scheduledStartTimeStr) { // Scheduled Time Exists (implies valid work schedule)
                              if (checkInTs) { // Check-in time exists
                                 try {
-                                    // Parse scheduled time and actual check-in time using Luxon for comparison
+                                    // Parse scheduled time and actual check-in time using Luxon
                                     const scheduledDt = DateTime.fromISO(`${dateStr}T${scheduledStartTimeStr}`, { zone: THAILAND_TIMEZONE });
                                     const actualCheckInDt = DateTime.fromJSDate(checkInTs.toDate()).setZone(THAILAND_TIMEZONE);
                                     // Check validity and compare
@@ -248,11 +239,11 @@ exports.exportAttendanceDataHandler = onCall({
                                     } else if (actualCheckInDt.isValid) {
                                         status = 'Present'; // On time or early
                                     } else {
-                                         status = 'Present (Check-in Invalid)'; // Error state
+                                         status = 'Present (Check-in Invalid)'; // Error state if timestamp is bad
                                     }
                                 } catch (e) {
                                      console.warn(`Error comparing times for ${key}:`, e);
-                                     status = 'Present (Time Error)'; // Error state
+                                     status = 'Present (Time Error)'; // Error state during comparison
                                 }
                              } else {
                                  status = 'Present (No Check-in?)'; // Data inconsistency
@@ -270,25 +261,33 @@ exports.exportAttendanceDataHandler = onCall({
                         } else if (isOffSchedule) {
                             status = 'Off'; // Scheduled off, no attendance
                         } else {
-                            // Neither attendance, schedule, nor leave.
-                            // This state means no relevant data exists, so skip the row.
-                            continue;
+                            // If schedule exists but isn't Work/Off, or no schedule exists (and not on leave)
+                            // Skip these rows as they don't represent a clear status relevant to attendance/absence
+                             if (schedule && !isWorkSchedule && !isOffSchedule) {
+                                 console.log(`Skipping row for ${staffName} on ${dateStr} - schedule type is '${schedule.type}'`);
+                                 continue; // Skip row
+                             }
+                             // If reached here, it means no attendance, no leave, no schedule - skipped by outer 'if' check already.
+                             continue;
                         }
                     }
 
                     // --- Prepare Row Data for CSV ---
-                    records.push({
-                        attendanceDocId: attendance ? attendance.id : '', // Include Firestore doc ID only if attendance exists
-                        staffId: staffId,
-                        staffName: staffName,
-                        date: dateStr, // YYYY-MM-DD format
-                        attendanceStatus: status, // The calculated status
-                        // Format times using Luxon helper (returns '' if Timestamp is null/invalid)
-                        checkInTime: formatTimeForExportLuxon(attendance?.checkInTime),
-                        checkOutTime: formatTimeForExportLuxon(attendance?.checkOutTime),
-                        breakStartTime: formatTimeForExportLuxon(attendance?.breakStart),
-                        breakEndTime: formatTimeForExportLuxon(attendance?.breakEnd),
-                    });
+                    // Only add row if status was determined (i.e., not skipped)
+                    if (status !== 'Unknown') {
+                        records.push({
+                            attendanceDocId: attendance ? attendance.id : '', // Include Firestore doc ID only if attendance exists
+                            staffId: staffId,
+                            staffName: staffName,
+                            date: dateStr, // YYYY-MM-DD format
+                            attendanceStatus: status, // The calculated status
+                            // Format times using Luxon helper (returns '' if Timestamp is null/invalid)
+                            checkInTime: formatTimeForExportLuxon(attendance?.checkInTime),
+                            checkOutTime: formatTimeForExportLuxon(attendance?.checkOutTime),
+                            breakStartTime: formatTimeForExportLuxon(attendance?.breakStart),
+                            breakEndTime: formatTimeForExportLuxon(attendance?.breakEnd),
+                        });
+                    }
                 } // End if (schedule || attendance || approvedLeave)
             } // End date loop
         } // End staff loop
@@ -315,9 +314,6 @@ exports.exportAttendanceDataHandler = onCall({
         const json2csvParser = new Parser({ fields, excelStrings: true }); // excelStrings helps prevent issues in Excel
         const csv = json2csvParser.parse(records);
         console.log("exportAttendanceDataHandler: CSV generated successfully.");
-
-        // Generate filename including date range and timestamp
-        const filename = `attendance_export_${startDate}_to_${endDate}_${DateTime.now().setZone(THAILAND_TIMEZONE).toFormat('yyyyMMddHHmmss')}.csv`;
         console.log(`exportAttendanceDataHandler: Generated filename: ${filename}`);
 
         // Return the CSV data and filename to the client
