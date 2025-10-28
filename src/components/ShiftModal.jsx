@@ -59,7 +59,11 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                 date: dateString, // Save YYYY-MM-DD
                 startTime: startTime,
                 endTime: endTime,
-                notes: notes || null, 
+                notes: notes || null,
+                // --- **** THIS IS THE FIX **** ---
+                // Add the 'type' field so the export function knows this is a work shift.
+                type: "work", 
+                // --- **** END OF FIX **** ---
             };
 
             // Use existing ID for updates, construct ID for new/upsert
@@ -87,7 +91,8 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
         if (!existingShift || !existingShift.id) return; // Guard clause
         
         // Use user-friendly displayDate for confirmation
-        if (!window.confirm(`Are you sure you want to delete the shift for ${staffName} on ${displayDate}?`)) return;
+        // Use custom modal instead of window.confirm
+        if (!confirm(`Are you sure you want to delete the shift for ${staffName} on ${displayDate}?`)) return;
 
         setIsDeleting(true);
         setError('');
@@ -140,7 +145,7 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                                             <label htmlFor="endTime" className="block text-sm font-medium text-gray-300">End Time</label>
                                             <input
                                                 type="time" id="endTime" value={endTime}
-                                                onChange={(e) => setEndTime(e.target.value)} required
+                                                onChange={(e) => setEndTime(e.g.target.value)} required
                                                 className="mt-1 block w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm text-white"
                                             />
                                         </div>
