@@ -1,130 +1,182 @@
 // src/components/ImportConfirmationModal.jsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import Modal from './Modal'; // Assuming Modal.jsx is in the same directory
+import { CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowRightIcon, PlusIcon } from './Icons'; // Assuming you have an Icons component
 
-const ImportConfirmationModal = ({ isOpen, onClose, analysisResult, onConfirm, isConfirming }) => {
-    if (!analysisResult) return null; // Don't render if no analysis data
+// Helper to get a consistent display name
+const getRowName = (row) => {
+    if (row.displayName) return row.displayName; // From Staff Import
+    if (row.staffName) return row.staffName; // From Planning Import
+    if (row.staffId) return row.staffId;
+    return 'Unknown';
+};
 
-    // Default to empty arrays if properties are missing in analysisResult
-    const { creates = [], updates = [], noChanges = [], errors = [] } = analysisResult;
+// Helper to format a value (e.g., from a 'details' object)
+const formatValue = (value) => {
+    // Check for Firestore Timestamp structure
+    if (value && typeof value === 'object' && value._seconds !== undefined) {
+        try {
+            return new Date(value._seconds * 1000).toLocaleDateString('en-GB');
+        } catch (e) {
+            return '[Date]';
+        }
+    }
+    if (value === null || value === undefined || value === '') return 'Empty';
+    return String(value);
+};
 
-    // Helper to render the 'from -> to' string for changes
-    const renderChanges = (changeDetail) => {
-        if (!changeDetail || typeof changeDetail !== 'object') return 'N/A';
+// Renders the list of changes for an "update" row
+const renderUpdateChanges = (details) => {
+    return (
+        <ul className="list-['▹'] list-inside ml-4 text-gray-400">
+            {Object.entries(details || {}).map(([field, change]) => (
+                <li key={field}>
+                    <span className="font-semibold">{field}</span>:
+                    <span className="text-red-400 line-through ml-1">{formatValue(change.from)}</span>
+                    <ArrowRightIcon className="inline-block mx-1 h-3 w-3 text-gray-400" />
+                    <span className="text-green-400">{formatValue(change.to)}</span>
+                </li>
+            ))}
+        </ul>
+    );
+};
 
-        // Format date (Timestamp) changes detected during analysis
-        const formatValue = (value) => {
-            // Check if it looks like a Firestore Timestamp structure returned from the function
-            // (Cloud Functions often serialize Timestamps this way in responses)
-            if (value && typeof value === 'object' && value._seconds !== undefined && value._nanoseconds !== undefined) {
-                 try {
-                    // Convert back to JS Date for display
-                    return new Date(value._seconds * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }); // dd/mm/yyyy
-                 } catch (e) {
-                     console.error("Error formatting date from analysis:", value, e);
-                     return '[Date Object]';
-                 }
-            }
-             // Handle simple null/undefined/empty string representation
-            if (value === null || value === undefined || value === '') return 'Empty';
-            // Otherwise, return the value as a string
-            return String(value);
-        };
+// Renders the details for a "create" row (for Planning)
+const renderCreateChanges = (details) => {
+    if (details.type === 'work') {
+        return `Set to WORK: ${details.startTime} - ${details.endTime}`;
+    }
+    return `Set to OFF`;
+};
 
-        return `${formatValue(changeDetail.from)} -> ${formatValue(changeDetail.to)}`;
+
+export default function ImportConfirmationModal({
+    isOpen,
+    onClose,
+    onConfirm,
+    analysis, // Renamed from analysisResult to be generic
+    isLoading, // Renamed from isConfirming
+    fileName = "Import", // New prop to set the title
+    error // New prop for general errors
+}) {
+    if (!analysis) return null; // Don't render if no analysis data
+
+    // Default to empty arrays if properties are missing
+    const { creates = [], updates = [], noChanges = [], errors = [] } = analysis;
+    const totalProcessed = creates.length + updates.length + noChanges.length + errors.length;
+
+    // Check what type of import this is. Staff import has 'email'. Planning import has 'date'.
+    const isPlanningImport = creates[0]?.date || updates[0]?.date || errors[0]?.date;
+    
+    const AnalysisSection = ({ title, icon, data, colorClass }) => {
+        if (!data || data.length === 0) return null;
+        return (
+            <div>
+                <h4 className={`text-lg font-semibold flex items-center mb-2 ${colorClass}`}>
+                    {icon}
+                    <span className="ml-2">{title} ({data.length})</span>
+                </h4>
+                <div className="max-h-40 overflow-y-auto bg-gray-900 rounded-md p-3 space-y-2">
+                    {data.map((row) => (
+                        <div key={row.rowNum} className="text-sm border-b border-gray-700 pb-2 last:border-b-0">
+                            <p className="font-medium text-gray-200">
+                                Row {row.rowNum}: {getRowName(row)}
+                                {isPlanningImport && ` (${row.date})`}
+                                {!isPlanningImport && row.email && ` (${row.email})`}
+                            </p>
+                            
+                            {/* Render Errors */}
+                            {row.action === 'error' && (
+                                <p className="text-red-400 text-xs">{row.errors.join(', ')}</p>
+                            )}
+
+                            {/* Render Planning Create */}
+                            {isPlanningImport && row.action === 'create' && (
+                                <div className="text-gray-400 text-xs">{renderCreateChanges(row.details)}</div>
+                            )}
+
+                            {/* Render Updates (works for both) */}
+                            {row.action === 'update' && (
+                                <div className="text-gray-400">{renderUpdateChanges(row.details)}</div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Confirm Staff Import">
-            <div className="space-y-4 text-sm text-gray-300">
-                <p className="font-semibold text-lg text-amber-400">Import Summary:</p>
-
-                {/* Creates Section */}
-                {creates.length > 0 && (
-                    <div>
-                        <p className="font-medium text-green-400">{creates.length} New Staff Member(s) to Create:</p>
-                        <ul className="list-disc list-inside ml-4 max-h-32 overflow-y-auto">
-                            {creates.map(item => (
-                                <li key={item.rowNum}>{item.displayName} ({item.email})</li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-
-                {/* Updates Section */}
-                {updates.length > 0 && (
-                    <div>
-                        <p className="font-medium text-blue-400">{updates.length} Staff Member(s) to Update:</p>
-                        <ul className="list-disc list-inside ml-4 space-y-1 max-h-48 overflow-y-auto">
-                            {updates.map(item => (
-                                <li key={item.rowNum}>
-                                    {item.displayName} ({item.email || item.staffId}): {/* Show email or ID */}
-                                    {/* Display changes */}
-                                    <ul className="list-['▹'] list-inside ml-4 text-gray-400">
-                                         {Object.entries(item.details || {}).map(([field, change]) => (
-                                            <li key={field}>{field}: {renderChanges(change)}</li>
-                                        ))}
-                                    </ul>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-
-                {/* No Changes Section */}
-                {noChanges.length > 0 && (
-                    <div>
-                        <p className="font-medium text-gray-500">{noChanges.length} Staff Member(s) with No Changes.</p>
-                        {/* Optionally list them if needed for clarity on large imports */}
-                         {/* <ul className="list-disc list-inside ml-4 max-h-32 overflow-y-auto text-xs text-gray-600">
-                             {noChanges.map(item => (<li key={item.rowNum}>{item.displayName} ({item.email || item.staffId})</li>))}
-                         </ul> */}
-                    </div>
-                )}
-
-                 {/* Errors Section */}
-                 {errors.length > 0 && (
-                    <div className="pt-2 border-t border-gray-600">
-                        <p className="font-medium text-red-400">{errors.length} Row(s) with Errors (will be skipped):</p>
-                        <ul className="list-disc list-inside ml-4 max-h-32 overflow-y-auto text-red-500">
-                            {errors.map(item => (
-                                <li key={item.rowNum}>Row {item.rowNum}: {item.errors.join(', ')}</li>
-                            ))}
-                        </ul>
-                    </div>
-                 )}
-
-
-                {/* Confirmation Prompt */}
-                <p className="mt-6 text-amber-500">
-                     Proceed with importing <span className="font-bold">{creates.length + updates.length}</span> record(s)?
-                     {errors.length > 0 && ` ${errors.length} record(s) with errors will be skipped.`}
+        <Modal isOpen={isOpen} onClose={onClose} title={`Confirm ${fileName}`}>
+            <div className="space-y-6">
+                <p className="text-gray-300">
+                    The file has been analyzed. Please review the changes below before confirming the import.
                 </p>
+                <div className="grid grid-cols-2 gap-4 text-center">
+                    <div className="bg-gray-700 p-3 rounded-lg">
+                        <p className="text-sm text-gray-400">Total Rows Processed</p>
+                        <p className="text-2xl font-bold text-white">{totalProcessed}</p>
+                    </div>
+                    <div className="bg-gray-700 p-3 rounded-lg">
+                        <p className="text-sm text-gray-400">Total Errors Found</p>
+                        <p className={`text-2xl font-bold ${errors.length > 0 ? 'text-red-400' : 'text-green-400'}`}>{errors.length}</p>
+                    </div>
+                </div>
 
-            </div>
+                {error && (
+                     <div className="bg-red-900/50 border border-red-700 text-red-300 p-3 rounded-lg">
+                        <p className="font-bold">An error occurred:</p>
+                        <p className="text-sm">{error}</p>
+                    </div>
+                )}
 
-             {/* Action Buttons */}
-             <div className="mt-6 flex justify-end space-x-3">
-                <button
-                    type="button"
-                    onClick={onClose}
-                    disabled={isConfirming}
-                    className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-md transition duration-150 ease-in-out disabled:opacity-50"
-                >
-                    Cancel
-                </button>
-                <button
-                    type="button"
-                    onClick={onConfirm}
-                    // Disable confirmation if currently confirming OR if there are no creates/updates to perform
-                    disabled={isConfirming || (creates.length === 0 && updates.length === 0)}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition duration-150 ease-in-out disabled:bg-gray-500 disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                    {isConfirming ? 'Importing...' : 'Confirm Import'}
-                </button>
+                <div className="space-y-4">
+                    <AnalysisSection
+                        title="Errors"
+                        icon={<ExclamationTriangleIcon className="h-5 w-5" />}
+                        data={errors}
+                        colorClass="text-red-400"
+                    />
+                    <AnalysisSection
+                        title={`New ${isPlanningImport ? 'Schedules' : 'Staff'} to Create`}
+                        icon={<PlusIcon className="h-5 w-5" />}
+                        data={creates}
+                        colorClass="text-green-400"
+                    />
+                    <AnalysisSection
+                        title={`${isPlanningImport ? 'Schedules' : 'Staff'} to Update`}
+                        icon={<CheckCircleIcon className="h-5 w-5" />}
+                        data={updates}
+                        colorClass="text-yellow-400"
+                    />
+                    <AnalysisSection
+                        title="No Changes Detected"
+                        icon={<InformationCircleIcon className="h-5 w-5" />}
+                        data={noChanges}
+                        colorClass="text-gray-400"
+                    />
+                </div>
+                
+                <div className="flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-4 pt-6 border-t border-gray-700">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        disabled={isLoading}
+                        className="mt-3 sm:mt-0 w-full sm:w-auto px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 disabled:opacity-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onConfirm}
+                        disabled={isLoading || errors.length > 0 || (creates.length === 0 && updates.length === 0)}
+                        className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:bg-gray-500"
+                    >
+                        {isLoading ? 'Importing...' : `Confirm Import (${creates.length + updates.length} changes)`}
+                    </button>
+                </div>
             </div>
         </Modal>
     );
 };
 
-export default ImportConfirmationModal;

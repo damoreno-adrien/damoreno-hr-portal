@@ -15,6 +15,7 @@ const { deleteStaffHandler } = require('./src/staff/deleteStaff');
 const { exportStaffDataHandler } = require('./src/staff/exportStaffData');
 const { importStaffDataHandler } = require('./src/staff/importStaffData');
 const { exportPlanningDataHandler } = require('./src/planning/exportPlanningData');
+const { importPlanningDataHandler } = require('./src/planning/importPlanningData');
 const { exportAttendanceDataHandler } = require('./src/attendance/exportAttendanceData');
 const { importAttendanceDataHandler } = require('./src/attendance/importAttendanceData');
 
@@ -32,5 +33,6 @@ exports.deleteStaff = deleteStaffHandler;
 exports.exportStaffData = exportStaffDataHandler;
 exports.importStaffData = importStaffDataHandler;
 exports.exportPlanningData = exportPlanningDataHandler;
+exports.importPlanningData = importPlanningDataHandler;
 exports.exportAttendanceData = exportAttendanceDataHandler;
 exports.importAttendanceData = importAttendanceDataHandler;

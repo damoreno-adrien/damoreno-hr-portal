@@ -3,14 +3,15 @@ import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/fir
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js" // Adjusted import path
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon } from '../components/Icons';
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
 import ShiftModal from '../components/ShiftModal';
+import ImportConfirmationModal from '../components/ImportConfirmationModal'; // Added this import
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-// const functionsDefault = getFunctions(app, "us-central1");
 const functionsAsia = getFunctions(app, "asia-southeast1");
-const exportPlanningData = httpsCallable(functionsAsia, 'exportPlanningData'); // Use correct handler name
+const exportPlanningData = httpsCallable(functionsAsia, 'exportPlanningData');
+const importPlanningData = httpsCallable(functionsAsia, 'importPlanningData'); // Added this line
 
 // Helper function to get display name
 const getDisplayName = (staff) => {
@@ -41,7 +42,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     });
 
     // Custom hook to fetch weekly schedule data
-    // Removed staffList dependency as it's not directly used by the hook
     const { weekData, weekDates = [], loading, refetchWeekData } = useWeeklyPlannerData(db, currentWeekStart);
 
     // State for the shift editing modal
@@ -50,6 +50,13 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
 
     // State for export loading indicator
     const [isExporting, setIsExporting] = useState(false);
+
+    // --- NEW STATE for Import Process ---
+    const [isImporting, setIsImporting] = useState(false);
+    const [importAnalysis, setImportAnalysis] = useState(null);
+    const [importCsvContent, setImportCsvContent] = useState(null);
+    const [importError, setImportError] = useState(null);
+    // --- END NEW STATE ---
 
     // Navigation handlers using standard date utils
     const handlePrevWeek = () => {
@@ -137,6 +144,79 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         }
     };
 
+    // --- NEW HANDLERS for CSV Import ---
+    const handleImportFileSelect = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        setImportError(null);
+        setIsImporting(true);
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const csvContent = e.target.result;
+            setImportCsvContent(csvContent); // Save CSV content for confirmation step
+            try {
+                // Call function for analysis (dry run)
+                const result = await importPlanningData({ csvData: csvContent, confirm: false });
+                if (result.data.analysis) {
+                    setImportAnalysis(result.data.analysis);
+                } else {
+                    throw new Error("Invalid analysis response from server.");
+                }
+            } catch (error) {
+                console.error("Error during planning import analysis:", error);
+                setImportError(`Analysis Failed: ${error.message}`);
+                setImportAnalysis(null); // Clear analysis on error
+            } finally {
+                setIsImporting(false);
+                // Reset file input so user can select the same file again
+                event.target.value = null;
+            }
+        };
+        reader.onerror = () => {
+            console.error("Error reading file");
+            setImportError("Error reading file.");
+            setIsImporting(false);
+        };
+        reader.readAsText(file);
+    };
+
+    const handleImportConfirm = async () => {
+        if (!importCsvContent) return;
+
+        setIsImporting(true);
+        setImportError(null);
+        try {
+            // Call function with confirm: true
+            const result = await importPlanningData({ csvData: importCsvContent, confirm: true });
+
+            if (result.data.errors && result.data.errors.length > 0) {
+                // Show errors, but data might still have been partially processed
+                alert(`Import completed with errors:\n- ${result.data.errors.join('\n- ')}`);
+            } else {
+                alert(result.data.result || "Planning import completed successfully!");
+            }
+
+            refetchWeekData(); // Refresh the grid to show new data
+
+        } catch (error) {
+            console.error("Error confirming planning import:", error);
+            alert(`Import Failed: ${error.message}`);
+        } finally {
+            setIsImporting(false);
+            setImportAnalysis(null); // Close modal
+            setImportCsvContent(null);
+        }
+    };
+
+    const handleImportCancel = () => {
+        setImportAnalysis(null);
+        setImportCsvContent(null);
+        setImportError(null);
+    };
+    // --- END NEW HANDLERS ---
+
     // Main component render
     return (
         <div>
@@ -146,12 +226,27 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                     onClose={closeModal}
                     db={db}
                     staffId={selectedShiftInfo.staffId}
-                    staffName={ getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId)) || 'Unknown Staff' }
+                    staffName={getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId)) || 'Unknown Staff'}
                     date={selectedShiftInfo.date}
                     existingShift={selectedShiftInfo.shift}
                     onSaveSuccess={refetchWeekData}
                 />
             )}
+
+            {/* --- NEW Import Confirmation Modal --- */}
+            {importAnalysis && (
+                <ImportConfirmationModal
+                    isOpen={!!importAnalysis}
+                    onClose={handleImportCancel}
+                    onConfirm={handleImportConfirm}
+                    analysis={importAnalysis}
+                    isLoading={isImporting}
+                    fileName="Planning Import" // Pass the correct title
+                    error={importError}
+                />
+            )}
+            {/* --- END Import Modal --- */}
+
 
             {/* Header section with title and navigation/export buttons */}
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
@@ -166,10 +261,31 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                     <button onClick={handleNextWeek} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600" title="Next Week">
                         <ChevronRightIcon className="h-6 w-6" />
                     </button>
-                     {/* Export Button */}
-                     <button
+
+                    {/* --- IMPORT BUTTON --- */}
+                    {/* Hidden file input, triggered by the button label */}
+                    <input
+                        type="file"
+                        id="planning-csv-import"
+                        className="hidden"
+                        accept=".csv"
+                        onChange={handleImportFileSelect}
+                        disabled={isImporting}
+                    />
+                    <label
+                        htmlFor="planning-csv-import"
+                        className={`flex items-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 cursor-pointer ${isImporting ? 'bg-gray-500 cursor-not-allowed' : ''}`}
+                        title="Import a planning schedule from CSV"
+                    >
+                        <UploadIcon className="h-5 w-5 mr-2" />
+                        {isImporting ? 'Analyzing...' : 'Import Week'}
+                    </label>
+                    {/* --- END IMPORT BUTTON --- */}
+
+                    {/* Export Button */}
+                    <button
                         onClick={handleExportWeek}
-                        disabled={isExporting || loading} // Disable while loading or exporting
+                        disabled={isExporting || loading || isImporting} // Disable during import too
                         className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500"
                         title="Export this week's schedule to CSV"
                     >
@@ -199,7 +315,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         </thead>
                         {/* Table Body - Grouped by Department */}
                         {sortedDepartments.map(department => (
-                             <React.Fragment key={department}>
+                            <React.Fragment key={department}>
                                 <tbody>{/* Department Header Row */}
                                     {/* Adjust top based on actual header height if needed */}
                                     <tr className="bg-gray-700 sticky top-[calc(theme(space.12)+theme(space.px))] z-10">
@@ -234,7 +350,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                         </tr>
                                     ))}
                                 </tbody>
-                             </React.Fragment>
+                            </React.Fragment>
                         ))}
                     </table>
                 </div>
