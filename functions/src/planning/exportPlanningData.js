@@ -1,138 +1,225 @@
-const functions = require("firebase-functions/v2");
-const { HttpsError } = functions.https;
+/* functions/src/planning/exportPlanningData.js */
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore'); // Import FieldValue
 const { Parser } = require('json2csv');
-const { parseISO } = require('date-fns'); // Import date-fns helper
+const { DateTime } = require('luxon');
 
-const db = getFirestore();
+const db = admin.firestore();
+const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
-// Helper to get current job details using robust date parsing
-const getCurrentJob = (staff) => {
-    if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) {
-        return { position: 'N/A', department: 'Unassigned' };
+/**
+ * Generates an array of date strings in YYYY-MM-DD format.
+ */
+const generateDateRange = (startDateStr, endDateStr) => {
+    const dates = [];
+    let current = DateTime.fromISO(startDateStr, { zone: THAILAND_TIMEZONE });
+    const end = DateTime.fromISO(endDateStr, { zone: THAILAND_TIMEZONE });
+    if (!current.isValid || !end.isValid || current > end) {
+        console.error("generateDateRange: Invalid date range:", startDateStr, endDateStr);
+        return [];
     }
-    // Ensure sorting is robust using date-fns
-    return [...staff.jobHistory].sort((a, b) => {
-        // Parse dates robustly, default to epoch start if invalid/missing
-        const dateA = a.startDate ? parseISO(a.startDate) : new Date(0);
-        const dateB = b.startDate ? parseISO(b.startDate) : new Date(0);
-        // Handle invalid dates by treating them as very old
-        const timeA = !isNaN(dateA) ? dateA.getTime() : 0;
-        const timeB = !isNaN(dateB) ? dateB.getTime() : 0;
-        return timeB - timeA; // Sort descending (most recent first)
-    })[0];
-};
-
-// Helper to get display name
-const getDisplayName = (staff) => {
-    if (!staff) return 'Unknown Staff';
-    if (staff.nickname) return staff.nickname;
-    if (staff.firstName) return `${staff.firstName} ${staff.lastName}`;
-    return staff.fullName || 'Unknown Staff';
+    while (current <= end) {
+        dates.push(current.toISODate());
+        current = current.plus({ days: 1 });
+    }
+    return dates;
 };
 
 
-exports.exportPlanningDataHandler = functions.https.onCall({
-    region: "asia-southeast1", // Updated region
-    timeoutSeconds: 120 // Allow more time for data fetching/processing
+exports.exportPlanningDataHandler = onCall({
+    region: "asia-southeast1",
+    timeoutSeconds: 300,
 }, async (request) => {
-    // --- Auth Checks ---
+    console.log("exportPlanningData: Function execution started.");
+
+    // 1. --- Authentication and Authorization ---
     if (!request.auth) {
-        throw new HttpsError("unauthenticated", "You must be logged in.");
+        console.error("exportPlanningData: Unauthenticated access attempt.");
+        throw new HttpsError("unauthenticated", "Authentication required.");
     }
-    const callerDoc = await db.collection("users").doc(request.auth.uid).get();
-    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-        throw new HttpsError("permission-denied", "Only managers can export planning data.");
+    const callerUid = request.auth.uid;
+    try {
+        const callerDoc = await db.collection("users").doc(callerUid).get();
+        if (!callerDoc.exists || callerDoc.data().role !== "manager") {
+            console.error(`exportPlanningData: Permission denied for user ${callerUid}.`);
+            throw new HttpsError("permission-denied", "Manager role required.");
+        }
+        console.log(`exportPlanningData: User ${callerUid} authorized as manager.`);
+    } catch(err) {
+         console.error(`exportPlanningData: Error verifying manager role for ${callerUid}:`, err);
+         if (err instanceof HttpsError) throw err;
+         throw new HttpsError("internal", "Failed to verify user role.", err.message);
     }
 
-    // --- Input Validation ---
-    const { startDate, endDate } = request.data;
-    // Basic format check, more robust validation can be added if needed
-    if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-        throw new HttpsError("invalid-argument", "Valid startDate and endDate (YYYY-MM-DD) are required.");
-    }
-    // Optional: Check if endDate is before startDate
-    if (endDate < startDate) {
-        throw new HttpsError("invalid-argument", "End date cannot be before start date.");
-    }
-
+    // 2. --- Input Validation (Date Range & Staff) ---
+    const { startDate, endDate, staffIds } = request.data;
+     if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+         throw new HttpsError("invalid-argument", "Valid 'startDate' and 'endDate' (YYYY-MM-DD) required.");
+     }
+     
+     // staffIds validation:
+     const useAllStaff = !staffIds || !Array.isArray(staffIds) || staffIds.length === 0;
+     if (useAllStaff) {
+         console.log(`exportPlanningData: Exporting schedule data for ALL STAFF from ${startDate} to ${endDate}`);
+     } else {
+         console.log(`exportPlanningData: Exporting schedule data for ${staffIds.length} staff from ${startDate} to ${endDate}`);
+     }
 
     try {
-        console.log(`Exporting planning data from ${startDate} to ${endDate}`);
-        // --- Fetch Data ---
-        // 1. Get all schedules within the date range
-        const schedulesQuery = db.collection("schedules")
+        // --- 3. Fetch Selected Staff ---
+        let staffToProcess = [];
+        
+        if (useAllStaff) {
+            // Option A: All active staff
+            const staffQuery = db.collection('staff_profiles').where('status', '==', 'active');
+            const staffSnap = await staffQuery.get();
+            staffToProcess = staffSnap.docs.map(doc => ({
+                id: doc.id,
+                name: doc.data().nickname || doc.data().firstName || 'Unknown',
+            }));
+        } else {
+            // Option B: Specific staff (Firestore 'in' query is limited to 30 items)
+            // If you have more than 30 staff, we fetch them individually or in chunks.
+            // For simplicity and given your restaurant's scale, we'll fetch them efficiently.
+            
+            // Chunk staffIds into groups of 30 for 'in' query
+            const staffIdChunks = [];
+            for (let i = 0; i < staffIds.length; i += 30) {
+                staffIdChunks.push(staffIds.slice(i, i + 30));
+            }
+
+            const staffPromises = staffIdChunks.map(chunk =>
+                db.collection('staff_profiles')
+                    .where(FieldValue.documentId(), 'in', chunk)
+                    .get()
+            );
+
+            const staffSnapshots = await Promise.all(staffPromises);
+            
+            staffSnapshots.forEach(snap => {
+                snap.docs.forEach(doc => {
+                    staffToProcess.push({
+                        id: doc.id,
+                        name: doc.data().nickname || doc.data().firstName || 'Unknown',
+                    });
+                });
+            });
+        }
+        
+        if (staffToProcess.length === 0) {
+            console.log("exportPlanningData: No staff found to process.");
+            return { csvData: "" };
+        }
+        console.log(`exportPlanningData: Found ${staffToProcess.length} staff to process.`);
+
+
+        // --- 4. Fetch Existing Schedule Data ---
+        let schedulesQuery = db.collection("schedules")
             .where("date", ">=", startDate)
             .where("date", "<=", endDate);
-        const schedulesSnap = await schedulesQuery.get();
 
-        if (schedulesSnap.empty) {
-            console.log("No schedules found for the specified period.");
-            return { csvData: "" }; // Return empty CSV data
+        // **MODIFICATION**: If specific staff are requested, filter schedules by staffId
+        // This is more efficient than fetching all schedules.
+        // We must also chunk this query.
+        
+        const schedulesMap = new Map();
+
+        if (useAllStaff) {
+            // Fetch all schedules in the date range
+            const schedulesSnap = await schedulesQuery.get();
+            schedulesSnap.forEach(doc => {
+                const data = doc.data();
+                const key = `${data.staffId}_${data.date}`;
+                schedulesMap.set(key, { scheduleId: doc.id, ...data });
+            });
+        } else {
+            // Fetch schedules only for the selected staff (in chunks)
+            const staffIdChunks = [];
+            const allStaffIdsToProcess = staffToProcess.map(s => s.id);
+            for (let i = 0; i < allStaffIdsToProcess.length; i += 30) {
+                staffIdChunks.push(allStaffIdsToProcess.slice(i, i + 30));
+            }
+
+            const schedulePromises = staffIdChunks.map(chunk =>
+                schedulesQuery.where('staffId', 'in', chunk).get()
+            );
+
+            const scheduleSnapshots = await Promise.all(schedulePromises);
+
+            scheduleSnapshots.forEach(snap => {
+                snap.docs.forEach(doc => {
+                    const data = doc.data();
+                    const key = `${data.staffId}_${data.date}`;
+                    schedulesMap.set(key, { scheduleId: doc.id, ...data });
+                });
+            });
         }
-        console.log(`Found ${schedulesSnap.size} schedules.`);
+        console.log(`exportPlanningData: Found ${schedulesMap.size} existing schedule records for selected staff.`);
 
-        const schedules = schedulesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // 2. Get unique staff IDs from the schedules
-        const staffIds = [...new Set(schedules.map(s => s.staffId))];
-        console.log(`Fetching profiles for ${staffIds.length} unique staff IDs.`);
+        // --- 5. Generate Date Range Array ---
+        const dateRange = generateDateRange(startDate, endDate);
+        if (dateRange.length === 0) {
+            throw new HttpsError("internal", "Could not generate date range.");
+        }
 
-        // 3. Fetch profiles for these staff members
-        const staffProfiles = {};
-        // Fetch profiles in chunks (Firestore `in` query limit is 30 as of v9+)
-        const chunkSize = 30;
-        for (let i = 0; i < staffIds.length; i += chunkSize) {
-            const chunk = staffIds.slice(i, i + chunkSize);
-            if (chunk.length > 0) {
-                 console.log(`Fetching staff profile chunk ${Math.floor(i / chunkSize) + 1}...`);
-                 const staffQuery = db.collection("staff_profiles").where(admin.firestore.FieldPath.documentId(), "in", chunk);
-                 const staffSnap = await staffQuery.get();
-                 staffSnap.forEach(doc => {
-                     staffProfiles[doc.id] = doc.data();
-                 });
+        // --- 6. Process Data: Loop through staff and dates ---
+        const records = [];
+        for (const staff of staffToProcess) {
+            for (const date of dateRange) {
+                const key = `${staff.id}_${date}`;
+                const existingSchedule = schedulesMap.get(key);
+
+                if (existingSchedule) {
+                    // Schedule exists, use it
+                    records.push({
+                        scheduleId: existingSchedule.scheduleId,
+                        staffId: existingSchedule.staffId,
+                        staffName: existingSchedule.staffName || staff.name,
+                        date: existingSchedule.date,
+                        type: existingSchedule.type || 'work',
+                        startTime: existingSchedule.startTime || '',
+                        endTime: existingSchedule.endTime || '',
+                        notes: existingSchedule.notes || ''
+                    });
+                } else {
+                    // No schedule exists, create a placeholder "off" row
+                    records.push({
+                        scheduleId: `${staff.id}_${date}`, // Use the predictable ID
+                        staffId: staff.id,
+                        staffName: staff.name,
+                        date: date,
+                        type: 'off',
+                        startTime: '',
+                        endTime: '',
+                        notes: ''
+                    });
+                }
             }
         }
-        console.log(`Fetched ${Object.keys(staffProfiles).length} staff profiles.`);
 
-
-        // --- Format Data for CSV ---
-        const records = schedules.map(schedule => {
-            const staff = staffProfiles[schedule.staffId]; // Might be undefined if profile missing
-            const job = getCurrentJob(staff); // Handles undefined staff
-
-            return {
-                Date: schedule.date, // Already in YYYY-MM-DD
-                StaffName: getDisplayName(staff), // Handles undefined staff
-                Department: job.department, // Handles undefined job
-                Position: job.position, // Handles undefined job
-                StartTime: schedule.startTime || '', // Use empty string if missing
-                EndTime: schedule.endTime || '', // Use empty string if missing
-                Notes: schedule.notes || '' // Use empty string if missing
-            };
-        });
-
-        // Sort records primarily by date, then by staff name (localeCompare is fine for YYYY-MM-DD)
-        records.sort((a, b) => {
-            if (a.Date !== b.Date) {
-                return a.Date.localeCompare(b.Date);
-            }
-            return a.StaffName.localeCompare(b.StaffName);
-        });
-
-        // --- Generate CSV ---
-        const fields = ['Date', 'StaffName', 'Department', 'Position', 'StartTime', 'EndTime', 'Notes'];
-        const json2csvParser = new Parser({ fields });
+        // --- 7. Generate CSV Output ---
+        const fields = [
+            'scheduleId',
+            'staffId',
+            'staffName',
+            'date',
+            'type',
+            'startTime',
+            'endTime',
+            'notes'
+        ];
+        
+        const json2csvParser = new Parser({ fields, excelStrings: true });
         const csv = json2csvParser.parse(records);
-        console.log("CSV generation successful.");
-
+        
+        console.log("exportPlanningData: CSV generation complete.");
         return { csvData: csv };
 
-    } catch (error) {
-        console.error("Error exporting planning data:", error);
-        // Ensure HttpsError is thrown for client-side handling
+    } catch (error) { // Error handling
+        console.error("exportPlanningData: Unhandled error:", error);
         if (error instanceof HttpsError) throw error;
-        throw new HttpsError("internal", "An unexpected error occurred while exporting planning data.", error.message);
+        throw new HttpsError("internal", `Error exporting schedule data: ${error.message}`, error.stack);
     }
 });

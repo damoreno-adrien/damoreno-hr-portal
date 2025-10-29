@@ -5,13 +5,14 @@ import { app } from "../../firebase.js" // Adjusted import path
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
 import ShiftModal from '../components/ShiftModal';
-import ImportConfirmationModal from '../components/ImportConfirmationModal'; // Added this import
+import ImportConfirmationModal from '../components/ImportConfirmationModal';
+import ExportOptionsModal from '../components/ExportOptionsModal'; // *** ADDED THIS IMPORT ***
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const exportPlanningData = httpsCallable(functionsAsia, 'exportPlanningData');
-const importPlanningData = httpsCallable(functionsAsia, 'importPlanningData'); // Added this line
+const importPlanningData = httpsCallable(functionsAsia, 'importPlanningData');
 
 // Helper function to get display name
 const getDisplayName = (staff) => {
@@ -37,7 +38,6 @@ const getCurrentJob = (staff) => {
 export default function PlanningPage({ db, staffList, userRole, departments }) {
     // State for the starting date of the currently viewed week
     const [currentWeekStart, setCurrentWeekStart] = useState(() => {
-        // Use standard function
         return dateUtils.startOfWeek(new Date());
     });
 
@@ -50,6 +50,8 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
 
     // State for export loading indicator
     const [isExporting, setIsExporting] = useState(false);
+    // *** NEW STATE for export modal ***
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     // --- NEW STATE for Import Process ---
     const [isImporting, setIsImporting] = useState(false);
@@ -69,16 +71,15 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
 
     // Click handler using standard date parsing
     const handleCellClick = (staffId, dateString, shift) => {
-        // Use our parser to correctly interpret yyyy-MM-dd as a local date
         const dateObject = dateUtils.parseISODateString(dateString);
-        setSelectedShiftInfo({ staffId, date: dateObject, shift }); // Pass Date object
+        setSelectedShiftInfo({ staffId, date: dateObject, shift });
         setIsShiftModalOpen(true);
     };
 
     // Handler to close the shift modal
     const closeModal = () => {
         setIsShiftModalOpen(false);
-        setSelectedShiftInfo({ staffId: null, date: null, shift: null }); // Reset selected info
+        setSelectedShiftInfo({ staffId: null, date: null, shift: null });
     };
 
     // Formatted date range string for display using standard utils
@@ -106,25 +107,21 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     // Get sorted department names for rendering sections
     const sortedDepartments = useMemo(() => Object.keys(groupedStaff).sort(), [groupedStaff]);
 
-    // Handler for exporting the current week's schedule
-    const handleExportWeek = async () => {
+    // *** UPDATED HANDLER for confirming export from modal ***
+    const handleConfirmExport = async ({ startDate, endDate, staffIds }) => {
         setIsExporting(true);
         try {
-            // exportPlanningData callable defined at top level
-            const startDate = dateUtils.formatISODate(currentWeekStart);
-            const endDate = dateUtils.formatISODate(weekEnd);
-
-            // Use the correctly initialized callable function
-            const result = await exportPlanningData({ startDate, endDate });
+            // Use the data from the modal
+            const result = await exportPlanningData({ startDate, endDate, staffIds });
             const csvData = result.data.csvData;
 
             if (!csvData) {
-                alert("No planning data found for this week to export.");
-                setIsExporting(false); // Reset loading state
+                alert("No planning data found for the selected options.");
+                setIsExporting(false);
                 return;
             }
 
-            // Trigger CSV download with BOM for Excel compatibility
+            // Trigger CSV download
             const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
@@ -134,8 +131,9 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            URL.revokeObjectURL(url); // Clean up the blob URL
+            URL.revokeObjectURL(url);
 
+            setIsExportModalOpen(false); // Close modal on success
         } catch (error) {
             console.error("Error exporting planning data:", error);
             alert(`Failed to export planning data: ${error.message}`);
@@ -143,6 +141,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             setIsExporting(false);
         }
     };
+    // *** END UPDATED HANDLER ***
 
     // --- NEW HANDLERS for CSV Import ---
     const handleImportFileSelect = (event) => {
@@ -155,7 +154,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         const reader = new FileReader();
         reader.onload = async (e) => {
             const csvContent = e.target.result;
-            setImportCsvContent(csvContent); // Save CSV content for confirmation step
+            setImportCsvContent(csvContent);
             try {
                 // Call function for analysis (dry run)
                 const result = await importPlanningData({ csvData: csvContent, confirm: false });
@@ -167,10 +166,9 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             } catch (error) {
                 console.error("Error during planning import analysis:", error);
                 setImportError(`Analysis Failed: ${error.message}`);
-                setImportAnalysis(null); // Clear analysis on error
+                setImportAnalysis(null);
             } finally {
                 setIsImporting(false);
-                // Reset file input so user can select the same file again
                 event.target.value = null;
             }
         };
@@ -192,20 +190,19 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             const result = await importPlanningData({ csvData: importCsvContent, confirm: true });
 
             if (result.data.errors && result.data.errors.length > 0) {
-                // Show errors, but data might still have been partially processed
                 alert(`Import completed with errors:\n- ${result.data.errors.join('\n- ')}`);
             } else {
                 alert(result.data.result || "Planning import completed successfully!");
             }
 
-            refetchWeekData(); // Refresh the grid to show new data
+            refetchWeekData(); // Refresh the grid
 
         } catch (error) {
             console.error("Error confirming planning import:", error);
             alert(`Import Failed: ${error.message}`);
         } finally {
             setIsImporting(false);
-            setImportAnalysis(null); // Close modal
+            setImportAnalysis(null);
             setImportCsvContent(null);
         }
     };
@@ -241,14 +238,25 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                     onConfirm={handleImportConfirm}
                     analysis={importAnalysis}
                     isLoading={isImporting}
-                    fileName="Planning Import" // Pass the correct title
+                    fileName="Planning Import"
                     error={importError}
                 />
             )}
-            {/* --- END Import Modal --- */}
+            
+            {/* *** NEW Export Options Modal *** */}
+            <ExportOptionsModal
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                onConfirm={handleConfirmExport}
+                staffList={activeStaff} // Pass the active staff list
+                defaultStartDate={currentWeekStart}
+                defaultEndDate={weekEnd}
+                isExporting={isExporting}
+            />
+            {/* *** END Export Modal *** */}
 
 
-            {/* Header section with title and navigation/export buttons */}
+            {/* Header section */}
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Weekly Planning</h2>
                 <div className="flex items-center space-x-4">
@@ -262,8 +270,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         <ChevronRightIcon className="h-6 w-6" />
                     </button>
 
-                    {/* --- IMPORT BUTTON --- */}
-                    {/* Hidden file input, triggered by the button label */}
+                    {/* Import Button */}
                     <input
                         type="file"
                         id="planning-csv-import"
@@ -278,27 +285,27 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         title="Import a planning schedule from CSV"
                     >
                         <UploadIcon className="h-5 w-5 mr-2" />
-                        {isImporting ? 'Analyzing...' : 'Import Week'}
+                        {isImporting ? 'Analyzing...' : 'Import'}
                     </label>
-                    {/* --- END IMPORT BUTTON --- */}
 
-                    {/* Export Button */}
+                    {/* *** UPDATED Export Button *** */}
                     <button
-                        onClick={handleExportWeek}
-                        disabled={isExporting || loading || isImporting} // Disable during import too
+                        onClick={() => setIsExportModalOpen(true)} // *** CHANGED: This now opens the modal ***
+                        disabled={isExporting || loading || isImporting}
                         className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500"
-                        title="Export this week's schedule to CSV"
+                        title="Export schedule data..." // Updated title
                     >
                         <DownloadIcon className="h-5 w-5 mr-2" />
-                        {isExporting ? 'Exporting...' : 'Export Week'}
+                        {isExporting ? 'Exporting...' : 'Export'}
                     </button>
+                    {/* *** END UPDATED Export Button *** */}
                 </div>
             </div>
 
             {/* Loading indicator */}
             {loading && <p className="text-center text-gray-400 my-10">Loading schedule...</p>}
 
-            {/* Schedule Table - Render only when not loading and weekDates are available */}
+            {/* Schedule Table */}
             {!loading && weekDates && weekDates.length > 0 && (
                 <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-lg">
                     <table className="min-w-full divide-y divide-gray-700 border-collapse">
@@ -313,11 +320,10 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                 ))}
                             </tr>
                         </thead>
-                        {/* Table Body - Grouped by Department */}
+                        {/* Table Body */}
                         {sortedDepartments.map(department => (
                             <React.Fragment key={department}>
-                                <tbody>{/* Department Header Row */}
-                                    {/* Adjust top based on actual header height if needed */}
+                                <tbody>
                                     <tr className="bg-gray-700 sticky top-[calc(theme(space.12)+theme(space.px))] z-10">
                                         <th colSpan={weekDates.length + 1} className="sticky left-0 bg-gray-700 px-4 py-2 text-left text-sm font-semibold text-amber-400 z-20">
                                             {department}
@@ -325,17 +331,16 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                     </tr>
                                 </tbody>
                                 <tbody className="divide-y divide-gray-700">
-                                    {/* Staff Rows within Department */}
                                     {groupedStaff[department].map(staff => (
-                                        <tr key={staff.id} className="hover:bg-gray-600 group"> {/* Use group hover for cell bg */}
+                                        <tr key={staff.id} className="hover:bg-gray-600 group">
                                             <td className="sticky left-0 bg-gray-800 group-hover:bg-gray-600 px-4 py-3 whitespace-nowrap text-sm font-medium text-white w-48 z-10 transition-colors">
                                                 {getDisplayName(staff)}
                                                 <div className="text-xs text-gray-400">{getCurrentJob(staff).position}</div>
                                             </td>
-                                            {/* Date Cells for each staff member */}
                                             {weekDates.map(dateObj => {
                                                 const shift = weekData[staff.id]?.[dateObj.dateString];
                                                 const displayTime = shift ? `${shift.startTime} - ${shift.endTime}` : '';
+                
                                                 return (
                                                     <td
                                                         key={dateObj.dateString}
@@ -355,7 +360,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                     </table>
                 </div>
             )}
-            {/* Fallback message if loading finishes but data/dates are missing */}
             {!loading && (!weekDates || weekDates.length === 0) && (
                 <p className="text-center text-gray-500 my-10">Could not load schedule data for this week.</p>
             )}
