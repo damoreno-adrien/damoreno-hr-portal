@@ -1,7 +1,8 @@
 /* functions/src/planning/exportPlanningData.js */
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const { getFirestore, FieldValue } = require('firebase-admin/firestore'); // Import FieldValue
+// --- FIX: Import FieldPath, not just FieldValue ---
+const { getFirestore, FieldValue, FieldPath } = require('firebase-admin/firestore');
 const { Parser } = require('json2csv');
 const { DateTime } = require('luxon');
 
@@ -58,7 +59,6 @@ exports.exportPlanningDataHandler = onCall({
          throw new HttpsError("invalid-argument", "Valid 'startDate' and 'endDate' (YYYY-MM-DD) required.");
      }
      
-     // staffIds validation:
      const useAllStaff = !staffIds || !Array.isArray(staffIds) || staffIds.length === 0;
      if (useAllStaff) {
          console.log(`exportPlanningData: Exporting schedule data for ALL STAFF from ${startDate} to ${endDate}`);
@@ -79,11 +79,7 @@ exports.exportPlanningDataHandler = onCall({
                 name: doc.data().nickname || doc.data().firstName || 'Unknown',
             }));
         } else {
-            // Option B: Specific staff (Firestore 'in' query is limited to 30 items)
-            // If you have more than 30 staff, we fetch them individually or in chunks.
-            // For simplicity and given your restaurant's scale, we'll fetch them efficiently.
-            
-            // Chunk staffIds into groups of 30 for 'in' query
+            // Option B: Specific staff
             const staffIdChunks = [];
             for (let i = 0; i < staffIds.length; i += 30) {
                 staffIdChunks.push(staffIds.slice(i, i + 30));
@@ -91,7 +87,8 @@ exports.exportPlanningDataHandler = onCall({
 
             const staffPromises = staffIdChunks.map(chunk =>
                 db.collection('staff_profiles')
-                    .where(FieldValue.documentId(), 'in', chunk)
+                    // --- FIX: Use FieldPath.documentId() ---
+                    .where(FieldPath.documentId(), 'in', chunk)
                     .get()
             );
 
@@ -119,10 +116,6 @@ exports.exportPlanningDataHandler = onCall({
             .where("date", ">=", startDate)
             .where("date", "<=", endDate);
 
-        // **MODIFICATION**: If specific staff are requested, filter schedules by staffId
-        // This is more efficient than fetching all schedules.
-        // We must also chunk this query.
-        
         const schedulesMap = new Map();
 
         if (useAllStaff) {
@@ -141,6 +134,7 @@ exports.exportPlanningDataHandler = onCall({
                 staffIdChunks.push(allStaffIdsToProcess.slice(i, i + 30));
             }
 
+            // This query correctly uses 'staffId' and did not need fixing
             const schedulePromises = staffIdChunks.map(chunk =>
                 schedulesQuery.where('staffId', 'in', chunk).get()
             );
@@ -172,7 +166,6 @@ exports.exportPlanningDataHandler = onCall({
                 const existingSchedule = schedulesMap.get(key);
 
                 if (existingSchedule) {
-                    // Schedule exists, use it
                     records.push({
                         scheduleId: existingSchedule.scheduleId,
                         staffId: existingSchedule.staffId,
@@ -184,9 +177,8 @@ exports.exportPlanningDataHandler = onCall({
                         notes: existingSchedule.notes || ''
                     });
                 } else {
-                    // No schedule exists, create a placeholder "off" row
                     records.push({
-                        scheduleId: `${staff.id}_${date}`, // Use the predictable ID
+                        scheduleId: `${staff.id}_${date}`,
                         staffId: staff.id,
                         staffName: staff.name,
                         date: date,

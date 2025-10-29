@@ -3,60 +3,40 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore } = require('firebase-admin/firestore');
 const { parse: csvParseSync } = require('csv-parse/sync');
-// --- ADDED LUXON for robust date parsing ---
 const { DateTime } = require('luxon');
 
-// Use V8 syntax for db, consistent with your other functions
 const db = admin.firestore();
 
 // --- Configuration ---
 const REQUIRED_HEADERS_STAFFID = ['staffid', 'staffid'];
 const REQUIRED_HEADERS_DATE = ['date'];
-const OPTIONAL_SCHEDULEID = ['scheduleid', 'scheduleid'];
+// --- RENAMED for clarity ---
+const OPTIONAL_SCHEDULEID_HEADERS = ['scheduleid', 'scheduleid'];
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
-// --- NEW HELPER ---
-/**
- * Gets a value from a CSV record object by checking a list of possible header names.
- * Checks are case-insensitive.
- */
+// --- HELPER ---
 const getRecordValue = (record, possibleNames) => {
     const recordKeys = Object.keys(record);
     for (const name of possibleNames) {
-        // Find the actual header key in the record that matches (case-insensitive)
         const actualHeader = recordKeys.find(h => h.toLowerCase() === name.toLowerCase());
         if (actualHeader && record[actualHeader] !== undefined) {
             return record[actualHeader].trim();
         }
     }
-    return undefined; // Return undefined if no value found
+    return undefined;
 };
 
-// --- NEW HELPER to parse multiple date formats ---
-/**
- * Parses a date string from a CSV.
- * Tries "yyyy-MM-dd", "dd-MM-yy", and "dd-MM-yyyy".
- * @param {string} dateString The date string from the CSV.
- * @returns {string | null} A valid "yyyy-MM-dd" string or null.
- */
+// --- HELPER to parse multiple date formats ---
 const parseDateString = (dateString) => {
     if (!dateString) return null;
-
-    // List of formats to try
-    const formatsToTry = [
-        'yyyy-MM-dd', // Format 1: 2025-10-23
-        'dd-MM-yy',   // Format 2: 23-10-25
-        'dd-MM-yyyy'  // Format 3: 23-10-2025
-    ];
-
+    const formatsToTry = ['yyyy-MM-dd', 'dd-MM-yy', 'dd-MM-yyyy'];
     for (const format of formatsToTry) {
         const dt = DateTime.fromFormat(dateString, format, { zone: THAILAND_TIMEZONE });
         if (dt.isValid) {
             return dt.toFormat('yyyy-MM-dd'); // Return in standard format
         }
     }
-    
-    return null; // Could not parse
+    return null;
 };
 
 
@@ -110,16 +90,13 @@ exports.importPlanningDataHandler = onCall({
             return { result: "CSV file was empty.", analysis: { creates: [], updates: [], noChanges: [], errors: [] } };
         }
 
-        // --- UPDATED Header Validation ---
         console.log("importPlanningData: Validating CSV headers...");
         const headers = Object.keys(records[0]).map(h => h.toLowerCase());
-
-        // Check if *at least one* of the required ID spellings is present
         const hasStaffId = REQUIRED_HEADERS_STAFFID.some(key => headers.includes(key));
         const hasDate = REQUIRED_HEADERS_DATE.some(key => headers.includes(key));
 
         const missingRequired = [];
-        if (!hasStaffId) missingRequired.push('staffId'); // User-friendly name
+        if (!hasStaffId) missingRequired.push('staffId');
         if (!hasDate) missingRequired.push('date');
 
         if (missingRequired.length > 0) {
@@ -127,8 +104,6 @@ exports.importPlanningDataHandler = onCall({
             throw new HttpsError("invalid-argument", `Missing required columns in CSV: ${missingRequired.join(', ')}`);
         }
         console.log("importPlanningData: Headers validated.");
-        // --- END UPDATED Validation ---
-
 
         // 5. --- Analyze Each Record ---
         console.log("importPlanningData: Analyzing records...");
@@ -139,18 +114,17 @@ exports.importPlanningDataHandler = onCall({
 
             try {
                 // --- UPDATED Value Extraction ---
-                // Use the new helper to get values, checking multiple key spellings
                 const staffId = getRecordValue(record, REQUIRED_HEADERS_STAFFID);
                 const rawDate = getRecordValue(record, REQUIRED_HEADERS_DATE);
-                const scheduleId = getRecordValue(record, OPTIONAL_SCHEDULEID); // Can be null/undefined
-
-                // --- NEW Date Parsing ---
                 const date = parseDateString(rawDate);
+                
+                // We get scheduleId from CSV but won't use it to find the doc
+                // We *always* use staffId + date to build the ID
+                const csvScheduleId = getRecordValue(record, OPTIONAL_SCHEDULEID_HEADERS);
 
-                // Add to analysis object early
                 analysis.staffId = staffId;
-                analysis.date = date; // Store the *parsed* date
-                analysis.scheduleId = scheduleId;
+                analysis.date = date;
+                analysis.scheduleId = csvScheduleId; // Store what was in the CSV for reference
 
                 // a. --- Row-Level Validation (Required Fields) ---
                 if (!staffId || !date) {
@@ -159,20 +133,16 @@ exports.importPlanningDataHandler = onCall({
                     if (!date) errorMsg += `date (Could not parse: '${rawDate}')`;
                     throw new Error(errorMsg);
                 }
-                // --- REMOVED REGEX CHECK ---
-                // The parseDateString function already validates the format.
                 
                 // b. --- Prepare Firestore Data ---
-                // Get all potential values from the CSV
                 const staffName = getRecordValue(record, ['staffname', 'staffName']) || null;
                 const type = getRecordValue(record, ['type'])?.toLowerCase() || 'work';
                 const startTime = getRecordValue(record, ['starttime', 'startTime']) || null;
                 const endTime = getRecordValue(record, ['endtime', 'endTime']) || null;
                 const notes = getRecordValue(record, ['notes']) || null;
 
-                analysis.staffName = staffName; // Store for modal display
+                analysis.staffName = staffName;
 
-                // Build the data object to be saved
                 const csvScheduleData = {
                     staffId,
                     date,
@@ -184,36 +154,26 @@ exports.importPlanningDataHandler = onCall({
                 };
                 
                 // c. --- Determine Firestore Document Reference ---
+                // --- *** LOGIC CORRECTION *** ---
+                // We *always* build the doc ID from staffId and date.
+                // This makes the logic consistent with ShiftModal and the export function.
+                
                 let scheduleRef;
                 let existingRecord = null;
 
-                if (scheduleId) {
-                    // Strategy 1: scheduleId is provided. Use it.
-                    scheduleRef = db.collection('schedules').doc(scheduleId);
-                    const docSnap = await scheduleRef.get();
-                    if (docSnap.exists) {
-                        existingRecord = docSnap.data();
-                        // Sanity check
-                        if (existingRecord.staffId !== staffId || existingRecord.date !== date) {
-                            throw new Error(`Data mismatch: scheduleId ${scheduleId} belongs to a different staff/date.`);
-                        }
-                    } else {
-                        // This is an error. If an ID is provided, it should exist.
-                        throw new Error(`scheduleId "${scheduleId}" not found in database. Cannot update.`);
-                    }
-                } else {
-                    // Strategy 2: No scheduleId. Use staffId + date to build the doc ID.
-                    // This is the standard doc ID format from ShiftModal.jsx
-                    const docId = `${staffId}_${date}`;
-                    scheduleRef = db.collection('schedules').doc(docId);
-                    const docSnap = await scheduleRef.get();
-                    if (docSnap.exists) {
-                        existingRecord = docSnap.data();
-                    }
+                const docId = `${staffId}_${date}`;
+                scheduleRef = db.collection('schedules').doc(docId);
+                const docSnap = await scheduleRef.get();
+                
+                if (docSnap.exists) {
+                    existingRecord = docSnap.data();
                 }
                 
-                analysis.scheduleId = scheduleRef.id; // Store the actual doc ID we're acting on
-
+                // Store the *actual* doc ID we are acting on
+                analysis.scheduleId = scheduleRef.id; 
+                
+                // --- END LOGIC CORRECTION ---
+                
                 // d. --- Determine Action (Create, Update, NoChange) ---
                 if (existingRecord) {
                     // ** Case: Update or No Change **
@@ -221,18 +181,23 @@ exports.importPlanningDataHandler = onCall({
                     let changes = {};
                     let requiresUpdate = false;
                     
-                    // Compare all fields
                     for (const key of ['staffName', 'type', 'startTime', 'endTime', 'notes']) {
                         const csvValue = csvScheduleData[key];
-                        const existingValue = existingRecord[key] || null; // Treat missing field as null
+                        const existingValue = existingRecord[key] || null;
                         
-                        // --- FIX for 'type' field comparison ---
-                        const csvValueNormalized = (key === 'type' && csvValue === null) ? 'off' : csvValue;
-                        const existingValueNormalized = (key === 'type' && existingValue === null) ? 'off' : existingValue;
+                        // Handle 'off' vs null comparison
+                        const csvValueNormalized = (key === 'type' && (csvValue === 'off' || csvValue === null)) ? 'off' : csvValue;
+                        const existingValueNormalized = (key === 'type' && (existingValue === 'off' || existingValue === null)) ? 'off' : existingValue;
 
                         if (csvValueNormalized !== existingValueNormalized) {
-                            changes[key] = { from: existingValue, to: csvValue };
-                            requiresUpdate = true;
+                            // Special check: If type is changing to 'off', don't flag times if they are already null
+                            if (key === 'type' && csvValueNormalized === 'off') {
+                                changes[key] = { from: existingValue, to: csvValue };
+                                requiresUpdate = true;
+                            } else {
+                                changes[key] = { from: existingValue, to: csvValue };
+                                requiresUpdate = true;
+                            }
                         }
                     }
 
@@ -242,9 +207,26 @@ exports.importPlanningDataHandler = onCall({
                         analysis.action = 'nochange';
                     }
                 } else {
-                    // ** Case: Create New Record **
-                    analysis.action = 'create';
-                    analysis.details = csvScheduleData; // Show all new data
+                    // ** Case: Create New Record (or No Change if 'off') **
+                    // --- *** LOGIC CORRECTION *** ---
+                    // If the record doesn't exist, we only "create" it if
+                    // the CSV specifies a 'work' shift.
+                    // If the CSV says 'off', and it doesn't exist, that's "nochange".
+                    
+                    const effectiveType = csvScheduleData.type || 'work'; // Default to work
+                    
+                    if (effectiveType === 'off') {
+                        // It's 'off' in the CSV and doesn't exist in DB. No change needed.
+                        analysis.action = 'nochange';
+                    } else if (effectiveType === 'work' && (!csvScheduleData.startTime || !csvScheduleData.endTime)) {
+                        // It's a 'work' day but has no times. Treat as 'off'. No change needed.
+                        analysis.action = 'nochange';
+                    } else {
+                        // It's a 'work' day with times. Create it.
+                        analysis.action = 'create';
+                        analysis.details = csvScheduleData; // Show all new data
+                    }
+                    // --- END LOGIC CORRECTION ---
                 }
 
             } catch (error) { // Catch errors specific to this row
@@ -260,11 +242,25 @@ exports.importPlanningDataHandler = onCall({
         // 6. --- Return Analysis (Dry Run) or Execute Writes (Confirm) ---
         if (isDryRun) {
             console.log("importPlanningData: Dry run complete. Returning analysis.");
+            
+            // --- *** BUG FIX (TYPO) *** ---
+            // The key 'noChanges' must be 'nochanges' to match `action: 'nochange'` + 's'
             const summary = analysisResults.reduce((acc, cur) => {
                 acc[cur.action + 's'].push(cur);
                 return acc;
-            }, { creates: [], updates: [], noChanges: [], errors: [] });
-            return { analysis: summary };
+            }, { creates: [], updates: [], nochanges: [], errors: [] }); 
+            // --- END BUG FIX ---
+            
+            // Rename 'nochanges' back to 'noChanges' for the frontend modal
+            const finalSummary = {
+                creates: summary.creates,
+                updates: summary.updates,
+                noChanges: summary.nochanges, // Rename here
+                errors: summary.errors
+            };
+
+            return { analysis: finalSummary };
+            
         } else {
             // --- Execute Confirmed Writes ---
             console.log("importPlanningData: Executing confirmed import writes...");
@@ -274,41 +270,41 @@ exports.importPlanningDataHandler = onCall({
             const finalExecutionErrors = [];
 
             analysisResults.forEach(res => {
+                // We only write 'create' or 'update'
                 if (res.action === 'create' || res.action === 'update') {
                     const docRef = db.collection('schedules').doc(res.scheduleId);
                     
-                    // --- UPDATED LOGIC for setDoc ---
-                    // We now use res.details (which is csvScheduleData)
-                    // and ensure 'type' is 'off' if null
-                    let dataToSave = res.details;
-                    if (res.action === 'update') {
-                        // For updates, we must merge the *full* new object
-                        // The 'details' object only contains the *changes*
-                        // So we rebuild the object from the analysis row
-                        dataToSave = {
-                            staffId: res.staffId,
-                            date: res.date,
-                            staffName: res.staffName,
-                            type: getRecordValue(records[res.rowNum - 2], ['type'])?.toLowerCase() || 'work',
-                            startTime: getRecordValue(records[res.rowNum - 2], ['starttime', 'startTime']) || null,
-                            endTime: getRecordValue(records[res.rowNum - 2], ['endtime', 'endTime']) || null,
-                            notes: getRecordValue(records[res.rowNum - 2], ['notes']) || null,
-                        };
-                    }
+                    let dataToSave;
                     
+                    // Re-build the data object from the original record, not analysis
+                    // This ensures we get the *intended* data, not just 'details'
+                    const originalRecord = records[res.rowNum - 2];
+                    dataToSave = {
+                        staffId: res.staffId, // From analysis
+                        date: res.date,       // From analysis
+                        staffName: getRecordValue(originalRecord, ['staffname', 'staffName']) || null,
+                        type: getRecordValue(originalRecord, ['type'])?.toLowerCase() || 'work',
+                        startTime: getRecordValue(originalRecord, ['starttime', 'startTime']) || null,
+                        endTime: getRecordValue(originalRecord, ['endtime', 'endTime']) || null,
+                        notes: getRecordValue(originalRecord, ['notes']) || null,
+                    };
+
                     // Handle "off" days: if type is 'off', clear times
                     if (dataToSave.type === 'off') {
                         dataToSave.startTime = null;
                         dataToSave.endTime = null;
+                        dataToSave.notes = getRecordValue(originalRecord, ['notes']) || null; // Keep notes for 'off' days
                     }
                     
                     batch.set(docRef, dataToSave); 
                     
                     if (res.action === 'create') recordsCreated++;
                     if (res.action === 'update') recordsUpdated++;
+                    
                 } else if (res.action === 'error') {
                     res.errors.forEach(errMsg => finalExecutionErrors.push(`Row ${res.rowNum}: ${errMsg}`));
                 }
+                // 'nochange' actions are correctly ignored
             });
 
             await batch.commit();
