@@ -328,7 +328,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                     {/* Staff Rows within Department */}
                                     {groupedStaff[department].map(staff => (
                                         <tr key={staff.id} className="hover:bg-gray-600 group"> {/* Use group hover for cell bg */}
-                                            <td className="sticky left-0 bg-gray-800 group-hover:bg-gray-600 px-4 py-3 whitespace-nowrap text-sm font-medium text-white w-48 z-10 transition-colors">
+                                            <td className="sticky left-0 bg-gray-800 group-hover:bg-gray-600 px-4 py-3 whitespace-nowDrap text-sm font-medium text-white w-48 z-10 transition-colors">
                                                 {getDisplayName(staff)}
                                                 <div className="text-xs text-gray-400">{getCurrentJob(staff).position}</div>
                                             </td>

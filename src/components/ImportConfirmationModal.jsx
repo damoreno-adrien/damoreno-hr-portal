@@ -1,7 +1,8 @@
 // src/components/ImportConfirmationModal.jsx
 import React, { useMemo } from 'react';
 import Modal from './Modal'; // Assuming Modal.jsx is in the same directory
-import { CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowRightIcon, PlusIcon } from './Icons'; // Assuming you have an Icons component
+// --- Import Icons (Assuming you have this file) ---
+import { CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowRightIcon, PlusIcon } from './Icons'; 
 
 // Helper to get a consistent display name
 const getRowName = (row) => {
@@ -59,14 +60,18 @@ export default function ImportConfirmationModal({
     fileName = "Import", // New prop to set the title
     error // New prop for general errors
 }) {
-    if (!analysis) return null; // Don't render if no analysis data
-
+    // Ensure analysis is an object before destructuring
+    const safeAnalysis = useMemo(() => analysis || {}, [analysis]);
+    
     // Default to empty arrays if properties are missing
-    const { creates = [], updates = [], noChanges = [], errors = [] } = analysis;
+    const { creates = [], updates = [], noChanges = [], errors = [] } = safeAnalysis;
     const totalProcessed = creates.length + updates.length + noChanges.length + errors.length;
 
     // Check what type of import this is. Staff import has 'email'. Planning import has 'date'.
-    const isPlanningImport = creates[0]?.date || updates[0]?.date || errors[0]?.date;
+    const isPlanningImport = useMemo(() => {
+        const firstRow = creates[0] || updates[0] || errors[0];
+        return firstRow ? firstRow.hasOwnProperty('date') : false;
+    }, [creates, updates, errors]);
     
     const AnalysisSection = ({ title, icon, data, colorClass }) => {
         if (!data || data.length === 0) return null;
@@ -94,6 +99,11 @@ export default function ImportConfirmationModal({
                             {isPlanningImport && row.action === 'create' && (
                                 <div className="text-gray-400 text-xs">{renderCreateChanges(row.details)}</div>
                             )}
+                            
+                            {/* Render Staff Create (simple) */}
+                            {!isPlanningImport && row.action === 'create' && (
+                                <div className="text-gray-400 text-xs">New user will be created.</div>
+                            )}
 
                             {/* Render Updates (works for both) */}
                             {row.action === 'update' && (
@@ -105,6 +115,8 @@ export default function ImportConfirmationModal({
             </div>
         );
     };
+
+    if (!analysis) return null; // Don't render if no analysis data
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={`Confirm ${fileName}`}>
@@ -179,4 +191,3 @@ export default function ImportConfirmationModal({
         </Modal>
     );
 };
-
