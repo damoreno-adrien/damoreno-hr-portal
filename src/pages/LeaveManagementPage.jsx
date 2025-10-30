@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
-import { PlusIcon, SearchIcon } from '../components/Icons'; // --- Added SearchIcon ---
+import { PlusIcon } from '../components/Icons'; // --- Removed SearchIcon ---
+import { Search } from 'lucide-react'; // --- MODIFIED: Import from lucide-react ---
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
@@ -205,7 +206,8 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                     {/* Search Bar */}
                     <div className="relative flex-grow w-full md:w-auto">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <SearchIcon className="h-5 w-5 text-gray-400" />
+                            {/* --- MODIFIED: Use lucide icon --- */}
+                            <Search className="h-5 w-5 text-gray-400" />
                         </div>
                         <input
                             type="text"
