@@ -14,43 +14,42 @@ const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName && staff.lastName) return `${staff.firstName} ${staff.lastName}`;
     if (staff && staff.firstName) return staff.firstName;
-    if (staff && staff.fullName) return staff.fullName; // Fallback to fullName if needed
+    if (staff && staff.fullName) return staff.fullName;
     return 'Unknown Staff';
 };
 
 export default function AttendanceReportsPage({ db, staffList }) {
     const [reportData, setReportData] = useState([]);
-    const [isLoading, setIsLoading] = useState(false); // For generating report
-    // Default start/end dates to the current day
+    const [isLoading, setIsLoading] = useState(false);
     const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
-    const [selectedStaffId, setSelectedStaffId] = useState('all'); // Default to 'All Staff'
-    const [editingRecord, setEditingRecord] = useState(null); // For the edit modal
+    const [selectedStaffId, setSelectedStaffId] = useState('all');
+    const [editingRecord, setEditingRecord] = useState(null);
 
     // --- State for Export ---
     const [isExporting, setIsExporting] = useState(false);
 
     // --- State for Import ---
-    const [isImporting, setIsImporting] = useState(false); // For analysis step
-    const [isConfirmingImport, setIsConfirmingImport] = useState(false); // For execution step
-    const [importResult, setImportResult] = useState(null); // For final result message { message: string, errors: string[] }
-    const [analysisResult, setAnalysisResult] = useState(null); // Stores results from dry run { creates: [], updates: [], noChanges: [], errors: [] }
-    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false); // Controls confirmation modal visibility
-    const [csvDataToConfirm, setCsvDataToConfirm] = useState(null); // Stores raw CSV data between analysis and confirmation
-    const fileInputRef = useRef(null); // Ref for the hidden file input element
+    const [isImporting, setIsImporting] = useState(false);
+    const [isConfirmingImport, setIsConfirmingImport] = useState(false);
+    const [importResult, setImportResult] = useState(null);
+    const [analysisResult, setAnalysisResult] = useState(null);
+    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+    const [csvDataToConfirm, setCsvDataToConfirm] = useState(null);
+    const fileInputRef = useRef(null);
 
     // --- Function to generate the report displayed on the page ---
     const handleGenerateReport = async () => {
-        setIsLoading(true); // Start loading indicator
-        setReportData([]); // Clear previous report data
-        setImportResult(null); // Clear previous import results
+        setIsLoading(true);
+        setReportData([]);
+        setImportResult(null);
 
         try {
             // --- 1. Fetch Schedules ---
             console.log(`Generating report for ${startDate} to ${endDate}`);
             const schedulesQuery = query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate));
             const schedulesSnapshot = await getDocs(schedulesQuery);
-            const schedulesMap = new Map(); // Key: "staffId_date", Value: schedule data
+            const schedulesMap = new Map();
             schedulesSnapshot.docs.forEach(doc => {
                 const data = doc.data();
                 schedulesMap.set(`${data.staffId}_${data.date}`, data);
@@ -60,251 +59,224 @@ export default function AttendanceReportsPage({ db, staffList }) {
             // --- 2. Fetch Attendance ---
             const attendanceQuery = query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate));
             const attendanceSnapshot = await getDocs(attendanceQuery);
-            const attendanceMap = new Map(); // Key: "staffId_date", Value: { id: docId, ...data }
+            const attendanceMap = new Map();
             attendanceSnapshot.docs.forEach(doc => {
                 const data = doc.data();
-                attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data }); // Store doc ID with data
+                attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
             });
             console.log(`Fetched ${attendanceMap.size} attendance records.`);
 
             // --- 3. Fetch Approved Leave Requests ---
-            // *** IMPORTANT: Adjust collection name and field names if different in your Firestore ***
             const leaveQuery = query(
-                collection(db, "leave_requests"),      // ASSUMED collection name
-                where("status", "==", "approved"),     // ASSUMED status field and value
-                where("date", ">=", startDate),        // ASSUMED date field name
-                where("date", "<=", endDate)
+                collection(db, "leave_requests"),
+                where("status", "==", "approved"),
+                where("startDate", "<=", endDate) // Find leave that started before or during the range
             );
             const leaveSnapshot = await getDocs(leaveQuery);
             const leaveMap = new Map(); // Key: "staffId_date", Value: leave request data
+            
             leaveSnapshot.docs.forEach(doc => {
                 const data = doc.data();
-                // *** ASSUMING staffId field is "staffId" ***
-                if(data.staffId && data.date) {
-                   leaveMap.set(`${data.staffId}_${data.date}`, data);
-                } else {
-                    console.warn("Found leave request without staffId or date:", doc.id, data);
+                // Only process if the leave *also* ends on or after the start date
+                if (data.endDate >= startDate) {
+                    // This request is active in our window. Apply it to all relevant days.
+                    const allLeaveDays = dateUtils.eachDayOfInterval(data.startDate, data.endDate);
+                    allLeaveDays.forEach(day => {
+                        const dateStr = dateUtils.formatISODate(day);
+                        // Only add days that are *within* our report's date range
+                        if (dateStr >= startDate && dateStr <= endDate) {
+                            leaveMap.set(`${data.staffId}_${dateStr}`, data);
+                        }
+                    });
                 }
             });
             console.log(`Found ${leaveMap.size} approved leave days in range.`);
 
 
             // --- 4. Process and Generate Report Data ---
-            // Filter staff list based on selection
             const staffToReport = selectedStaffId === 'all'
-                ? staffList // Use the full list passed as prop
+                ? staffList.filter(s => s.status !== 'inactive') // Default to active staff
                 : staffList.filter(s => s.id === selectedStaffId);
 
-            const generatedData = []; // Array to hold processed report rows
-            const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate); // Get all dates in the range
+            const generatedData = [];
+            const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
 
-            // Loop through each relevant staff member
             for (const staff of staffToReport) {
-                if (!staff || !staff.id) continue; // Skip if staff data is invalid
+                if (!staff || !staff.id) continue;
 
-                // Loop through each day in the selected date range
                 for (const day of dateInterval) {
-                    const dateStr = dateUtils.formatISODate(day); // Format date as YYYY-MM-DD
-                    const key = `${staff.id}_${dateStr}`; // Unique key for maps
+                    const dateStr = dateUtils.formatISODate(day);
+                    const key = `${staff.id}_${dateStr}`;
 
-                    // Look up data for this staff/day
                     const schedule = schedulesMap.get(key);
                     const attendance = attendanceMap.get(key);
-                    const approvedLeave = leaveMap.get(key); // Check if on approved leave
+                    const approvedLeave = leaveMap.get(key);
 
-                    // Debugging logs (Optional: keep or remove as needed)
-                    // if (attendance && !schedule && !approvedLeave) console.log(`DEBUG: ...`);
-                    // if (attendance && schedule && schedule.type?.toLowerCase() !== 'work') console.log(`DEBUG: ...`);
-                    // if (attendance && schedule && schedule.type?.toLowerCase() === 'work' && !schedule.startTime) console.log(`DEBUG: ...`);
+                    // --- *** START OF LOGIC FIX *** ---
+                    // We process *every* day, not just days with data
+                    
+                    let status = 'Unknown';
+                    const checkInTime = dateUtils.fromFirestore(attendance?.checkInTime);
 
-
-                    // Determine if a row should be generated (if any relevant data exists)
-                    if (schedule || attendance || approvedLeave) {
-                        // --- Calculate Status ---
-                        let status = 'Unknown'; // Default status
-                        const checkInTime = dateUtils.fromFirestore(attendance?.checkInTime); // Convert Timestamp to JS Date or null
-
-                        // More robust schedule type checks (case-insensitive, handle null/undefined)
-                        const isWorkSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'work';
-                        const isOffSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'off';
-                        // Get start time ONLY if it's a valid work schedule
-                        const scheduledStartTimeStr = (isWorkSchedule && schedule.startTime) ? schedule.startTime : null;
-                        const scheduledTime = scheduledStartTimeStr ? dateUtils.fromFirestore(`${dateStr}T${scheduledStartTimeStr}`) : null; // Construct JS Date from schedule
+                    const isWorkSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'work';
+                    const isOffSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'off';
+                    const scheduledStartTimeStr = (isWorkSchedule && schedule.startTime) ? schedule.startTime : null;
+                    const scheduledTime = scheduledStartTimeStr ? dateUtils.fromFirestore(`${dateStr}T${scheduledStartTimeStr}`) : null;
 
 
-                        if (attendance) { // Attendance record EXISTS for this day
-                            if (scheduledTime) { // Scheduled Time Exists (implies valid work schedule)
-                                 if (checkInTime) { // Check-in time exists
-                                    if (checkInTime > scheduledTime) { // Check for lateness
-                                        // Calculate difference in minutes, rounding up
-                                        const lateMinutes = Math.ceil((checkInTime.getTime() - scheduledTime.getTime()) / 60000);
-                                        status = `Late (${lateMinutes}m)`;
-                                    } else {
-                                        status = 'Present'; // On time or early
-                                    }
+                    if (attendance) { // Attendance record EXISTS
+                        if (scheduledTime) { // Scheduled Time Exists
+                             if (checkInTime) {
+                                if (checkInTime > scheduledTime) {
+                                    const lateMinutes = Math.ceil((checkInTime.getTime() - scheduledTime.getTime()) / 60000);
+                                    status = `Late (${lateMinutes}m)`;
                                 } else {
-                                     status = 'Present (No Check-in?)'; // Data inconsistency
+                                    status = 'Present';
                                 }
-                            } else if (isOffSchedule) { // Attended but was scheduled Off
-                                 status = 'Worked on Day Off';
-                            } else { // Attended without a known 'Work' schedule (or schedule missing details)
-                                 status = 'Present (Unscheduled)';
-                            }
-                        } else { // No attendance record FOUND for this day
-                            if (approvedLeave) {
-                                status = 'Leave'; // Primary status if on approved leave
-                            } else if (isWorkSchedule) {
-                                status = 'Absent'; // Scheduled for work, no attendance, not on leave
-                            } else if (isOffSchedule) {
-                                status = 'Off'; // Scheduled off, no attendance
                             } else {
-                                // If schedule exists but isn't Work/Off, or no schedule exists (and not on leave)
-                                // Skip these rows as they don't represent a clear status relevant to attendance/absence
-                                 if (schedule && !isWorkSchedule && !isOffSchedule) {
-                                     console.log(`Skipping row for ${getDisplayName(staff)} on ${dateStr} - schedule type is '${schedule.type}'`);
-                                     continue; // Skip row
-                                 }
-                                 // If reached here, it means no attendance, no leave, no schedule - skipped by outer 'if' check already.
-                                 continue;
+                                 status = 'Present (No Check-in?)';
                             }
+                        } else if (isOffSchedule) {
+                             status = 'Worked on Day Off';
+                        } else {
+                             status = 'Present (Unscheduled)';
                         }
-
-                        // --- Calculate Work Hours ---
-                        const checkOutTime = dateUtils.fromFirestore(attendance?.checkOutTime);
-                        const breakStartTime = dateUtils.fromFirestore(attendance?.breakStart);
-                        const breakEndTime = dateUtils.fromFirestore(attendance?.breakEnd);
-
-                        let workHours = 0;
-                        // Calculate only if both check-in and check-out exist
-                        if (checkInTime && checkOutTime) {
-                            workHours = (checkOutTime.getTime() - checkInTime.getTime()); // Milliseconds worked
-                            // Subtract break time if both start and end exist
-                            if (breakStartTime && breakEndTime) {
-                                workHours -= (breakEndTime.getTime() - breakStartTime.getTime());
-                            }
-                            workHours = Math.max(0, workHours) / 3600000; // Convert to hours, ensure non-negative
+                    } else { // No attendance record FOUND
+                        if (approvedLeave) {
+                            status = 'Leave'; // Primary status
+                        } else if (isWorkSchedule) {
+                            status = 'Absent'; // Scheduled work, no attendance
+                        } else if (isOffSchedule) {
+                            status = 'Off'; // Scheduled off
+                        } else if (!schedule) {
+                            // *** THIS IS THE FIX ***
+                            // No schedule exists = Day Off
+                            status = 'Off';
+                        } else {
+                            // Schedule exists but isn't 'work' or 'off'
+                            status = 'Off'; // Treat other types (e.g., 'training') as 'Off'
                         }
+                    }
 
-                        // --- Add Processed Row to Report Data ---
-                        // Add row only if status was determined (i.e., not skipped)
-                         if (status !== 'Unknown') {
-                            generatedData.push({
-                                // Use attendance doc ID if available for editing, otherwise construct unique key
-                                id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
-                                staffId: staff.id,
-                                staffName: getDisplayName(staff), // Use helper for consistent naming
-                                date: dateStr, // Keep as yyyy-MM-dd string
-                                // Format times as HH:mm for display, show '-' if null
-                                checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
-                                checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
-                                // Format work hours, show N/A for Leave/Off days
-                                workHours: (status === 'Leave' || status === 'Off') ? 'N/A' : (workHours > 0 ? workHours.toFixed(2) : '0.00'),
-                                status: status, // The calculated status (Present, Late, Absent, Leave, Off, etc.)
-                                // Pass full attendance record (or placeholder) to Edit modal
-                                // Include staffId/date even if no record exists, useful for creating one manually
-                                fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null }, // Ensure id is null if creating
-                            });
+                    // --- Calculate Work Hours ---
+                    const checkOutTime = dateUtils.fromFirestore(attendance?.checkOutTime);
+                    const breakStartTime = dateUtils.fromFirestore(attendance?.breakStart);
+                    const breakEndTime = dateUtils.fromFirestore(attendance?.breakEnd);
+
+                    let workHours = 0;
+                    if (checkInTime && checkOutTime) {
+                        workHours = (checkOutTime.getTime() - checkInTime.getTime());
+                        if (breakStartTime && breakEndTime) {
+                            workHours -= (breakEndTime.getTime() - breakStartTime.getTime());
                         }
-                    } // End if (schedule || attendance || approvedLeave)
+                        workHours = Math.max(0, workHours) / 3600000;
+                    }
+
+                    // --- Add Processed Row to Report Data ---
+                    if (status !== 'Unknown') {
+                        generatedData.push({
+                            id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
+                            staffId: staff.id,
+                            staffName: getDisplayName(staff),
+                            date: dateStr,
+                            checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
+                            checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
+                            workHours: (status === 'Leave' || status === 'Off') ? 'N/A' : (workHours > 0 ? workHours.toFixed(2) : '0.00'),
+                            status: status,
+                            fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
+                        });
+                    }
+                    // --- *** END OF LOGIC FIX *** ---
                 } // End date loop
             } // End staff loop
 
-            // Sort the generated data by staff name, then by date
             generatedData.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.date.localeCompare(b.date));
-            setReportData(generatedData); // Update state with the final report data
+            setReportData(generatedData);
             console.log(`Generated ${generatedData.length} report rows.`);
 
         } catch (error) {
-            // Catch errors during report generation
             console.error("Error generating attendance report: ", error);
-             setImportResult({ message: "Error generating report.", errors: [error.message] }); // Display error to user
+             setImportResult({ message: "Error generating report.", errors: [error.message] });
         } finally {
-            setIsLoading(false); // Stop loading indicator
+            setIsLoading(false);
         }
     }; // --- End handleGenerateReport ---
 
 
     // --- Other Handlers (Edit, Export, Import) ---
 
-    // Handler for clicking a table row to open the edit/create modal
     const handleRowClick = (record) => {
         console.log("Editing record:", record);
-        setEditingRecord(record); // Pass the processed row data to the state
+        setEditingRecord(record);
     };
 
-    // Handler for the Export CSV button
     const handleExport = async () => {
         if (!startDate || !endDate) {
             alert("Please select both a start and end date for the export.");
             return;
         }
         setIsExporting(true);
-        setImportResult(null); // Clear previous messages
+        setImportResult(null);
         try {
-            const functions = getFunctions(app);
+            // Using "asia-southeast1" as it matches your other functions
+            const functions = getFunctions(app, "asia-southeast1"); 
             const exportAttendanceData = httpsCallable(functions, 'exportAttendanceData');
             console.log(`Calling exportAttendanceData for ${startDate} to ${endDate}`);
-            const result = await exportAttendanceData({ startDate, endDate }); // Pass date range
+            const result = await exportAttendanceData({ startDate, endDate }); 
 
             const csvData = result.data.csvData;
             const filename = result.data.filename || `attendance_export_${startDate}_to_${endDate}_fallback.csv`;
 
             if (!csvData) {
                 alert("No attendance data found for the selected period to export.");
-                setIsExporting(false); // Ensure loading state is reset
+                setIsExporting(false);
                 return;
             }
 
-            // Trigger CSV download in the browser
-            const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' }); // Add BOM for Excel UTF-8 compatibility
+            const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
             link.setAttribute("download", filename);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
-            link.click(); // Simulate click to download
-            document.body.removeChild(link); // Clean up
-            URL.revokeObjectURL(url); // Release object URL
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
 
         } catch (error) {
             console.error("Error exporting attendance data:", error);
             const errorMsg = error.message || "Unknown export error";
             alert(`Failed to export attendance data: ${errorMsg}`);
-             setImportResult({ message: "Export failed.", errors: [errorMsg] }); // Show error
+             setImportResult({ message: "Export failed.", errors: [errorMsg] });
         } finally {
-            setIsExporting(false); // Stop export loading indicator
+            setIsExporting(false);
         }
     };
 
-    // Handler for the Import CSV button (triggers file input)
     const handleImportClick = () => {
         if (fileInputRef.current) {
-            // Reset state before opening file dialog
             setImportResult(null);
             setAnalysisResult(null);
             setCsvDataToConfirm(null);
             setIsConfirmModalOpen(false);
-            fileInputRef.current.value = ''; // Clear previous file selection
+            fileInputRef.current.value = '';
             fileInputRef.current.click();
         }
     };
 
-    // Step 1 of Import: Read file and call Cloud Function for analysis (dry run)
     const handleFileSelected = (event) => {
         const file = event.target.files?.[0];
-        if (!file) return; // No file selected
-        // Don't reset value here, let the handler manage state
+        if (!file) return;
 
-        // Basic file type validation
-        if (!file.name.toLowerCase().endsWith('.csv') || file.type !== 'text/csv') {
+        // More permissive file type check
+        if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'application/vnd.ms-excel') {
             alert("Invalid file type. Please upload a CSV file (.csv).");
-            if (fileInputRef.current) fileInputRef.current.value = ''; // Clear invalid selection
+            if (fileInputRef.current) fileInputRef.current.value = '';
             return;
         }
 
         const reader = new FileReader();
-        // Callback for when file is successfully read
         reader.onload = async (e) => {
             const csvData = e.target?.result;
             if (typeof csvData !== 'string') {
@@ -312,28 +284,24 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 return;
             }
 
-            setIsImporting(true); // Start analysis loading indicator
+            setIsImporting(true);
             setAnalysisResult(null);
             setImportResult(null);
             console.log("Attendance Import Step 1: Calling importAttendanceData (Dry Run)...");
 
             try {
-                const functions = getFunctions(app);
+                const functions = getFunctions(app, "asia-southeast1");
                 const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
-                // Call the function with CSV data and confirm: false
                 const result = await importAttendanceData({ csvData, confirm: false });
 
                 console.log("Attendance Import Step 1: Received response:", result);
-                console.log("Attendance Import Step 1: Data:", result.data);
 
-                // Check if the response contains the expected 'analysis' object
                 if (result.data && result.data.analysis) {
                     console.log("Attendance Import Step 1: Analysis data found. Opening confirmation modal.");
-                    setAnalysisResult(result.data.analysis); // Store the analysis results
-                    setCsvDataToConfirm(csvData); // Store the raw CSV data for the confirmation step
-                    setIsConfirmModalOpen(true); // Open the confirmation modal
+                    setAnalysisResult(result.data.analysis);
+                    setCsvDataToConfirm(csvData);
+                    setIsConfirmModalOpen(true);
                 } else {
-                    // Handle cases where analysis might fail server-side or return unexpected structure
                     console.error("Attendance Import Step 1: Analysis data missing or invalid in response.", result.data);
                     setImportResult({
                         message: result.data?.result || "Analysis failed or returned no data.",
@@ -342,7 +310,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 }
 
             } catch (error) {
-                // Catch errors during the Cloud Function call itself (network, permissions, etc.)
                 console.error("Attendance Import Step 1: Error during analysis function call:", error);
                  const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
                 setImportResult({
@@ -350,60 +317,49 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
                 });
             } finally {
-                setIsImporting(false); // Stop analysis loading indicator
-                 console.log("Attendance Import Step 1: Analysis phase finished.");
-                 // Clear file input value *after* processing is done (success or fail)
+                setIsImporting(false);
                  if (fileInputRef.current) fileInputRef.current.value = '';
             }
         };
-        // Callback for file reading errors
         reader.onerror = () => {
             alert("Error reading file.");
             setIsImporting(false);
-            if (fileInputRef.current) fileInputRef.current.value = ''; // Clear on error too
+            if (fileInputRef.current) fileInputRef.current.value = '';
         };
-        // Start reading the file as text
         reader.readAsText(file);
     };
 
-    // Step 2 of Import: Handle confirmation from the modal, call Cloud Function to execute
     const handleConfirmImport = async () => {
         if (!csvDataToConfirm) {
              alert("Internal error: No CSV data stored for confirmation.");
-             handleCancelImport(); // Reset state
+             handleCancelImport();
              return;
         }
 
-        setIsConfirmingImport(true); // Start execution loading indicator
-        setIsConfirmModalOpen(false); // Close the confirmation modal
-        setImportResult(null); // Clear previous final results
+        setIsConfirmingImport(true);
+        setIsConfirmModalOpen(false);
+        setImportResult(null);
         console.log("Attendance Import Step 2: Calling importAttendanceData (Confirm: true)...");
 
         try {
-            const functions = getFunctions(app);
+            const functions = getFunctions(app, "asia-southeast1");
             const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
-            // Call the function with stored CSV data and confirm: true
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
 
             console.log("Attendance Import Step 2: Received final response:", result.data);
-            // Store the FINAL result message and errors
             setImportResult({
-                message: result.data.result || "Import completed.", // Provide default message
+                message: result.data.result || "Import completed.",
                 errors: result.data.errors || []
             });
 
-            // Refresh the report data on the page ONLY if the import likely succeeded (e.g., no errors reported back)
              if (!result.data.errors || result.data.errors.length === 0) {
                  console.log("Attendance Import Step 2: Import seems successful, refreshing report...");
-                 // Use a slight delay if needed to allow Firestore listeners to potentially update
-                 // setTimeout(handleGenerateReport, 500);
-                 await handleGenerateReport(); // Regenerate the report to show changes
+                 await handleGenerateReport();
              } else {
                  console.warn("Attendance Import Step 2: Import completed with errors, report not automatically refreshed.");
              }
 
         } catch (error) {
-            // Catch errors during the confirmation Cloud Function call
             console.error("Attendance Import Step 2: Error confirming import call:", error);
              const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
             setImportResult({
@@ -411,60 +367,50 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
             });
         } finally {
-            setIsConfirmingImport(false); // Stop execution loading indicator
-            // Clear temporary state regardless of success/failure
+            setIsConfirmingImport(false);
             setCsvDataToConfirm(null);
             setAnalysisResult(null);
-            console.log("Attendance Import Step 2: Confirmation phase finished.");
         }
     };
 
-    // Step 3 of Import: Handle cancellation from the modal
     const handleCancelImport = () => {
-        setIsConfirmModalOpen(false); // Close modal
-        // Clear temporary state
+        setIsConfirmModalOpen(false);
         setAnalysisResult(null);
         setCsvDataToConfirm(null);
-        // Ensure file input is cleared
         if (fileInputRef.current) fileInputRef.current.value = '';
         console.log("Attendance Import: Cancelled.");
     };
 
-
     // --- Render Component JSX ---
     return (
         <div>
-             {/* --- Modals --- */}
-            {/* Edit/Create Attendance Modal Instance */}
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}>
                     <EditAttendanceModal
                         db={db}
-                        record={editingRecord} // Pass the processed row data including fullRecord
+                        record={editingRecord}
                         onClose={() => {
-                            setEditingRecord(null); // Close modal
-                            handleGenerateReport(); // Refresh report after modal closes
+                            setEditingRecord(null);
+                            handleGenerateReport();
                         }}
                      />
                 </Modal>
             )}
-            {/* Import Confirmation Modal Instance */}
+            
+            {/* --- MODIFIED: Pass correct props based on ImportConfirmationModal.jsx --- */}
             <ImportConfirmationModal
                 isOpen={isConfirmModalOpen}
-                onClose={handleCancelImport} // Use cancel handler
-                analysisResult={analysisResult} // Pass analysis data
-                onConfirm={handleConfirmImport} // Use confirm handler
-                isConfirming={isConfirmingImport} // Pass execution loading state
+                onClose={handleCancelImport}
+                analysis={analysisResult} // Prop is 'analysis'
+                onConfirm={handleConfirmImport}
+                isLoading={isConfirmingImport} // Prop is 'isLoading'
+                fileName="Attendance Import" // Pass title
             />
 
-            {/* --- Page Title --- */}
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
 
-            {/* --- Filter Controls & Action Buttons Panel --- */}
             <div className="bg-gray-800 rounded-lg shadow-lg p-4 md:p-6 mb-8">
-                 {/* Filter Row */}
                  <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
-                     {/* Start Date Input */}
                      <div className="flex-grow">
                         <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                         <input
@@ -475,7 +421,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:ring-amber-500 focus:border-amber-500 text-gray-200"
                          />
                     </div>
-                     {/* End Date Input */}
                      <div className="flex-grow">
                         <label htmlFor="endDate" className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
                         <input
@@ -483,11 +428,10 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             type="date"
                             value={endDate}
                             onChange={e => setEndDate(e.target.value)}
-                            min={startDate} // Prevent end date being before start date
+                            min={startDate}
                             className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:ring-amber-500 focus:border-amber-500 text-gray-200"
                          />
                     </div>
-                     {/* Staff Selector Dropdown */}
                      <div className="flex-grow">
                         <label htmlFor="staffSelect" className="block text-sm font-medium text-gray-300 mb-1">Staff Member</label>
                         <select
@@ -496,9 +440,10 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             onChange={e => setSelectedStaffId(e.target.value)}
                             className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:ring-amber-500 focus:border-amber-500 text-gray-200"
                         >
-                            <option value="all">All Staff</option>
-                            {/* Sort staff list alphabetically by display name for dropdown */}
+                            <option value="all">All Active Staff</option>
+                            {/* Filter out inactive staff from dropdown, then sort */}
                             {staffList
+                                .filter(s => s.status !== 'inactive')
                                 .sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b)))
                                 .map(staff => (
                                     <option key={staff.id} value={staff.id}>
@@ -508,57 +453,46 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             }
                         </select>
                     </div>
-                     {/* Generate Report Button */}
                      <button
                         onClick={handleGenerateReport}
-                        // Disable if any operation is in progress
                         disabled={isLoading || isImporting || isConfirmingImport || isExporting}
                         className="w-full sm:w-auto px-5 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 disabled:cursor-not-allowed flex-shrink-0 transition duration-150 ease-in-out text-white font-semibold"
                     >
                         {isLoading ? 'Generating...' : 'Generate Report'}
                     </button>
                  </div>
-                 {/* Action Buttons Row (Export/Import) */}
                 <div className="flex flex-col sm:flex-row sm:justify-end gap-3 mt-4 border-t border-gray-700 pt-4">
-                     {/* Export Button */}
                      <button
                         onClick={handleExport}
-                        // Disable if any operation is in progress
                         disabled={isExporting || isLoading || isImporting || isConfirmingImport}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
                         <DownloadIcon className="h-5 w-5 mr-2" />
                         {isExporting ? 'Exporting...' : 'Export CSV'}
                     </button>
-                     {/* Import Button */}
                      <button
                         onClick={handleImportClick}
-                        // Disable if any operation is in progress
                         disabled={isImporting || isConfirmingImport || isLoading || isExporting}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
                         <UploadIcon className="h-5 w-5 mr-2" />
-                        {/* Show appropriate loading text */}
                         {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
                     </button>
-                     {/* Hidden File Input Element */}
                      <input
                         type="file"
                         ref={fileInputRef}
                         onChange={handleFileSelected}
-                        accept=".csv, text/csv" // Specify accepted file types
-                        style={{ display: 'none' }} // Keep it hidden
+                        accept=".csv, text/csv, application/vnd.ms-excel"
+                        style={{ display: 'none' }}
                       />
                 </div>
             </div>
 
-             {/* --- Import Results --- */}
              {importResult && (
                 <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
                     <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}>
                         Import Result: {importResult.message}
                     </p>
-                    {/* Display errors if any occurred during import */}
                     {importResult.errors?.length > 0 && (
                         <div className="mt-3">
                             <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered during import:</p>
@@ -572,7 +506,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 </div>
              )}
 
-            {/* --- Report Table --- */}
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
@@ -586,40 +519,36 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
-                        {/* Conditional rendering based on loading state and data presence */}
                         {isLoading ? (
                              <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr>
                         ) : reportData.length > 0 ? (
-                            // Map through report data to create table rows
                             reportData.map((row) => (
                                 <tr
-                                    key={row.id || `${row.staffId}_${row.date}`} // Use unique key
-                                    onClick={() => handleRowClick(row)} // Allow clicking row to edit
+                                    key={row.id || `${row.staffId}_${row.date}`}
+                                    onClick={() => handleRowClick(row)}
                                     className="hover:bg-gray-700 cursor-pointer transition duration-150 ease-in-out"
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(row.date)}</td>
-                                    {/* Apply dynamic text color based on status */}
                                     <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${
                                         row.status === 'Absent' ? 'text-red-400' :
                                         row.status.startsWith('Late') ? 'text-yellow-400' :
-                                        row.status === 'Leave' ? 'text-blue-400' : // Color for Leave
-                                        row.status === 'Off' ? 'text-gray-500' : // Color for Off
-                                        row.status.includes('Worked on Day Off') ? 'text-orange-400' : // Color for working on day off
-                                        'text-gray-300' // Default/Present/Unscheduled etc.
+                                        row.status === 'Leave' ? 'text-blue-400' :
+                                        row.status === 'Off' ? 'text-gray-500' :
+                                        row.status.includes('Worked on Day Off') ? 'text-orange-400' :
+                                        'text-gray-300'
                                     }`}>{row.status}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours}</td>
+                                    <td className="px-6 py-4 whitespace-nowDrap text-sm text-gray-300">{row.workHours}</td>
                                 </tr>
                             ))
                         ) : (
-                            // Message when no data is found or report hasn't been generated
-                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">No attendance data found for the selected criteria, or report not yet generated.</td></tr>
+                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">No attendance data found for the selected criteria.</td></tr>
                         )}
                     </tbody>
                 </table>
-            </div> {/* End Table Wrapper */}
-        </div> // End Page Wrapper
+            </div>
+        </div>
     );
 }
