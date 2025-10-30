@@ -169,7 +169,7 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 }
 
                 // b. --- Extract and Validate Key Identifying Fields ---
-                let attendanceDocId = hasAttendanceDocId ? getRecordValue('attendanceDocId') : null;
+                let csvDocId = hasAttendanceDocId ? getRecordValue('attendanceDocId') : null;
                 const staffId = getRecordValue('staffId');
                 const rawDate = getRecordValue('date');
                 const staffName = getRecordValue('staffName') || '';
@@ -186,16 +186,16 @@ exports.importAttendanceDataHandler = functions.https.onCall({
 
                 // --- *** LOGIC FIX: Generate the ID consistently *** ---
                 const expectedDocId = `${staffId}_${date}`;
-                if (hasAttendanceDocId && attendanceDocId && attendanceDocId !== expectedDocId) {
-                    // If an ID is provided but it doesn't match our format, trust it but log a warning.
-                    console.warn(`Row ${rowNum}: Provided attendanceDocId '${attendanceDocId}' does not match expected format '${expectedDocId}'. Using provided ID.`);
+                if (csvDocId && csvDocId !== expectedDocId) {
+                    // If an ID is provided but it doesn't match our format, trust it
+                    console.warn(`Row ${rowNum}: Provided attendanceDocId '${csvDocId}' does not match expected format '${expectedDocId}'. Using provided ID.`);
                 } else {
                     // Use the formatted, predictable ID
-                    attendanceDocId = expectedDocId;
+                    csvDocId = expectedDocId;
                 }
                 // --- *** END LOGIC FIX *** ---
 
-                analysis.attendanceDocId = attendanceDocId; // This is now ALWAYS the formatted ID
+                analysis.attendanceDocId = csvDocId; // This is now ALWAYS the formatted ID
                 analysis.staffId = staffId;
                 analysis.date = date;
                 analysis.staffName = staffName;
@@ -216,8 +216,8 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 let attendanceRef = null;
 
                 // --- *** LOGIC FIX: Always find by the formatted ID *** ---
-                console.log(`importAttendanceData: Row ${rowNum} - Checking for doc with ID: ${attendanceDocId}`);
-                attendanceRef = db.collection('attendance').doc(attendanceDocId);
+                console.log(`importAttendanceData: Row ${rowNum} - Checking for doc with ID: ${csvDocId}`);
+                attendanceRef = db.collection('attendance').doc(csvDocId);
                 const docSnap = await attendanceRef.get();
                 if (docSnap.exists) {
                     existingRecord = docSnap.data();
@@ -311,7 +311,6 @@ exports.importAttendanceDataHandler = functions.https.onCall({
             console.log("importAttendanceData: Executing confirmed import writes...");
             let recordsCreated = 0;
             let recordsUpdated = 0;
-            const writePromises = [];
             const finalExecutionErrors = [];
 
             // --- *** LOGIC FIX: Use Batch write for creates/updates *** ---
