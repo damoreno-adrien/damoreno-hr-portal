@@ -1,8 +1,9 @@
+// src/components/LeaveManagement/LeaveRequestItem.jsx
 import React from 'react';
 import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 import { BriefcaseIcon, TrashIcon } from '../Icons'; // Correct: Go up one level
 
-// Reusable StatusBadge component (can be moved to a shared location later if needed)
+// Reusable StatusBadge component
 const StatusBadge = ({ status }) => {
     const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
     if (status === 'approved') return <span className={`${baseClasses} bg-green-600 text-green-100`}>Approved</span>;
@@ -11,17 +12,34 @@ const StatusBadge = ({ status }) => {
 };
 
 export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange }) => {
+    
+    // --- MODIFICATION: Logic to show who created it ---
+    let createdByString = '';
+    if (req.createdByName) {
+        if (req.createdBy === req.staffId) {
+            // Staff requested it themselves
+            createdByString = `(Requested by ${req.createdByName})`;
+        } else {
+            // Manager created it for them
+            createdByString = `(Created by ${req.createdByName})`;
+        }
+    }
+    // --- END MODIFICATION ---
+
     return (
         <div className="p-4">
             <div className="flex flex-wrap justify-between items-center gap-4">
                 <div className="flex-grow min-w-[200px]">
                     <p className="font-bold text-white">{req.displayStaffName}</p>
-                    {/* Apply formatting to requestedAt */}
-                    <p className="text-sm text-gray-400">{req.leaveType} | Requested: {dateUtils.formatDisplayDate(req.requestedAt)}</p>
+                    {/* --- MODIFIED: Display creator name --- */}
+                    <p className="text-sm text-gray-400">
+                        {req.leaveType} | Requested: {dateUtils.formatDisplayDate(req.requestedAt)}
+                        {createdByString && <span className="italic ml-1">{createdByString}</span>}
+                    </p>
+                    {/* --- END MODIFICATION --- */}
                 </div>
                 <div className="text-center">
                     <p className="text-sm text-gray-300">Dates:</p>
-                    {/* Apply formatting to start/end dates */}
                     <p className="font-medium text-white">{dateUtils.formatDisplayDate(req.startDate)} to {dateUtils.formatDisplayDate(req.endDate)}</p>
                 </div>
                 <div className="text-center">

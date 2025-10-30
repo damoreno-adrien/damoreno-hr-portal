@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'; // --- MODIFIED: Added useMemo ---
+// src/components/LeaveRequestForm.jsx
+import React, { useState, useEffect, useMemo } from 'react';
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
@@ -38,7 +39,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     }, [startDate, endDate]);
 
-    // Use our new standard function for day calculation
     const totalDays = dateUtils.differenceInCalendarDays(endDate, startDate);
 
     const handleSubmit = async (e) => {
@@ -94,21 +94,41 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
         const requestData = {
             staffId: checkStaffId,
-            staffName: getDisplayName(staffForRequest), // Use helper to get correct name
+            staffName: getDisplayName(staffForRequest),
             leaveType, startDate, endDate, totalDays, reason,
             status: existingRequest ? existingRequest.status : 'pending',
         };
 
         try {
             if (existingRequest) {
+                // This is an EDIT
                 const docRef = doc(db, 'leave_requests', existingRequest.id);
-                await updateDoc(docRef, requestData);
+                await updateDoc(docRef, {
+                    ...requestData,
+                    lastEditedBy: user.uid, // Store who last edited it
+                    lastEditedAt: serverTimestamp()
+                });
             } else {
+                // This is a NEW request
+                // --- MODIFICATION: Find creator's name ---
+                let creatorName = 'Unknown User';
+                const creatorProfile = staffList.find(s => s.id === user.uid);
+                if (creatorProfile) {
+                    creatorName = getDisplayName(creatorProfile);
+                } else if (user.displayName) {
+                    creatorName = user.displayName; // Fallback to auth name
+                } else if (userRole === 'manager') {
+                    creatorName = 'Manager';
+                }
+                // --- END MODIFICATION ---
+
                 await addDoc(collection(db, 'leave_requests'), {
                     ...requestData,
                     requestedAt: serverTimestamp(),
                     status: isManagerCreating ? 'approved' : 'pending',
                     isReadByStaff: isManagerCreating ? false : null,
+                    createdBy: user.uid, // --- ADDED THIS ---
+                    createdByName: creatorName, // --- ADDED THIS ---
                 });
             }
             onClose();
@@ -120,17 +140,13 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     };
 
-    // --- *** MODIFIED DATE LOGIC *** ---
-    // Use useMemo to calculate the minimum allowed start date based on user role
     const minStartDate = useMemo(() => {
         if (userRole === 'manager') {
             return null; // Managers can select past dates
         }
-        // Staff are restricted to tomorrow
         const tomorrow = dateUtils.addDays(new Date(), 1);
         return dateUtils.formatISODate(tomorrow);
     }, [userRole]);
-    // --- *** END MODIFIED LOGIC *** ---
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -167,7 +183,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                         type="date" 
                         value={startDate} 
                         onChange={(e) => setStartDate(e.target.value)} 
-                        min={minStartDate} // --- MODIFIED: Use new variable
+                        min={minStartDate}
                         className="w-full p-2 bg-gray-700 rounded-md" 
                     />
                 </div>
@@ -177,7 +193,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                         type="date" 
                         value={endDate} 
                         onChange={(e) => setEndDate(e.target.value)} 
-                        min={startDate || minStartDate} // --- MODIFIED: Use new variable
+                        min={startDate || minStartDate}
                         className="w-full p-2 bg-gray-700 rounded-md" 
                     />
                 </div>
