@@ -10,7 +10,9 @@ const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
-export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig, leaveBalances }) {
+// --- *** THIS IS THE FIX *** ---
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, userRole, staffList = [], companyConfig, leaveBalances, isModalOpen }) {
+// --- *** END FIX *** ---
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -36,13 +38,13 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             setReason('');
             setSelectedStaffId('');
         }
-    }, [existingRequest, isModalOpen]); // Reset when request changes or modal opens
+    }, [existingRequest, isModalOpen]); // This dependency array is now correct
 
     useEffect(() => {
         const start = dateUtils.parseISODateString(startDate);
         const end = dateUtils.parseISODateString(endDate);
         if (start && end && end < start) {
-            setEndDate(startDate); // Set end date to start date if it's invalid
+            setEndDate(startDate);
         }
     }, [startDate, endDate]);
 
@@ -66,7 +68,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
 
         if (userRole === 'staff') {
-            // Check for leave balances only if balances are available
             if (leaveBalances) {
                 if (leaveType === 'Public Holiday (In Lieu)' && totalDays > leaveBalances.publicHoliday) {
                     setError(`You only have ${leaveBalances.publicHoliday} public holiday credits available.`);
@@ -115,31 +116,29 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 const docRef = doc(db, 'leave_requests', existingRequest.id);
                 await updateDoc(docRef, {
                     ...requestData,
-                    lastEditedBy: user.uid, // Store who last edited it
+                    lastEditedBy: user.uid,
                     lastEditedAt: serverTimestamp()
                 });
             } else {
                 // This is a NEW request
-                // --- MODIFICATION: Find creator's name ---
                 let creatorName = 'Unknown User';
                 const creatorProfile = staffList.find(s => s.id === user.uid);
                 
                 if (creatorProfile) {
                     creatorName = getDisplayName(creatorProfile);
                 } else if (user.displayName) {
-                    creatorName = user.displayName; // Fallback to auth name
+                    creatorName = user.displayName;
                 } else if (userRole === 'manager') {
-                    creatorName = 'Manager'; // Fallback for manager
+                    creatorName = 'Manager';
                 }
-                // --- END MODIFICATION ---
 
                 await addDoc(collection(db, 'leave_requests'), {
                     ...requestData,
                     requestedAt: serverTimestamp(),
                     status: isManagerCreating ? 'approved' : 'pending',
                     isReadByStaff: isManagerCreating ? false : null,
-                    createdBy: user.uid, // --- ADDED THIS ---
-                    createdByName: creatorName, // --- ADDED THIS ---
+                    createdBy: user.uid,
+                    createdByName: creatorName,
                 });
             }
             onClose();
@@ -153,7 +152,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
 
     const minStartDate = useMemo(() => {
         if (userRole === 'manager') {
-            return null; // Managers can select past dates
+            return null;
         }
         const tomorrow = dateUtils.addDays(new Date(), 1);
         return dateUtils.formatISODate(tomorrow);
@@ -176,12 +175,10 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     <option>Annual Leave</option>
                     <option>Sick Leave</option>
                     <option>Personal Leave</option>
-                    {/* --- ADDED CHECK for leaveBalances --- */}
                     {(userRole === 'manager' || (leaveBalances && leaveBalances.publicHoliday > 0)) && (
                         <option>Public Holiday (In Lieu)</option>
                     )}
                 </select>
-                {/* --- ADDED CHECK for leaveBalances --- */}
                 {userRole === 'staff' && leaveBalances && (
                     <div className="text-xs text-gray-400 mt-1 space-y-1">
                         <p>Annual Leave Remaining: {leaveBalances.annual}</p>

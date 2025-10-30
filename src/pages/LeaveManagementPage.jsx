@@ -4,9 +4,9 @@ import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeB
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
 import { PlusIcon } from '../components/Icons';
-import { Search } from 'lucide-react'; // Import from lucide-react
+import { Search } from 'lucide-react';
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import * as dateUtils from '../utils/dateUtils';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -22,7 +22,7 @@ const StatusBadge = ({ status }) => {
     return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
 };
 
-// --- COMPONENT for Date Range Filters ---
+// COMPONENT for Date Range Filters
 const DateRangeFilter = ({ currentFilter, setFilter }) => {
     const filters = [
         { key: 'thisMonth', label: 'This Month' },
@@ -44,14 +44,14 @@ const DateRangeFilter = ({ currentFilter, setFilter }) => {
         </div>
     );
 };
-// --- END COMPONENT ---
+// END COMPONENT
 
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
-    const [filter, setFilter] = useState('pending'); // Status filter (pending, approved, rejected)
+    const [filter, setFilter] = useState('pending');
     const [searchTerm, setSearchTerm] = useState('');
-    const [dateFilter, setDateFilter] = useState('thisMonth'); // Date range filter
+    const [dateFilter, setDateFilter] = useState('thisMonth');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
 
@@ -99,17 +99,15 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         }
     }, [allLeaveRequests, userRole, db]);
 
-    // --- MODIFIED Effect to apply ALL filters (Now using correct dateUtils) ---
+    // MODIFIED Effect to apply ALL filters
     useEffect(() => {
         if (userRole === 'manager') {
             const now = new Date();
             
-            // --- THIS CODE WILL NOW WORK ---
             const monthStart = dateUtils.startOfMonth(now);
             const monthEnd = dateUtils.endOfMonth(now);
             const yearStart = dateUtils.startOfYear(now);
             const yearEnd = dateUtils.endOfYear(now);
-            // --- END ---
             
             const filtered = allLeaveRequests.filter(req => {
                 // 1. Filter by Status (Pending, Approved, Rejected)
@@ -185,7 +183,20 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         return (
             <div>
                 <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
-                    <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={activeStaffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
+                    {/* --- *** THIS IS THE FIX *** --- */}
+                    <LeaveRequestForm 
+                        db={db} 
+                        user={user} 
+                        onClose={closeModal} 
+                        existingRequest={requestToEdit} 
+                        userRole={userRole} 
+                        staffList={activeStaffList} 
+                        existingRequests={allLeaveRequests} 
+                        companyConfig={companyConfig} 
+                        leaveBalances={leaveBalances}
+                        isModalOpen={isModalOpen} 
+                    />
+                    {/* --- *** END FIX *** --- */}
                 </Modal>
                 
                 {/* --- HEADER --- */}
@@ -254,7 +265,19 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
-                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequests={allLeaveRequests} userRole={userRole} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={activeStaffList} />
+                {/* --- *** THIS IS THE FIX (for Staff) *** --- */}
+                <LeaveRequestForm 
+                    db={db} 
+                    user={user} 
+                    onClose={closeModal} 
+                    existingRequests={allLeaveRequests} 
+                    userRole={userRole} 
+                    companyConfig={companyConfig} 
+                    leaveBalances={leaveBalances} 
+                    staffList={activeStaffList} 
+                    isModalOpen={isModalOpen} 
+                />
+                {/* --- *** END FIX *** --- */}
             </Modal>
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>
