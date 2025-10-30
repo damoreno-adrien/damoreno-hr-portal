@@ -2,8 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
-import { PlusIcon } from '../components/Icons';
-// --- CORRECTED IMPORT PATH ---
+import { PlusIcon, SearchIcon } from '../components/Icons'; // --- Added SearchIcon ---
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
@@ -21,13 +20,44 @@ const StatusBadge = ({ status }) => {
     return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
 };
 
+// --- NEW COMPONENT for Date Range Filters ---
+const DateRangeFilter = ({ currentFilter, setFilter }) => {
+    const filters = [
+        { key: 'thisMonth', label: 'This Month' },
+        { key: 'thisYear', label: 'This Year' },
+        { key: 'allTime', label: 'All Time' },
+    ];
+    
+    return (
+        <div className="flex space-x-2 p-1 bg-gray-900 rounded-lg">
+            {filters.map(f => (
+                <button 
+                    key={f.key}
+                    onClick={() => setFilter(f.key)} 
+                    className={`px-3 py-1 text-xs rounded-md ${currentFilter === f.key ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}
+                >
+                    {f.label}
+                </button>
+            ))}
+        </div>
+    );
+};
+// --- END NEW COMPONENT ---
+
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
-    const [filter, setFilter] = useState('pending');
+    const [filter, setFilter] = useState('pending'); // Status filter (pending, approved, rejected)
+    
+    // --- NEW STATE for reorganization ---
+    const [searchTerm, setSearchTerm] = useState('');
+    const [dateFilter, setDateFilter] = useState('thisMonth'); // Date range filter
+    // --- END NEW STATE ---
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
 
+    // Effect to fetch all requests
     useEffect(() => {
         if (!db || !user) return;
         
@@ -55,6 +85,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         return () => unsubscribe();
     }, [db, userRole, user?.uid, staffList]);
 
+    // Effect to mark staff requests as read
     useEffect(() => {
         if (userRole === 'staff' && allLeaveRequests.length > 0) {
             const batch = writeBatch(db);
@@ -70,23 +101,54 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         }
     }, [allLeaveRequests, userRole, db]);
 
+    // --- MODIFIED Effect to apply ALL filters ---
     useEffect(() => {
         if (userRole === 'manager') {
+            const now = new Date();
+            const monthStart = dateUtils.startOfMonth(now);
+            const monthEnd = dateUtils.endOfMonth(now);
+            const yearStart = dateUtils.startOfYear(now);
+            const yearEnd = dateUtils.endOfYear(now);
+            
             const filtered = allLeaveRequests.filter(req => {
+                // 1. Filter by Status (Pending, Approved, Rejected)
                 if (req.status !== filter) return false;
+                
+                // 2. Filter by Search Term (case-insensitive)
+                if (searchTerm && !req.displayStaffName.toLowerCase().includes(searchTerm.toLowerCase())) {
+                    return false;
+                }
+
+                // 3. Filter by Date Range (only for 'approved' and 'rejected' tabs)
+                if (filter === 'approved' || filter === 'rejected') {
+                    const reqStartDate = dateUtils.parseISODateString(req.startDate);
+                    if (!reqStartDate) return false; // Failsafe
+
+                    if (dateFilter === 'thisMonth') {
+                        if (reqStartDate < monthStart || reqStartDate > monthEnd) return false;
+                    } else if (dateFilter === 'thisYear') {
+                        if (reqStartDate < yearStart || reqStartDate > yearEnd) return false;
+                    }
+                    // 'allTime' does nothing
+                }
+
+                // 4. Special rule for 'pending' tab (hide inactive staff)
                 if (filter === 'pending') {
                     const staffMember = staffList.find(s => s.id === req.staffId);
                     if (!staffMember || staffMember.status === 'inactive') {
                         return false;
                     }
                 }
+                
                 return true; 
             });
             setFilteredLeaveRequests(filtered);
         } else {
+            // Staff view doesn't have these filters
             setFilteredLeaveRequests(allLeaveRequests);
         }
-    }, [filter, allLeaveRequests, userRole, staffList]);
+    }, [filter, allLeaveRequests, userRole, staffList, searchTerm, dateFilter]);
+    // --- END MODIFIED Effect ---
 
     const handleUpdateRequest = async (id, newStatus) => { 
         const requestDocRef = doc(db, "leave_requests", id);
@@ -124,17 +186,44 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                 <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
                     <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} userRole={userRole} staffList={activeStaffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} leaveBalances={leaveBalances}/>
                 </Modal>
-                <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-8">
+                
+                {/* --- HEADER --- */}
+                <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-6">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Leave Management</h2>
-                    <div className="w-full md:w-auto flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
-                        <div className="flex space-x-2 p-1 bg-gray-700 rounded-lg">
-                            <button onClick={() => setFilter('pending')} className={`px-4 py-2 text-sm rounded-md ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Pending</button>
-                            <button onClick={() => setFilter('approved')} className={`px-4 py-2 text-sm rounded-md ${filter === 'approved' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Approved</button>
-                            <button onClick={() => setFilter('rejected')} className={`px-4 py-2 text-sm rounded-md ${filter === 'rejected' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Rejected</button>
-                        </div>
-                        <button onClick={openNewRequestModal} className="flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />New Request for Staff</button>
-                    </div>
+                    <button onClick={openNewRequestModal} className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />New Request for Staff</button>
                 </div>
+                
+                {/* --- NEW FILTER BAR --- */}
+                <div className="mb-6 p-4 bg-gray-900 rounded-lg flex flex-col md:flex-row gap-4 justify-between items-center">
+                    {/* Status Filter */}
+                    <div className="flex space-x-2 p-1 bg-gray-700 rounded-lg">
+                        <button onClick={() => setFilter('pending')} className={`px-4 py-2 text-sm rounded-md ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Pending</button>
+                        <button onClick={() => setFilter('approved')} className={`px-4 py-2 text-sm rounded-md ${filter === 'approved' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Approved</button>
+                        <button onClick={() => setFilter('rejected')} className={`px-4 py-2 text-sm rounded-md ${filter === 'rejected' ? 'bg-amber-600 text-white' : 'text-gray-300'}`}>Rejected</button>
+                    </div>
+
+                    {/* Search Bar */}
+                    <div className="relative flex-grow w-full md:w-auto">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <SearchIcon className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <input
+                            type="text"
+                            placeholder="Search by staff name..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-700 text-white border-gray-600 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                    </div>
+                    
+                    {/* Date Range Filter (Conditional) */}
+                    {(filter === 'approved' || filter === 'rejected') && (
+                        <DateRangeFilter currentFilter={dateFilter} setFilter={setDateFilter} />
+                    )}
+                </div>
+                {/* --- END NEW FILTER BAR --- */}
+
+                {/* --- RESULTS LIST --- */}
                 <div className="bg-gray-800 rounded-lg shadow-lg">
                     <div className="divide-y divide-gray-700">
                         {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
@@ -146,13 +235,21 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                                 onEditRequest={openEditModal}
                                 onMcStatusChange={handleMcStatusChange}
                             />
-                        )) : (<p className="text-center py-10 text-gray-400">No {filter} requests found.</p>)}
+                        )) : (
+                            <p className="text-center py-10 text-gray-400">
+                                No {filter} requests found
+                                {searchTerm && ` for "${searchTerm}"`}
+                                {(filter === 'approved' || filter === 'rejected') && dateFilter !== 'allTime' && ` in ${dateFilter === 'thisMonth' ? 'this month' : 'this year'}`}
+                                .
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
         );
     }
 
+    // --- STAFF VIEW (Unchanged) ---
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
