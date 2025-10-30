@@ -9,6 +9,11 @@ import { DownloadIcon, UploadIcon } from '../components/Icons';
 import * as dateUtils from '../utils/dateUtils';
 import { app } from "../../firebase.js";
 
+// --- *** FIX: Initialize functions with region *** ---
+const functionsAsia = getFunctions(app, "asia-southeast1");
+const exportAttendanceData = httpsCallable(functionsAsia, 'exportAttendanceData');
+const importAttendanceData = httpsCallable(functionsAsia, 'importAttendanceData');
+
 // Helper function for display name
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -77,13 +82,10 @@ export default function AttendanceReportsPage({ db, staffList }) {
             
             leaveSnapshot.docs.forEach(doc => {
                 const data = doc.data();
-                // Only process if the leave *also* ends on or after the start date
-                if (data.endDate >= startDate) {
-                    // This request is active in our window. Apply it to all relevant days.
+                if (data.endDate >= startDate) { // Filter for leave that ended during or after the range
                     const allLeaveDays = dateUtils.eachDayOfInterval(data.startDate, data.endDate);
                     allLeaveDays.forEach(day => {
                         const dateStr = dateUtils.formatISODate(day);
-                        // Only add days that are *within* our report's date range
                         if (dateStr >= startDate && dateStr <= endDate) {
                             leaveMap.set(`${data.staffId}_${dateStr}`, data);
                         }
@@ -112,9 +114,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key);
 
-                    // --- *** START OF LOGIC FIX *** ---
-                    // We process *every* day, not just days with data
-                    
                     let status = 'Unknown';
                     const checkInTime = dateUtils.fromFirestore(attendance?.checkInTime);
 
@@ -143,18 +142,15 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         }
                     } else { // No attendance record FOUND
                         if (approvedLeave) {
-                            status = 'Leave'; // Primary status
+                            status = 'Leave';
                         } else if (isWorkSchedule) {
-                            status = 'Absent'; // Scheduled work, no attendance
+                            status = 'Absent';
                         } else if (isOffSchedule) {
-                            status = 'Off'; // Scheduled off
+                            status = 'Off';
                         } else if (!schedule) {
-                            // *** THIS IS THE FIX ***
-                            // No schedule exists = Day Off
                             status = 'Off';
                         } else {
-                            // Schedule exists but isn't 'work' or 'off'
-                            status = 'Off'; // Treat other types (e.g., 'training') as 'Off'
+                            status = 'Off';
                         }
                     }
 
@@ -172,7 +168,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         workHours = Math.max(0, workHours) / 3600000;
                     }
 
-                    // --- Add Processed Row to Report Data ---
                     if (status !== 'Unknown') {
                         generatedData.push({
                             id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
@@ -186,7 +181,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
                         });
                     }
-                    // --- *** END OF LOGIC FIX *** ---
                 } // End date loop
             } // End staff loop
 
@@ -218,9 +212,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setIsExporting(true);
         setImportResult(null);
         try {
-            // Using "asia-southeast1" as it matches your other functions
-            const functions = getFunctions(app, "asia-southeast1"); 
-            const exportAttendanceData = httpsCallable(functions, 'exportAttendanceData');
+            // --- *** FIX: Use the 'functionsAsia' const defined at the top *** ---
             console.log(`Calling exportAttendanceData for ${startDate} to ${endDate}`);
             const result = await exportAttendanceData({ startDate, endDate }); 
 
@@ -269,7 +261,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        // More permissive file type check
         if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'application/vnd.ms-excel') {
             alert("Invalid file type. Please upload a CSV file (.csv).");
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -290,8 +281,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
             console.log("Attendance Import Step 1: Calling importAttendanceData (Dry Run)...");
 
             try {
-                const functions = getFunctions(app, "asia-southeast1");
-                const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
+                // --- *** FIX: Use the 'functionsAsia' const defined at the top *** ---
                 const result = await importAttendanceData({ csvData, confirm: false });
 
                 console.log("Attendance Import Step 1: Received response:", result);
@@ -342,8 +332,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
         console.log("Attendance Import Step 2: Calling importAttendanceData (Confirm: true)...");
 
         try {
-            const functions = getFunctions(app, "asia-southeast1");
-            const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
+            // --- *** FIX: Use the 'functionsAsia' const defined at the top *** ---
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
 
             console.log("Attendance Import Step 2: Received final response:", result.data);
@@ -397,14 +386,13 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 </Modal>
             )}
             
-            {/* --- MODIFIED: Pass correct props based on ImportConfirmationModal.jsx --- */}
             <ImportConfirmationModal
                 isOpen={isConfirmModalOpen}
                 onClose={handleCancelImport}
-                analysis={analysisResult} // Prop is 'analysis'
+                analysis={analysisResult}
                 onConfirm={handleConfirmImport}
-                isLoading={isConfirmingImport} // Prop is 'isLoading'
-                fileName="Attendance Import" // Pass title
+                isLoading={isConfirmingImport}
+                fileName="Attendance Import"
             />
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
@@ -441,7 +429,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:ring-amber-500 focus:border-amber-500 text-gray-200"
                         >
                             <option value="all">All Active Staff</option>
-                            {/* Filter out inactive staff from dropdown, then sort */}
                             {staffList
                                 .filter(s => s.status !== 'inactive')
                                 .sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b)))
@@ -540,7 +527,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                     }`}>{row.status}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
-                                    <td className="px-6 py-4 whitespace-nowDrap text-sm text-gray-300">{row.workHours}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours}</td>
                                 </tr>
                             ))
                         ) : (
