@@ -9,10 +9,11 @@ import { DownloadIcon, UploadIcon } from '../components/Icons';
 import * as dateUtils from '../utils/dateUtils';
 import { app } from "../../firebase.js";
 
-// --- *** FIX: Initialize functions with region *** ---
-const functionsAsia = getFunctions(app, "asia-southeast1");
-const exportAttendanceData = httpsCallable(functionsAsia, 'exportAttendanceData');
-const importAttendanceData = httpsCallable(functionsAsia, 'importAttendanceData');
+// --- *** THIS IS THE FIX: Point to the correct 'us-central1' region *** ---
+const functions = getFunctions(app, "us-central1"); 
+const exportAttendanceData = httpsCallable(functions, 'exportAttendanceData');
+const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
+// --- *** END FIX *** ---
 
 // Helper function for display name
 const getDisplayName = (staff) => {
@@ -75,14 +76,14 @@ export default function AttendanceReportsPage({ db, staffList }) {
             const leaveQuery = query(
                 collection(db, "leave_requests"),
                 where("status", "==", "approved"),
-                where("startDate", "<=", endDate) // Find leave that started before or during the range
+                where("startDate", "<=", endDate)
             );
             const leaveSnapshot = await getDocs(leaveQuery);
-            const leaveMap = new Map(); // Key: "staffId_date", Value: leave request data
+            const leaveMap = new Map();
             
             leaveSnapshot.docs.forEach(doc => {
                 const data = doc.data();
-                if (data.endDate >= startDate) { // Filter for leave that ended during or after the range
+                if (data.endDate >= startDate) {
                     const allLeaveDays = dateUtils.eachDayOfInterval(data.startDate, data.endDate);
                     allLeaveDays.forEach(day => {
                         const dateStr = dateUtils.formatISODate(day);
@@ -97,7 +98,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
             // --- 4. Process and Generate Report Data ---
             const staffToReport = selectedStaffId === 'all'
-                ? staffList.filter(s => s.status !== 'inactive') // Default to active staff
+                ? staffList.filter(s => s.status !== 'inactive')
                 : staffList.filter(s => s.id === selectedStaffId);
 
             const generatedData = [];
@@ -123,8 +124,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     const scheduledTime = scheduledStartTimeStr ? dateUtils.fromFirestore(`${dateStr}T${scheduledStartTimeStr}`) : null;
 
 
-                    if (attendance) { // Attendance record EXISTS
-                        if (scheduledTime) { // Scheduled Time Exists
+                    if (attendance) {
+                        if (scheduledTime) {
                              if (checkInTime) {
                                 if (checkInTime > scheduledTime) {
                                     const lateMinutes = Math.ceil((checkInTime.getTime() - scheduledTime.getTime()) / 60000);
@@ -140,7 +141,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         } else {
                              status = 'Present (Unscheduled)';
                         }
-                    } else { // No attendance record FOUND
+                    } else {
                         if (approvedLeave) {
                             status = 'Leave';
                         } else if (isWorkSchedule) {
@@ -154,7 +155,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         }
                     }
 
-                    // --- Calculate Work Hours ---
                     const checkOutTime = dateUtils.fromFirestore(attendance?.checkOutTime);
                     const breakStartTime = dateUtils.fromFirestore(attendance?.breakStart);
                     const breakEndTime = dateUtils.fromFirestore(attendance?.breakEnd);
@@ -181,8 +181,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
                         });
                     }
-                } // End date loop
-            } // End staff loop
+                }
+            }
 
             generatedData.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.date.localeCompare(b.date));
             setReportData(generatedData);
@@ -194,7 +194,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
         } finally {
             setIsLoading(false);
         }
-    }; // --- End handleGenerateReport ---
+    };
 
 
     // --- Other Handlers (Edit, Export, Import) ---
@@ -212,7 +212,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setIsExporting(true);
         setImportResult(null);
         try {
-            // --- *** FIX: Use the 'functionsAsia' const defined at the top *** ---
+            // --- *** USE THE CORRECT 'functions' CONST *** ---
             console.log(`Calling exportAttendanceData for ${startDate} to ${endDate}`);
             const result = await exportAttendanceData({ startDate, endDate }); 
 
@@ -281,7 +281,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
             console.log("Attendance Import Step 1: Calling importAttendanceData (Dry Run)...");
 
             try {
-                // --- *** FIX: Use the 'functionsAsia' const defined at the top *** ---
+                // --- *** USE THE CORRECT 'functions' CONST *** ---
                 const result = await importAttendanceData({ csvData, confirm: false });
 
                 console.log("Attendance Import Step 1: Received response:", result);
@@ -332,7 +332,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
         console.log("Attendance Import Step 2: Calling importAttendanceData (Confirm: true)...");
 
         try {
-            // --- *** FIX: Use the 'functionsAsia' const defined at the top *** ---
+            // --- *** USE THE CORRECT 'functions' CONST *** ---
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
 
             console.log("Attendance Import Step 2: Received final response:", result.data);
