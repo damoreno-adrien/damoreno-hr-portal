@@ -1,5 +1,5 @@
 // src/pages/AttendanceReportsPage.jsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react'; // --- Added useMemo ---
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/Modal';
@@ -8,12 +8,12 @@ import ImportConfirmationModal from '../components/ImportConfirmationModal';
 import { DownloadIcon, UploadIcon } from '../components/Icons';
 import * as dateUtils from '../utils/dateUtils';
 import { app } from "../../firebase.js";
+import { ArrowUp, ArrowDown } from 'lucide-react'; // --- Added Sort Icons ---
 
-// --- *** THIS IS THE FIX: Point to the correct 'us-central1' region *** ---
+// --- Functions pointing to the correct 'us-central1' region ---
 const functions = getFunctions(app, "us-central1"); 
 const exportAttendanceData = httpsCallable(functions, 'exportAttendanceData');
 const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
-// --- *** END FIX *** ---
 
 // Helper function for display name
 const getDisplayName = (staff) => {
@@ -25,12 +25,16 @@ const getDisplayName = (staff) => {
 };
 
 export default function AttendanceReportsPage({ db, staffList }) {
-    const [reportData, setReportData] = useState([]);
+    const [reportData, setReportData] = useState([]); // This will hold the *sorted* data
+    const [unsortedReportData, setUnsortedReportData] = useState([]); // Holds raw data from generation
     const [isLoading, setIsLoading] = useState(false);
     const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
     const [selectedStaffId, setSelectedStaffId] = useState('all');
     const [editingRecord, setEditingRecord] = useState(null);
+
+    // --- NEW: State for sorting ---
+    const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'ascending' });
 
     // --- State for Export ---
     const [isExporting, setIsExporting] = useState(false);
@@ -47,7 +51,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
     // --- Function to generate the report displayed on the page ---
     const handleGenerateReport = async () => {
         setIsLoading(true);
-        setReportData([]);
+        setUnsortedReportData([]); // Clear previous unsorted data
         setImportResult(null);
 
         try {
@@ -176,16 +180,17 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             date: dateStr,
                             checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
                             checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
-                            workHours: (status === 'Leave' || status === 'Off') ? 'N/A' : (workHours > 0 ? workHours.toFixed(2) : '0.00'),
+                            // --- Store workHours as a number for sorting ---
+                            workHours: (status === 'Leave' || status === 'Off') ? -1 : (workHours > 0 ? parseFloat(workHours.toFixed(2)) : 0),
                             status: status,
                             fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
                         });
                     }
                 }
             }
-
-            generatedData.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.date.localeCompare(b.date));
-            setReportData(generatedData);
+            
+            // --- Set the *unsorted* data ---
+            setUnsortedReportData(generatedData);
             console.log(`Generated ${generatedData.length} report rows.`);
 
         } catch (error) {
@@ -194,9 +199,45 @@ export default function AttendanceReportsPage({ db, staffList }) {
         } finally {
             setIsLoading(false);
         }
+    }; // --- End handleGenerateReport ---
+
+    
+    // --- NEW: Function to handle sorting ---
+    const requestSort = (key) => {
+        let direction = 'ascending';
+        if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
     };
 
+    // --- NEW: useMemo to sort data whenever unsortedData or sortConfig changes ---
+    useEffect(() => {
+        let sortableData = [...unsortedReportData];
+        if (sortConfig.key !== null) {
+            sortableData.sort((a, b) => {
+                let aValue = a[sortConfig.key];
+                let bValue = b[sortConfig.key];
 
+                // Handle 'N/A' in workHours by treating it as -1
+                if (sortConfig.key === 'workHours') {
+                    aValue = aValue < 0 ? -1 : aValue;
+                    bValue = bValue < 0 ? -1 : bValue;
+                }
+                
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'ascending' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'ascending' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        setReportData(sortableData);
+    }, [unsortedReportData, sortConfig]);
+
+    
     // --- Other Handlers (Edit, Export, Import) ---
 
     const handleRowClick = (record) => {
@@ -212,7 +253,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setIsExporting(true);
         setImportResult(null);
         try {
-            // --- *** USE THE CORRECT 'functions' CONST *** ---
             console.log(`Calling exportAttendanceData for ${startDate} to ${endDate}`);
             const result = await exportAttendanceData({ startDate, endDate }); 
 
@@ -281,9 +321,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
             console.log("Attendance Import Step 1: Calling importAttendanceData (Dry Run)...");
 
             try {
-                // --- *** USE THE CORRECT 'functions' CONST *** ---
                 const result = await importAttendanceData({ csvData, confirm: false });
-
                 console.log("Attendance Import Step 1: Received response:", result);
 
                 if (result.data && result.data.analysis) {
@@ -332,7 +370,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         console.log("Attendance Import Step 2: Calling importAttendanceData (Confirm: true)...");
 
         try {
-            // --- *** USE THE CORRECT 'functions' CONST *** ---
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
 
             console.log("Attendance Import Step 2: Received final response:", result.data);
@@ -369,6 +406,18 @@ export default function AttendanceReportsPage({ db, staffList }) {
         if (fileInputRef.current) fileInputRef.current.value = '';
         console.log("Attendance Import: Cancelled.");
     };
+
+    // --- NEW: Helper for rendering sort icons ---
+    const getSortIcon = (key) => {
+        if (sortConfig.key !== key) {
+            return null; // No icon if not sorting by this key
+        }
+        if (sortConfig.direction === 'ascending') {
+            return <ArrowUp className="inline-block h-4 w-4 ml-1" />;
+        }
+        return <ArrowDown className="inline-block h-4 w-4 ml-1" />;
+    };
+
 
     // --- Render Component JSX ---
     return (
@@ -497,18 +546,44 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Staff Name</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Date</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Check-In</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Check-Out</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Work Hours</th>
+                            {/* --- MODIFIED: Added sorting headers --- */}
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                <button onClick={() => requestSort('staffName')} className="flex items-center hover:text-white">
+                                    Staff Name {getSortIcon('staffName')}
+                                </button>
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                <button onClick={() => requestSort('date')} className="flex items-center hover:text-white">
+                                    Date {getSortIcon('date')}
+                                </button>
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                <button onClick={() => requestSort('status')} className="flex items-center hover:text-white">
+                                    Status {getSortIcon('status')}
+                                </button>
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                <button onClick={() => requestSort('checkIn')} className="flex items-center hover:text-white">
+                                    Check-In {getSortIcon('checkIn')}
+                                </button>
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                <button onClick={() => requestSort('checkOut')} className="flex items-center hover:text-white">
+                                    Check-Out {getSortIcon('checkOut')}
+                                </button>
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                <button onClick={() => requestSort('workHours')} className="flex items-center hover:text-white">
+                                    Work Hours {getSortIcon('workHours')}
+                                </button>
+                            </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
                         {isLoading ? (
                              <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr>
                         ) : reportData.length > 0 ? (
+                            // --- MODIFIED: Map over sortedReportData (now just 'reportData') ---
                             reportData.map((row) => (
                                 <tr
                                     key={row.id || `${row.staffId}_${row.date}`}
@@ -517,6 +592,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(row.date)}</td>
+                                    
+                                    {/* --- MODIFIED: Added tooltip --- */}
                                     <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${
                                         row.status === 'Absent' ? 'text-red-400' :
                                         row.status.startsWith('Late') ? 'text-yellow-400' :
@@ -524,10 +601,19 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                         row.status === 'Off' ? 'text-gray-500' :
                                         row.status.includes('Worked on Day Off') ? 'text-orange-400' :
                                         'text-gray-300'
-                                    }`}>{row.status}</td>
+                                    }`}>
+                                        <span title={row.status === 'Present (No Check-in?)' ? `Document ID: ${row.id}` : null}>
+                                            {row.status}
+                                        </span>
+                                    </td>
+                                    {/* --- END MODIFICATION --- */}
+
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours}</td>
+                                    {/* --- MODIFIED: Format work hours for display --- */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                        {row.workHours < 0 ? 'N/A' : row.workHours.toFixed(2)}
+                                    </td>
                                 </tr>
                             ))
                         ) : (
