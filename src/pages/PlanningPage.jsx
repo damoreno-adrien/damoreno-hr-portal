@@ -1,13 +1,17 @@
+/* src/pages/PlanningPage.jsx */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js" // Adjusted import path
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
+import { ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react';
 import ShiftModal from '../components/ShiftModal';
 import ImportConfirmationModal from '../components/ImportConfirmationModal';
-import ExportOptionsModal from '../components/ExportOptionsModal'; // *** ADDED THIS IMPORT ***
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import ExportOptionsModal from '../components/ExportOptionsModal'; 
+import * as dateUtils from '../utils/dateUtils'; 
+// --- NEW IMPORTS ---
+import { calculateAttendanceStatus, getStatusClass } from '../utils/statusUtils';
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1");
@@ -42,6 +46,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     });
 
     // Custom hook to fetch weekly schedule data
+    // --- NOTE: The *structure* of weekData is now { staffId: { dateString: { schedule, attendance, leave } } } ---
     const { weekData, weekDates = [], loading, refetchWeekData } = useWeeklyPlannerData(db, currentWeekStart);
 
     // State for the shift editing modal
@@ -50,7 +55,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
 
     // State for export loading indicator
     const [isExporting, setIsExporting] = useState(false);
-    // *** NEW STATE for export modal ***
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     // --- NEW STATE for Import Process ---
@@ -261,13 +265,13 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Weekly Planning</h2>
                 <div className="flex items-center space-x-4">
                     <button onClick={handlePrevWeek} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600" title="Previous Week">
-                        <ChevronLeftIcon className="h-6 w-6" />
+                        <ChevronLeft className="h-6 w-6" />
                     </button>
                     <span className="text-lg font-semibold text-amber-400 whitespace-nowrap">
                         {weekStartFormatted} - {weekEndFormatted}
                     </span>
                     <button onClick={handleNextWeek} className="p-2 rounded-md bg-gray-700 hover:bg-gray-600" title="Next Week">
-                        <ChevronRightIcon className="h-6 w-6" />
+                        <ChevronRight className="h-6 w-6" />
                     </button>
 
                     {/* Import Button */}
@@ -284,7 +288,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         className={`flex items-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 cursor-pointer ${isImporting ? 'bg-gray-500 cursor-not-allowed' : ''}`}
                         title="Import a planning schedule from CSV"
                     >
-                        <UploadIcon className="h-5 w-5 mr-2" />
+                        <Upload className="h-5 w-5 mr-2" />
                         {isImporting ? 'Analyzing...' : 'Import'}
                     </label>
 
@@ -295,7 +299,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                         className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500"
                         title="Export schedule data..." // Updated title
                     >
-                        <DownloadIcon className="h-5 w-5 mr-2" />
+                        <Download className="h-5 w-5 mr-2" />
                         {isExporting ? 'Exporting...' : 'Export'}
                     </button>
                     {/* *** END UPDATED Export Button *** */}
@@ -315,6 +319,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                 <th className="sticky left-0 bg-gray-900 px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-48 z-20">Staff</th>
                                 {weekDates.map(dateObj => (
                                     <th key={dateObj.dateString} className="px-3 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider w-32 min-w-[8rem]">
+                                        {/* --- NOTE: Using dateObj properties from new hook --- */}
                                         {dateObj.dayName} <span className="block text-gray-400 font-normal">{dateObj.dateNum}</span>
                                     </th>
                                 ))}
@@ -338,17 +343,30 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                                 <div className="text-xs text-gray-400">{getCurrentJob(staff).position}</div>
                                             </td>
                                             {weekDates.map(dateObj => {
-                                                const shift = weekData[staff.id]?.[dateObj.dateString];
+                                                // --- UPDATED: Data structure is different ---
+                                                const shiftData = weekData[staff.id]?.[dateObj.dateString];
+                                                const shift = shiftData?.schedule; // This is the old 'shift' variable
                                                 const displayTime = shift ? `${shift.startTime} - ${shift.endTime}` : '';
                 
+                                                // --- NEW: Calculate status and get class ---
+                                                const { status } = calculateAttendanceStatus(
+                                                    shift, 
+                                                    shiftData?.attendance, 
+                                                    shiftData?.leave, 
+                                                    dateObj.dateObject // Pass the JS Date object
+                                                );
+                                                const statusClass = getStatusClass(status);
+
                                                 return (
                                                     <td
                                                         key={dateObj.dateString}
                                                         onClick={() => handleCellClick(staff.id, dateObj.dateString, shift)}
-                                                        className="px-3 py-3 text-center text-sm text-white hover:bg-gray-700 cursor-pointer w-32 min-w-[8rem] transition-colors"
+                                                        // --- UPDATED: Apply the status class ---
+                                                        className={`px-3 py-3 text-center text-sm transition-colors cursor-pointer w-32 min-w-[8rem] ${statusClass || 'text-white hover:bg-gray-700'}`}
                                                         title={shift ? `Click to edit ${getDisplayName(staff)}'s shift` : `Click to add shift for ${getDisplayName(staff)}`}
                                                     >
-                                                        {displayTime || <span className="text-gray-600 italic">OFF</span>}
+                                                        {/* --- UPDATED: Show 'LEAVE' text --- */}
+                                                        {displayTime || (status === 'Leave' ? <span className="text-gray-300 italic">LEAVE</span> : <span className="text-gray-600 italic">OFF</span>)}
                                                     </td>
                                                 );
                                             })}

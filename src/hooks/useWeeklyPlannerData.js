@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import { collection, query, where, getDocs } from 'firebase/firestore'; // --- UPDATED ---
+import * as dateUtils from '../utils/dateUtils';
+import { DateTime } from 'luxon'; // --- NEW ---
+
+const THAILAND_TIMEZONE = 'Asia/Bangkok'; // --- NEW ---
 
 export default function useWeeklyPlannerData(db, currentWeekStart) {
     const [weekData, setWeekData] = useState({});
     const [weekDates, setWeekDates] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [currentListener, setCurrentListener] = useState(null);
+    // --- REMOVED currentListener state ---
 
-    const fetchData = useCallback(() => {
+    const fetchData = useCallback(async () => { // --- UPDATED ---
         setLoading(true);
         setWeekData({});
         setWeekDates([]);
 
-        // Ensure currentWeekStart is a valid Date object
         const startDate = dateUtils.fromFirestore(currentWeekStart);
         if (!startDate) {
              console.error("Invalid currentWeekStart date provided to useWeeklyPlannerData.");
@@ -21,14 +23,13 @@ export default function useWeeklyPlannerData(db, currentWeekStart) {
              return;
         }
 
-
-        // Calculate Week Dates using dateUtils
         const tempWeekDates = [];
         for (let i = 0; i < 7; i++) {
             const currentDate = dateUtils.addDays(startDate, i);
-            if (!currentDate) continue; // Skip if date calculation fails
+            if (!currentDate) continue; 
 
             tempWeekDates.push({
+                dateObject: currentDate, // --- NEW: Pass the full JS Date object ---
                 dateString: dateUtils.formatISODate(currentDate), // "yyyy-MM-dd"
                 dayName: dateUtils.formatCustom(currentDate, 'EEE'), // "Mon", "Tue", etc.
                 dateNum: dateUtils.formatCustom(currentDate, 'd'), // Day of the month (1-31)
@@ -45,43 +46,98 @@ export default function useWeeklyPlannerData(db, currentWeekStart) {
         const startOfWeekStr = tempWeekDates[0].dateString;
         const endOfWeekStr = tempWeekDates[6].dateString;
 
-        // Query Firestore
-        const q = query(
-            collection(db, 'schedules'),
-            where('date', '>=', startOfWeekStr),
-            where('date', '<=', endOfWeekStr)
-        );
+        try { // --- NEW: try...catch block for getDocs ---
+            // --- NEW: Define all 3 queries ---
+            const schedulesQuery = query(
+                collection(db, 'schedules'),
+                where('date', '>=', startOfWeekStr),
+                where('date', '<=', endOfWeekStr)
+            );
+            const attendanceQuery = query(
+                collection(db, 'attendance'),
+                where('date', '>=', startOfWeekStr),
+                where('date', '<=', endOfWeekStr)
+            );
+            const leaveQuery = query(
+                collection(db, 'leave_requests'),
+                where('status', '==', 'approved'),
+                where('endDate', '>=', startOfWeekStr)
+                // We will client-filter startDate <= endOfWeekStr
+            );
 
-        // Cleanup previous listener if it exists
-        if (currentListener) {
-            currentListener();
-        }
+            // --- NEW: Fetch all data concurrently ---
+            const [schedulesSnap, attendanceSnap, leaveSnap] = await Promise.all([
+                getDocs(schedulesQuery),
+                getDocs(attendanceQuery),
+                getDocs(leaveQuery)
+            ]);
 
-        const unsubscribe = onSnapshot(q, (schedulesSnap) => {
-            const schedulesByStaff = {};
+            // --- NEW: Process data into maps ---
+            const schedulesMap = new Map();
             schedulesSnap.forEach(doc => {
-                const schedule = doc.data();
-                // Basic validation
-                if (schedule.staffId && schedule.date) {
-                    if (!schedulesByStaff[schedule.staffId]) {
-                        schedulesByStaff[schedule.staffId] = {};
-                    }
-                    schedulesByStaff[schedule.staffId][schedule.date] = { id: doc.id, ...schedule };
-                } else {
-                    console.warn("Schedule document missing staffId or date:", doc.id, schedule);
+                const data = doc.data();
+                if (data.staffId && data.date) {
+                    schedulesMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
                 }
             });
-            setWeekData(schedulesByStaff);
-            setLoading(false);
-        }, (error) => {
+
+            const attendanceMap = new Map();
+            attendanceSnap.forEach(doc => {
+                const data = doc.data();
+                if (data.staffId && data.date) {
+                    attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
+                }
+            });
+
+            const leaveMap = new Map();
+            const reportEndDt = DateTime.fromISO(endOfWeekStr, { zone: THAILAND_TIMEZONE });
+            leaveSnap.forEach(doc => {
+                const data = doc.data();
+                if (!data.staffId || !data.startDate || !data.endDate) return;
+                if (data.startDate > endOfWeekStr) return; // Skip leaves that start after the week ends
+
+                let current = DateTime.fromISO(data.startDate, { zone: THAILAND_TIMEZONE });
+                const leaveEnd = DateTime.fromISO(data.endDate, { zone: THAILAND_TIMEZONE });
+                if (!current.isValid || !leaveEnd.isValid) return;
+
+                while (current <= leaveEnd && current <= reportEndDt) {
+                    if (current.toISODate() >= startOfWeekStr) {
+                        const dateStr = current.toISODate();
+                        leaveMap.set(`${data.staffId}_${dateStr}`, { id: doc.id, ...data });
+                    }
+                    current = current.plus({ days: 1 });
+                }
+            });
+
+            // --- NEW: Combine all data into the final weekData structure ---
+            const combinedData = {};
+            const allStaffIds = new Set([
+                ...Array.from(schedulesMap.keys()).map(k => k.split('_')[0]),
+                ...Array.from(attendanceMap.keys()).map(k => k.split('_')[0]),
+                ...Array.from(leaveMap.keys()).map(k => k.split('_')[0]),
+            ]);
+
+            for (const staffId of allStaffIds) {
+                if (!combinedData[staffId]) combinedData[staffId] = {};
+                for (const dateObj of tempWeekDates) {
+                    const key = `${staffId}_${dateObj.dateString}`;
+                    combinedData[staffId][dateObj.dateString] = {
+                        schedule: schedulesMap.get(key) || null,
+                        attendance: attendanceMap.get(key) || null,
+                        leave: leaveMap.get(key) || null,
+                    };
+                }
+            }
+
+            setWeekData(combinedData);
+            
+        } catch (error) {
             console.error("Error fetching weekly planner data:", error);
-            setLoading(false);
             setWeekData({}); // Clear data on error
             setWeekDates([]); // Clear dates on error
-        });
-
-        // Store the cleanup function
-        setCurrentListener(() => unsubscribe);
+        } finally {
+            setLoading(false); // --- NEW: Set loading false in finally ---
+        }
 
     }, [db, currentWeekStart]); // Dependency array
 
@@ -89,12 +145,8 @@ export default function useWeeklyPlannerData(db, currentWeekStart) {
     useEffect(() => {
         fetchData(); // Fetch data when component mounts or dependencies change
 
-        // Cleanup listener on unmount or when dependencies change
-        return () => {
-            if (currentListener) {
-                currentListener();
-            }
-        };
+        // --- REMOVED Snapshot listener cleanup ---
+
     }, [fetchData]); // Use fetchData as the dependency
 
 
