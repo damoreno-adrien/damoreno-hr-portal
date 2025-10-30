@@ -1,8 +1,7 @@
 import React from 'react';
 import * as dateUtils from '../utils/dateUtils';
-import * as dateUtils from '../utils/dateUtils';
+// --- NEW: Import from lucide-react ---
 import {Clock, XCircle, CheckCircle, CalendarDays, Plane } from 'lucide-react';
-
 // Helper to format timestamps safely
 const formatTime = (timestamp) => {
     if (!timestamp) return 'N/A';
