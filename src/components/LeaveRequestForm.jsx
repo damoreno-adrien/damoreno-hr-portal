@@ -28,14 +28,21 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             setEndDate(existingRequest.endDate);
             setReason(existingRequest.reason || '');
             setSelectedStaffId(existingRequest.staffId);
+        } else {
+            // Reset form when opening for a new request
+            setLeaveType('Annual Leave');
+            setStartDate('');
+            setEndDate('');
+            setReason('');
+            setSelectedStaffId('');
         }
-    }, [existingRequest]);
+    }, [existingRequest, isModalOpen]); // Reset when request changes or modal opens
 
     useEffect(() => {
         const start = dateUtils.parseISODateString(startDate);
         const end = dateUtils.parseISODateString(endDate);
         if (start && end && end < start) {
-            setEndDate('');
+            setEndDate(startDate); // Set end date to start date if it's invalid
         }
     }, [startDate, endDate]);
 
@@ -59,13 +66,16 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
 
         if (userRole === 'staff') {
-            if (leaveType === 'Public Holiday (In Lieu)' && totalDays > leaveBalances.publicHoliday) {
-                setError(`You only have ${leaveBalances.publicHoliday} public holiday credits available.`);
-                return;
-            }
-            if (leaveType === 'Annual Leave' && totalDays > leaveBalances.annual) {
-                setError(`You only have ${leaveBalances.annual} annual leave days available.`);
-                return;
+            // Check for leave balances only if balances are available
+            if (leaveBalances) {
+                if (leaveType === 'Public Holiday (In Lieu)' && totalDays > leaveBalances.publicHoliday) {
+                    setError(`You only have ${leaveBalances.publicHoliday} public holiday credits available.`);
+                    return;
+                }
+                if (leaveType === 'Annual Leave' && totalDays > leaveBalances.annual) {
+                    setError(`You only have ${leaveBalances.annual} annual leave days available.`);
+                    return;
+                }
             }
         }
 
@@ -113,12 +123,13 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 // --- MODIFICATION: Find creator's name ---
                 let creatorName = 'Unknown User';
                 const creatorProfile = staffList.find(s => s.id === user.uid);
+                
                 if (creatorProfile) {
                     creatorName = getDisplayName(creatorProfile);
                 } else if (user.displayName) {
                     creatorName = user.displayName; // Fallback to auth name
                 } else if (userRole === 'manager') {
-                    creatorName = 'Manager';
+                    creatorName = 'Manager'; // Fallback for manager
                 }
                 // --- END MODIFICATION ---
 
@@ -165,11 +176,13 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     <option>Annual Leave</option>
                     <option>Sick Leave</option>
                     <option>Personal Leave</option>
-                    {(userRole === 'manager' || leaveBalances.publicHoliday > 0) && (
+                    {/* --- ADDED CHECK for leaveBalances --- */}
+                    {(userRole === 'manager' || (leaveBalances && leaveBalances.publicHoliday > 0)) && (
                         <option>Public Holiday (In Lieu)</option>
                     )}
                 </select>
-                {userRole === 'staff' && (
+                {/* --- ADDED CHECK for leaveBalances --- */}
+                {userRole === 'staff' && leaveBalances && (
                     <div className="text-xs text-gray-400 mt-1 space-y-1">
                         <p>Annual Leave Remaining: {leaveBalances.annual}</p>
                         <p>Public Holiday Credits: {leaveBalances.publicHoliday}</p>
@@ -183,7 +196,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                         type="date" 
                         value={startDate} 
                         onChange={(e) => setStartDate(e.target.value)} 
-                        min={minStartDate}
+                        min={minStartDate} 
                         className="w-full p-2 bg-gray-700 rounded-md" 
                     />
                 </div>
@@ -193,7 +206,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                         type="date" 
                         value={endDate} 
                         onChange={(e) => setEndDate(e.target.value)} 
-                        min={startDate || minStartDate}
+                        min={startDate || minStartDate} 
                         className="w-full p-2 bg-gray-700 rounded-md" 
                     />
                 </div>

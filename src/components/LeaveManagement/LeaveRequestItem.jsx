@@ -16,11 +16,8 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
     // --- MODIFICATION: Logic to show who created it ---
     let createdByString = '';
     if (req.createdByName) {
-        if (req.createdBy === req.staffId) {
-            // Staff requested it themselves
-            createdByString = `(Requested by ${req.createdByName})`;
-        } else {
-            // Manager created it for them
+        // Only show if the creator is *different* from the staff member
+        if (req.createdBy !== req.staffId) {
             createdByString = `(Created by ${req.createdByName})`;
         }
     }
@@ -34,7 +31,8 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
                     {/* --- MODIFIED: Display creator name --- */}
                     <p className="text-sm text-gray-400">
                         {req.leaveType} | Requested: {dateUtils.formatDisplayDate(req.requestedAt)}
-                        {createdByString && <span className="italic ml-1">{createdByString}</span>}
+                        {/* Show the creator string if it exists */}
+                        {createdByString && <span className="italic ml-1 text-gray-500">{createdByString}</span>}
                     </p>
                     {/* --- END MODIFICATION --- */}
                 </div>
