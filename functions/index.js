@@ -18,6 +18,7 @@ const { exportPlanningDataHandler } = require('./src/planning/exportPlanningData
 const { importPlanningDataHandler } = require('./src/planning/importPlanningData');
 const { exportAttendanceDataHandler } = require('./src/attendance/exportAttendanceData');
 const { importAttendanceDataHandler } = require('./src/attendance/importAttendanceData');
+const { cleanupBadAttendanceIdsHandler } = require('./src/attendance/cleanupBadAttendanceIds');
 
 // --- Directly export the handlers defined with v2 syntax ---
 exports.createUser = createUserHandler;
@@ -36,3 +37,4 @@ exports.exportPlanningData = exportPlanningDataHandler;
 exports.importPlanningData = importPlanningDataHandler;
 exports.exportAttendanceData = exportAttendanceDataHandler;
 exports.importAttendanceData = importAttendanceDataHandler;
+exports.cleanupBadAttendanceIds = cleanupBadAttendanceIdsHandler;

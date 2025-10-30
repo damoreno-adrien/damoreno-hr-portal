@@ -1,19 +1,21 @@
 // src/pages/AttendanceReportsPage.jsx
-import React, { useState, useRef, useEffect, useMemo } from 'react'; // --- Added useMemo ---
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/Modal';
 import EditAttendanceModal from '../components/EditAttendanceModal';
 import ImportConfirmationModal from '../components/ImportConfirmationModal';
-import { DownloadIcon, UploadIcon } from '../components/Icons';
+import { DownloadIcon, UploadIcon, TrashIcon } from '../components/Icons'; // --- Added TrashIcon ---
 import * as dateUtils from '../utils/dateUtils';
 import { app } from "../../firebase.js";
-import { ArrowUp, ArrowDown } from 'lucide-react'; // --- Added Sort Icons ---
+import { ArrowUp, ArrowDown } from 'lucide-react';
 
 // --- Functions pointing to the correct 'us-central1' region ---
 const functions = getFunctions(app, "us-central1"); 
 const exportAttendanceData = httpsCallable(functions, 'exportAttendanceData');
 const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
+// --- NEW: Add the cleanup function ---
+const cleanupBadAttendanceIds = httpsCallable(functions, 'cleanupBadAttendanceIds');
 
 // Helper function for display name
 const getDisplayName = (staff) => {
@@ -25,15 +27,13 @@ const getDisplayName = (staff) => {
 };
 
 export default function AttendanceReportsPage({ db, staffList }) {
-    const [reportData, setReportData] = useState([]); // This will hold the *sorted* data
-    const [unsortedReportData, setUnsortedReportData] = useState([]); // Holds raw data from generation
+    const [reportData, setReportData] = useState([]);
+    const [unsortedReportData, setUnsortedReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
     const [selectedStaffId, setSelectedStaffId] = useState('all');
     const [editingRecord, setEditingRecord] = useState(null);
-
-    // --- NEW: State for sorting ---
     const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'ascending' });
 
     // --- State for Export ---
@@ -48,13 +48,20 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const [csvDataToConfirm, setCsvDataToConfirm] = useState(null);
     const fileInputRef = useRef(null);
 
+    // --- NEW: State for Cleanup ---
+    const [cleanupLoading, setCleanupLoading] = useState(false);
+    const [cleanupResult, setCleanupResult] = useState(null); // { message: string, error: boolean }
+
+
     // --- Function to generate the report displayed on the page ---
     const handleGenerateReport = async () => {
         setIsLoading(true);
-        setUnsortedReportData([]); // Clear previous unsorted data
+        setUnsortedReportData([]);
         setImportResult(null);
+        setCleanupResult(null); // --- Clear cleanup message ---
 
         try {
+            // ... (rest of the function is identical) ...
             // --- 1. Fetch Schedules ---
             console.log(`Generating report for ${startDate} to ${endDate}`);
             const schedulesQuery = query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate));
@@ -180,7 +187,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             date: dateStr,
                             checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
                             checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
-                            // --- Store workHours as a number for sorting ---
                             workHours: (status === 'Leave' || status === 'Off') ? -1 : (workHours > 0 ? parseFloat(workHours.toFixed(2)) : 0),
                             status: status,
                             fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
@@ -189,7 +195,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 }
             }
             
-            // --- Set the *unsorted* data ---
             setUnsortedReportData(generatedData);
             console.log(`Generated ${generatedData.length} report rows.`);
 
@@ -202,7 +207,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
     }; // --- End handleGenerateReport ---
 
     
-    // --- NEW: Function to handle sorting ---
+    // --- Sorting logic ---
     const requestSort = (key) => {
         let direction = 'ascending';
         if (sortConfig.key === key && sortConfig.direction === 'ascending') {
@@ -211,7 +216,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setSortConfig({ key, direction });
     };
 
-    // --- NEW: useMemo to sort data whenever unsortedData or sortConfig changes ---
     useEffect(() => {
         let sortableData = [...unsortedReportData];
         if (sortConfig.key !== null) {
@@ -219,7 +223,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 let aValue = a[sortConfig.key];
                 let bValue = b[sortConfig.key];
 
-                // Handle 'N/A' in workHours by treating it as -1
                 if (sortConfig.key === 'workHours') {
                     aValue = aValue < 0 ? -1 : aValue;
                     bValue = bValue < 0 ? -1 : bValue;
@@ -252,19 +255,18 @@ export default function AttendanceReportsPage({ db, staffList }) {
         }
         setIsExporting(true);
         setImportResult(null);
+        setCleanupResult(null);
         try {
             console.log(`Calling exportAttendanceData for ${startDate} to ${endDate}`);
             const result = await exportAttendanceData({ startDate, endDate }); 
-
+            // ... (rest of export logic is unchanged) ...
             const csvData = result.data.csvData;
             const filename = result.data.filename || `attendance_export_${startDate}_to_${endDate}_fallback.csv`;
-
             if (!csvData) {
                 alert("No attendance data found for the selected period to export.");
                 setIsExporting(false);
                 return;
             }
-
             const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
@@ -289,6 +291,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const handleImportClick = () => {
         if (fileInputRef.current) {
             setImportResult(null);
+            setCleanupResult(null);
             setAnalysisResult(null);
             setCsvDataToConfirm(null);
             setIsConfirmModalOpen(false);
@@ -298,15 +301,14 @@ export default function AttendanceReportsPage({ db, staffList }) {
     };
 
     const handleFileSelected = (event) => {
+        // ... (this function is unchanged) ...
         const file = event.target.files?.[0];
         if (!file) return;
-
         if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'application/vnd.ms-excel') {
             alert("Invalid file type. Please upload a CSV file (.csv).");
             if (fileInputRef.current) fileInputRef.current.value = '';
             return;
         }
-
         const reader = new FileReader();
         reader.onload = async (e) => {
             const csvData = e.target?.result;
@@ -314,16 +316,14 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 alert("Could not read file content.");
                 return;
             }
-
             setIsImporting(true);
             setAnalysisResult(null);
             setImportResult(null);
+            setCleanupResult(null);
             console.log("Attendance Import Step 1: Calling importAttendanceData (Dry Run)...");
-
             try {
                 const result = await importAttendanceData({ csvData, confirm: false });
                 console.log("Attendance Import Step 1: Received response:", result);
-
                 if (result.data && result.data.analysis) {
                     console.log("Attendance Import Step 1: Analysis data found. Opening confirmation modal.");
                     setAnalysisResult(result.data.analysis);
@@ -336,7 +336,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         errors: result.data?.errors || ["Unknown analysis error."]
                     });
                 }
-
             } catch (error) {
                 console.error("Attendance Import Step 1: Error during analysis function call:", error);
                  const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
@@ -358,33 +357,30 @@ export default function AttendanceReportsPage({ db, staffList }) {
     };
 
     const handleConfirmImport = async () => {
+        // ... (this function is unchanged) ...
         if (!csvDataToConfirm) {
              alert("Internal error: No CSV data stored for confirmation.");
              handleCancelImport();
              return;
         }
-
         setIsConfirmingImport(true);
         setIsConfirmModalOpen(false);
         setImportResult(null);
+        setCleanupResult(null);
         console.log("Attendance Import Step 2: Calling importAttendanceData (Confirm: true)...");
-
         try {
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
-
             console.log("Attendance Import Step 2: Received final response:", result.data);
             setImportResult({
                 message: result.data.result || "Import completed.",
                 errors: result.data.errors || []
             });
-
              if (!result.data.errors || result.data.errors.length === 0) {
                  console.log("Attendance Import Step 2: Import seems successful, refreshing report...");
                  await handleGenerateReport();
              } else {
                  console.warn("Attendance Import Step 2: Import completed with errors, report not automatically refreshed.");
              }
-
         } catch (error) {
             console.error("Attendance Import Step 2: Error confirming import call:", error);
              const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
@@ -407,10 +403,35 @@ export default function AttendanceReportsPage({ db, staffList }) {
         console.log("Attendance Import: Cancelled.");
     };
 
-    // --- NEW: Helper for rendering sort icons ---
+    // --- NEW: Function to run the cleanup ---
+    const handleCleanup = async () => {
+        if (!window.confirm("Are you sure you want to run the cleanup? This will permanently delete all attendance records with 20-character Auto-IDs.")) {
+            return;
+        }
+        
+        setCleanupLoading(true);
+        setCleanupResult(null);
+        setImportResult(null); // Clear other results
+
+        try {
+            console.log("Calling cleanupBadAttendanceIds...");
+            const response = await cleanupBadAttendanceIds();
+            console.log("Cleanup response:", response.data);
+            setCleanupResult({ message: response.data.message, error: false });
+            // Refresh the report to show the cleaned data
+            await handleGenerateReport();
+        } catch (err) {
+            console.error("Error running cleanup:", err);
+            setCleanupResult({ message: err.message, error: true });
+        } finally {
+            setCleanupLoading(false);
+        }
+    };
+    
+    // --- Helper for rendering sort icons ---
     const getSortIcon = (key) => {
         if (sortConfig.key !== key) {
-            return null; // No icon if not sorting by this key
+            return null;
         }
         if (sortConfig.direction === 'ascending') {
             return <ArrowUp className="inline-block h-4 w-4 ml-1" />;
@@ -448,6 +469,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
             <div className="bg-gray-800 rounded-lg shadow-lg p-4 md:p-6 mb-8">
                  <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
+                     {/* ... (Date and Staff filters are unchanged) ... */}
                      <div className="flex-grow">
                         <label htmlFor="startDate" className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
                         <input
@@ -491,7 +513,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     </div>
                      <button
                         onClick={handleGenerateReport}
-                        disabled={isLoading || isImporting || isConfirmingImport || isExporting}
+                        disabled={isLoading || isImporting || isConfirmingImport || isExporting || cleanupLoading}
                         className="w-full sm:w-auto px-5 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 disabled:cursor-not-allowed flex-shrink-0 transition duration-150 ease-in-out text-white font-semibold"
                     >
                         {isLoading ? 'Generating...' : 'Generate Report'}
@@ -500,7 +522,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 <div className="flex flex-col sm:flex-row sm:justify-end gap-3 mt-4 border-t border-gray-700 pt-4">
                      <button
                         onClick={handleExport}
-                        disabled={isExporting || isLoading || isImporting || isConfirmingImport}
+                        disabled={isExporting || isLoading || isImporting || isConfirmingImport || cleanupLoading}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
                         <DownloadIcon className="h-5 w-5 mr-2" />
@@ -508,7 +530,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     </button>
                      <button
                         onClick={handleImportClick}
-                        disabled={isImporting || isConfirmingImport || isLoading || isExporting}
+                        disabled={isImporting || isConfirmingImport || isLoading || isExporting || cleanupLoading}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
                         <UploadIcon className="h-5 w-5 mr-2" />
@@ -521,9 +543,29 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         accept=".csv, text/csv, application/vnd.ms-excel"
                         style={{ display: 'none' }}
                       />
+                    {/* --- NEW: Temporary Cleanup Button --- */}
+                    <button
+                        onClick={handleCleanup}
+                        disabled={isExporting || isLoading || isImporting || isConfirmingImport || cleanupLoading}
+                        className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
+                    >
+                        <TrashIcon className="h-5 w-5 mr-2" />
+                        {cleanupLoading ? 'Cleaning...' : 'Run Cleanup'}
+                    </button>
                 </div>
             </div>
 
+             {/* --- NEW: Display Cleanup Result --- */}
+             {cleanupResult && (
+                <div className={`p-4 rounded-lg mb-6 shadow ${cleanupResult.error ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
+                    <p className={`font-semibold ${cleanupResult.error ? 'text-red-300' : 'text-green-300'}`}>
+                        {cleanupResult.error ? 'Cleanup Failed' : 'Cleanup Success'}
+                    </p>
+                    <p className="text-sm text-gray-300">{cleanupResult.message}</p>
+                </div>
+             )}
+
+             {/* --- Import Results --- */}
              {importResult && (
                 <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
                     <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}>
@@ -542,11 +584,11 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 </div>
              )}
 
+            {/* --- Report Table (with sorting headers) --- */}
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
-                            {/* --- MODIFIED: Added sorting headers --- */}
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                                 <button onClick={() => requestSort('staffName')} className="flex items-center hover:text-white">
                                     Staff Name {getSortIcon('staffName')}
@@ -583,7 +625,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         {isLoading ? (
                              <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr>
                         ) : reportData.length > 0 ? (
-                            // --- MODIFIED: Map over sortedReportData (now just 'reportData') ---
                             reportData.map((row) => (
                                 <tr
                                     key={row.id || `${row.staffId}_${row.date}`}
@@ -592,8 +633,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(row.date)}</td>
-                                    
-                                    {/* --- MODIFIED: Added tooltip --- */}
                                     <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${
                                         row.status === 'Absent' ? 'text-red-400' :
                                         row.status.startsWith('Late') ? 'text-yellow-400' :
@@ -606,11 +645,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                             {row.status}
                                         </span>
                                     </td>
-                                    {/* --- END MODIFICATION --- */}
-
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
-                                    {/* --- MODIFIED: Format work hours for display --- */}
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                         {row.workHours < 0 ? 'N/A' : row.workHours.toFixed(2)}
                                     </td>
