@@ -24,7 +24,7 @@ const StatusBadge = ({ status }) => {
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
-    const [filter, setFilter] = 'pending';
+    const [filter, setFilter] = useState('pending');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
 
