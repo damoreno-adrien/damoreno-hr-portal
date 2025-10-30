@@ -248,8 +248,7 @@ exports.exportAttendanceDataHandler = onCall({
                 // and avoids exporting 30 "Off" rows for every employee.
                 if (status !== 'Off' && status !== 'Unknown') {
                     records.push({
-                        // *** FIX: Use the consistent formatted ID ***
-                        attendanceDocId: attendance ? attendance.id : `${staffId}_${dateStr}`,
+                        attendanceDocId: key, // 'key' is already defined as `${staffId}_${dateStr}`
                         staffId,
                         staffName,
                         date: dateStr,
