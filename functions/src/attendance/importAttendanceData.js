@@ -27,54 +27,26 @@ const TIME_FIELDS_MAP = {
 
 // --- Helpers ---
 
-// *** NEW HELPER FUNCTION ***
-/**
- * Parses a date string from a CSV.
- * Tries "yyyy-MM-dd", "dd-MM-yy", and "dd-MM-yyyy".
- * @param {string} dateString The date string from the CSV.
- * @returns {string | null} A valid "yyyy-MM-dd" string or null.
- */
 const parseDateString = (dateString) => {
     if (!dateString) return null;
-
-    // List of formats to try
-    const formatsToTry = [
-        'yyyy-MM-dd', // Format 1: 2025-10-23
-        'dd-MM-yy',   // Format 2: 23-10-25
-        'dd-MM-yyyy'  // Format 3: 23-10-2025
-    ];
-
+    const formatsToTry = ['yyyy-MM-dd', 'dd-MM-yy', 'dd-MM-yyyy'];
     for (const format of formatsToTry) {
-        // Use Luxon to parse, specifying the local timezone
         const dt = DateTime.fromFormat(dateString, format, { zone: THAILAND_TIMEZONE });
         if (dt.isValid) {
-            return dt.toFormat('yyyy-MM-dd'); // Return in standard yyyy-MM-dd format
+            return dt.toFormat('yyyy-MM-dd');
         }
     }
-    
-    return null; // Could not parse
+    return null;
 };
-// *** END NEW HELPER FUNCTION ***
 
-
-/**
- * Parses a date string (YYYY-MM-DD) and time string (HH:mm or HH:mm:ss)
- * into a Firestore Timestamp, interpreting the time in the specified timezone using Luxon.
- */
 const parseDateTimeToTimestampLuxon = (dateString, timeString) => {
     if (!dateString || !timeString) return null;
-
-    // Date validation is now handled *before* this function is called,
-    // so we can trust dateString is YYYY-MM-DD.
     
-    const timeFormat = timeString.length === 5 ? 'HH:mm' : 'HH:mm:ss';
     if (!/^\d{2}:\d{2}(:\d{2})?$/.test(timeString)) {
         console.warn(`parseDateTimeLuxon: Invalid time format: "${timeString}"`);
         return null;
     }
-
     const dateTimeString = `${dateString}T${timeString}`;
-
     try {
         const dt = DateTime.fromISO(dateTimeString, { zone: THAILAND_TIMEZONE });
         if (!dt.isValid) {
@@ -88,11 +60,6 @@ const parseDateTimeToTimestampLuxon = (dateString, timeString) => {
     }
 };
 
-
-/**
- * Compares two values, correctly handling Firestore Timestamps,
- * numbers vs strings, and nullish values (null, undefined, empty string).
- */
 const areValuesEqual = (val1, val2) => {
     if (val1 instanceof Timestamp && val2 instanceof Timestamp) {
         try {
@@ -106,15 +73,12 @@ const areValuesEqual = (val1, val2) => {
         }
         return val1.isEqual(val2);
     }
-
     if (typeof val1 === 'number' || typeof val2 === 'number') {
         return Number(val1) === Number(val2);
     }
-
     const v1IsEmpty = val1 === null || val1 === undefined || val1 === '';
     const v2IsEmpty = val2 === null || val2 === undefined || val2 === '';
     if (v1IsEmpty && v2IsEmpty) return true;
-
     return val1 === val2;
 };
 
@@ -205,35 +169,41 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 }
 
                 // b. --- Extract and Validate Key Identifying Fields ---
-                const attendanceDocId = hasAttendanceDocId ? getRecordValue('attendanceDocId') : null;
+                let attendanceDocId = hasAttendanceDocId ? getRecordValue('attendanceDocId') : null;
                 const staffId = getRecordValue('staffId');
-                const rawDate = getRecordValue('date'); // e.g., "01-10-25"
+                const rawDate = getRecordValue('date');
                 const staffName = getRecordValue('staffName') || '';
-
-                // *** THIS IS THE FIX ***
-                // Use the new helper to parse and validate the date string
-                const date = parseDateString(rawDate); // Returns "2025-10-01" or null
+                
+                const date = parseDateString(rawDate);
                 
                 if (!date) {
                     throw new Error(`Missing or invalid required data for: date (Could not parse '${rawDate}'. Must be YYYY-MM-DD, dd-MM-yy, or dd-MM-yyyy)`);
                 }
-                // *** END FIX ***
                 
-                // Basic check for staffId format
                 if (!staffId || staffId.length < 5) {
                     throw new Error(`Invalid or missing staffId`);
                 }
 
-                // Store identifiers in analysis object
-                analysis.attendanceDocId = attendanceDocId;
+                // --- *** LOGIC FIX: Generate the ID consistently *** ---
+                const expectedDocId = `${staffId}_${date}`;
+                if (hasAttendanceDocId && attendanceDocId && attendanceDocId !== expectedDocId) {
+                    // If an ID is provided but it doesn't match our format, trust it but log a warning.
+                    console.warn(`Row ${rowNum}: Provided attendanceDocId '${attendanceDocId}' does not match expected format '${expectedDocId}'. Using provided ID.`);
+                } else {
+                    // Use the formatted, predictable ID
+                    attendanceDocId = expectedDocId;
+                }
+                // --- *** END LOGIC FIX *** ---
+
+                analysis.attendanceDocId = attendanceDocId; // This is now ALWAYS the formatted ID
                 analysis.staffId = staffId;
-                analysis.date = date; // Store the *parsed* YYYY-MM-DD date
+                analysis.date = date;
                 analysis.staffName = staffName;
 
-                // c. --- Prepare Potential Firestore Data (Parsing Times using Luxon) ---
+                // c. --- Prepare Potential Firestore Data ---
                 const csvAttendanceData = {
                     staffId: staffId,
-                    date: date, // Use the parsed YYYY-MM-DD date
+                    date: date,
                     staffName: staffName,
                     checkInTime: parseDateTimeToTimestampLuxon(date, getRecordValue('checkInTime')),
                     checkOutTime: parseDateTimeToTimestampLuxon(date, getRecordValue('checkOutTime')),
@@ -245,40 +215,21 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 let existingRecord = null;
                 let attendanceRef = null;
 
-                if (attendanceDocId) {
-                    // ** Strategy 1: Find by provided Document ID **
-                    console.log(`importAttendanceData: Row ${rowNum} - Attempting to find record by attendanceDocId: ${attendanceDocId}`);
-                    attendanceRef = db.collection('attendance').doc(attendanceDocId);
-                    const docSnap = await attendanceRef.get();
-                    if (docSnap.exists) {
-                        existingRecord = docSnap.data();
-                        if (existingRecord.staffId !== staffId || existingRecord.date !== date) {
-                            console.error(`importAttendanceData: Row ${rowNum} - Data mismatch error. Doc ${attendanceDocId} has staff ${existingRecord.staffId} on ${existingRecord.date}, but CSV row has staff ${staffId} on ${date}.`);
-                            throw new Error(`Data mismatch: Record found by attendanceDocId (${attendanceDocId}) has different staffId/date than CSV row.`);
-                        }
-                         console.log(`importAttendanceData: Row ${rowNum} - Successfully found existing record by attendanceDocId.`);
-                    } else {
-                        console.error(`importAttendanceData: Row ${rowNum} - Error: attendanceDocId "${attendanceDocId}" not found in database.`);
-                        throw new Error(`attendanceDocId "${attendanceDocId}" not found in database.`);
-                    }
+                // --- *** LOGIC FIX: Always find by the formatted ID *** ---
+                console.log(`importAttendanceData: Row ${rowNum} - Checking for doc with ID: ${attendanceDocId}`);
+                attendanceRef = db.collection('attendance').doc(attendanceDocId);
+                const docSnap = await attendanceRef.get();
+                if (docSnap.exists) {
+                    existingRecord = docSnap.data();
+                    console.log(`importAttendanceData: Row ${rowNum} - Successfully found existing record.`);
                 } else {
-                    // ** Strategy 2: No Document ID provided - Check for existing record **
-                     console.log(`importAttendanceData: Row ${rowNum} - No attendanceDocId provided. Checking for existing record for staff ${staffId} on ${date}.`);
-                     const q = db.collection('attendance').where('staffId', '==', staffId).where('date', '==', date).limit(1);
-                     const querySnap = await q.get();
-                     if (!querySnap.empty) {
-                        const existingDocId = querySnap.docs[0].id;
-                        console.warn(`importAttendanceData: Row ${rowNum} - Record already exists for ${staffId} on ${date} (Doc ID: ${existingDocId}) but no attendanceDocId was provided in CSV. Cannot create duplicate.`);
-                        throw new Error(`Record already exists for ${staffId} on ${date}. To update it, export the data first to get the attendanceDocId ('${existingDocId}') and include it in your import CSV.`);
-                     } else {
-                         console.log(`importAttendanceData: Row ${rowNum} - No existing record found for ${staffId} on ${date}. Will proceed with create action.`);
-                         existingRecord = null;
-                         attendanceRef = null;
-                     }
+                    console.log(`importAttendanceData: Row ${rowNum} - No existing record found. Will proceed with create action if checkInTime is present.`);
+                    existingRecord = null;
                 }
+                // --- *** END LOGIC FIX *** ---
 
-                // e. --- Determine Action (Create, Update, NoChange) and Calculate Changes ---
-                if (existingRecord && attendanceRef) {
+                // e. --- Determine Action (Create, Update, NoChange) ---
+                if (existingRecord) {
                     // ** Case: Update or No Change **
                     analysis.action = 'update';
                     let changes = {};
@@ -311,22 +262,24 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                          console.log(`importAttendanceData: Row ${rowNum} - Marked as NO CHANGE.`);
                     }
 
-                } else if (!attendanceDocId && !existingRecord) {
-                    // ** Case: Create New Record **
-                    analysis.action = 'create';
-                    analysis.details = {
-                        checkInTime: csvAttendanceData.checkInTime,
-                        checkOutTime: csvAttendanceData.checkOutTime,
-                        breakStart: csvAttendanceData.breakStart,
-                        breakEnd: csvAttendanceData.breakEnd,
-                        staffName: csvAttendanceData.staffName
-                    };
-                    analysis.dataForCreate = csvAttendanceData;
-                     console.log(`importAttendanceData: Row ${rowNum} - Marked for CREATE.`);
-
                 } else {
-                    console.error(`importAttendanceData: Row ${rowNum} - Reached unhandled analysis state. attendanceDocId: ${attendanceDocId}, existingRecord found: ${!!existingRecord}`);
-                    throw new Error(`Internal error: Unhandled analysis state for row ${rowNum}.`);
+                    // ** Case: Create New Record **
+                    if (csvAttendanceData.checkInTime) {
+                        analysis.action = 'create';
+                        analysis.details = {
+                            checkInTime: csvAttendanceData.checkInTime,
+                            checkOutTime: csvAttendanceData.checkOutTime,
+                            breakStart: csvAttendanceData.breakStart,
+                            breakEnd: csvAttendanceData.breakEnd,
+                            staffName: csvAttendanceData.staffName
+                        };
+                        analysis.dataForCreate = csvAttendanceData;
+                         console.log(`importAttendanceData: Row ${rowNum} - Marked for CREATE.`);
+                    } else {
+                        analysis.action = 'nochange';
+                        analysis.details = null;
+                        console.log(`importAttendanceData: Row ${rowNum} - Marked as NO CHANGE (no existing record and no new check-in time).`);
+                    }
                 }
 
             } catch (error) {
@@ -361,40 +314,28 @@ exports.importAttendanceDataHandler = functions.https.onCall({
             const writePromises = [];
             const finalExecutionErrors = [];
 
-            analysisResults.forEach(res => {
-                if (res.action === 'create' && res.dataForCreate) {
-                    writePromises.push((async () => {
-                        console.log(`importAttendanceData: Executing CREATE for row ${res.rowNum}, Staff: ${res.staffId}, Date: ${res.date}`);
-                        await db.collection('attendance').add({
-                             ...res.dataForCreate,
-                             createdAt: FieldValue.serverTimestamp()
-                         });
-                        recordsCreated++;
-                        console.log(`importAttendanceData: Row ${res.rowNum} - Successfully committed create.`);
-                    })().catch(err => {
-                        const errorMsg = `Row ${res.rowNum} (Create Failed): ${err.message}`;
-                        finalExecutionErrors.push(errorMsg);
-                        console.error(errorMsg, err);
-                    }));
-                }
-                else if (res.action === 'update' && res.dataForUpdate && res.attendanceDocId) {
-                    writePromises.push((async () => {
-                         const docId = res.attendanceDocId;
-                         console.log(`importAttendanceData: Executing UPDATE for row ${res.rowNum}, DocID: ${docId}`);
-                         const attendanceRef = db.collection('attendance').doc(docId);
-                         const { updateData } = res.dataForUpdate;
+            // --- *** LOGIC FIX: Use Batch write for creates/updates *** ---
+            const batch = db.batch();
 
-                         await attendanceRef.update({
-                             ...updateData,
-                             updatedAt: FieldValue.serverTimestamp()
-                         });
-                         recordsUpdated++;
-                         console.log(`importAttendanceData: Row ${res.rowNum} - Successfully committed update.`);
-                    })().catch(err => {
-                         const errorMsg = `Row ${res.rowNum} (Update Failed - Doc: ${res.attendanceDocId}): ${err.message}`;
-                         finalExecutionErrors.push(errorMsg);
-                         console.error(errorMsg, err);
-                     }));
+            analysisResults.forEach(res => {
+                // Get the consistent document reference
+                const docRef = db.collection('attendance').doc(res.attendanceDocId);
+
+                if (res.action === 'create' && res.dataForCreate) {
+                    console.log(`importAttendanceData: Executing CREATE for row ${res.rowNum}, DocID: ${res.attendanceDocId}`);
+                    batch.set(docRef, {
+                        ...res.dataForCreate,
+                        createdAt: FieldValue.serverTimestamp()
+                    });
+                    recordsCreated++;
+                }
+                else if (res.action === 'update' && res.dataForUpdate) {
+                    console.log(`importAttendanceData: Executing UPDATE for row ${res.rowNum}, DocID: ${res.attendanceDocId}`);
+                    batch.update(docRef, {
+                        ...res.dataForUpdate.updateData,
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    recordsUpdated++;
                  }
                 else if (res.action === 'error') {
                      res.errors.forEach(errMsg => {
@@ -406,8 +347,14 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 }
             });
 
-            await Promise.allSettled(writePromises);
-            console.log("importAttendanceData: All write operations have settled.");
+            try {
+                await batch.commit();
+                console.log("importAttendanceData: Batch commit successful.");
+            } catch (batchError) {
+                console.error("importAttendanceData: CRITICAL Batch Commit Error:", batchError);
+                finalExecutionErrors.push(`Batch Write Failed: ${batchError.message}. Some records may not have saved.`);
+            }
+            // --- *** END LOGIC FIX *** ---
 
              const uniqueRowErrors = new Map();
              [...overallErrors, ...finalExecutionErrors].forEach(e => {
