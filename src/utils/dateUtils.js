@@ -1,3 +1,4 @@
+// src/utils/dateUtils.js
 import {
   format,
   parseISO,
@@ -15,6 +16,8 @@ import {
   differenceInMonths as dfnsDifferenceInMonths,
   startOfMonth as dfnsStartOfMonth,
   endOfMonth as dfnsEndOfMonth,
+  startOfYear as dfnsStartOfYear,
+  endOfYear as dfnsEndOfYear,
   differenceInMilliseconds as dfnsDifferenceInMilliseconds,
   intervalToDuration,
   getDaysInMonth as dfnsGetDaysInMonth,
@@ -288,4 +291,22 @@ export const differenceInYears = (dateLeft, dateRight) => {
     const right = fromFirestore(dateRight);
     if (!left || !right) return 0; // Or handle error appropriately
     return dfnsDifferenceInYears(left, right);
+};
+
+/**
+ * Returns the start of the year for a given date.
+ */
+export const startOfYear = (date) => {
+  const dateObj = fromFirestore(date);
+  if (!dateObj) return null;
+  return dfnsStartOfYear(dateObj);
+};
+
+/**
+ * Returns the end of the year for a given date.
+ */
+export const endOfYear = (date) => {
+  const dateObj = fromFirestore(date);
+  if (!dateObj) return null;
+  return dfnsEndOfYear(dateObj);
 };

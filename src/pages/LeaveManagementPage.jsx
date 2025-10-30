@@ -1,9 +1,10 @@
+// src/pages/LeaveManagementPage.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import Modal from '../components/Modal';
 import LeaveRequestForm from '../components/LeaveRequestForm';
-import { PlusIcon } from '../components/Icons'; // --- Removed SearchIcon ---
-import { Search } from 'lucide-react'; // --- MODIFIED: Import from lucide-react ---
+import { PlusIcon } from '../components/Icons';
+import { Search } from 'lucide-react'; // Import from lucide-react
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
@@ -21,7 +22,7 @@ const StatusBadge = ({ status }) => {
     return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
 };
 
-// --- NEW COMPONENT for Date Range Filters ---
+// --- COMPONENT for Date Range Filters ---
 const DateRangeFilter = ({ currentFilter, setFilter }) => {
     const filters = [
         { key: 'thisMonth', label: 'This Month' },
@@ -43,18 +44,14 @@ const DateRangeFilter = ({ currentFilter, setFilter }) => {
         </div>
     );
 };
-// --- END NEW COMPONENT ---
+// --- END COMPONENT ---
 
 export default function LeaveManagementPage({ db, user, userRole, staffList, companyConfig, leaveBalances }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [filteredLeaveRequests, setFilteredLeaveRequests] = useState([]);
     const [filter, setFilter] = useState('pending'); // Status filter (pending, approved, rejected)
-    
-    // --- NEW STATE for reorganization ---
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState('thisMonth'); // Date range filter
-    // --- END NEW STATE ---
-
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
 
@@ -102,14 +99,17 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         }
     }, [allLeaveRequests, userRole, db]);
 
-    // --- MODIFIED Effect to apply ALL filters ---
+    // --- MODIFIED Effect to apply ALL filters (Now using correct dateUtils) ---
     useEffect(() => {
         if (userRole === 'manager') {
             const now = new Date();
+            
+            // --- THIS CODE WILL NOW WORK ---
             const monthStart = dateUtils.startOfMonth(now);
             const monthEnd = dateUtils.endOfMonth(now);
             const yearStart = dateUtils.startOfYear(now);
             const yearEnd = dateUtils.endOfYear(now);
+            // --- END ---
             
             const filtered = allLeaveRequests.filter(req => {
                 // 1. Filter by Status (Pending, Approved, Rejected)
@@ -194,7 +194,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                     <button onClick={openNewRequestModal} className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />New Request for Staff</button>
                 </div>
                 
-                {/* --- NEW FILTER BAR --- */}
+                {/* --- FILTER BAR --- */}
                 <div className="mb-6 p-4 bg-gray-900 rounded-lg flex flex-col md:flex-row gap-4 justify-between items-center">
                     {/* Status Filter */}
                     <div className="flex space-x-2 p-1 bg-gray-700 rounded-lg">
@@ -206,7 +206,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                     {/* Search Bar */}
                     <div className="relative flex-grow w-full md:w-auto">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            {/* --- MODIFIED: Use lucide icon --- */}
                             <Search className="h-5 w-5 text-gray-400" />
                         </div>
                         <input
@@ -223,7 +222,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                         <DateRangeFilter currentFilter={dateFilter} setFilter={setDateFilter} />
                     )}
                 </div>
-                {/* --- END NEW FILTER BAR --- */}
+                {/* --- END FILTER BAR --- */}
 
                 {/* --- RESULTS LIST --- */}
                 <div className="bg-gray-800 rounded-lg shadow-lg">
