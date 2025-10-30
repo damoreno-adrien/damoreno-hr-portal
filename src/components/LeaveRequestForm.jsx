@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react'; // --- MODIFIED: Added useMemo ---
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
@@ -120,9 +120,17 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         }
     };
 
-    // Use standard date utils
-    const tomorrow = dateUtils.addDays(new Date(), 1);
-    const minDate = dateUtils.formatISODate(tomorrow);
+    // --- *** MODIFIED DATE LOGIC *** ---
+    // Use useMemo to calculate the minimum allowed start date based on user role
+    const minStartDate = useMemo(() => {
+        if (userRole === 'manager') {
+            return null; // Managers can select past dates
+        }
+        // Staff are restricted to tomorrow
+        const tomorrow = dateUtils.addDays(new Date(), 1);
+        return dateUtils.formatISODate(tomorrow);
+    }, [userRole]);
+    // --- *** END MODIFIED LOGIC *** ---
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -155,11 +163,23 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
-                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} min={minDate} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input 
+                        type="date" 
+                        value={startDate} 
+                        onChange={(e) => setStartDate(e.target.value)} 
+                        min={minStartDate} // --- MODIFIED: Use new variable
+                        className="w-full p-2 bg-gray-700 rounded-md" 
+                    />
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
-                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={startDate || minDate} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input 
+                        type="date" 
+                        value={endDate} 
+                        onChange={(e) => setEndDate(e.target.value)} 
+                        min={startDate || minStartDate} // --- MODIFIED: Use new variable
+                        className="w-full p-2 bg-gray-700 rounded-md" 
+                    />
                 </div>
             </div>
              <div><p className="text-sm text-gray-400">Total days: <span className="font-bold text-white">{totalDays > 0 ? totalDays : ''}</span></p></div>
