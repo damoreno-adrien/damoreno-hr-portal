@@ -31,6 +31,8 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
                     {/* --- MODIFIED: Display creator name --- */}
                     <p className="text-sm text-gray-400">
                         {req.leaveType} | Requested: {dateUtils.formatDisplayDate(req.requestedAt)}
+                    </p>
+                    <p className="text-sm text-gray-400">
                         {/* Show the creator string if it exists */}
                         {createdByString && <span className="italic ml-1 text-gray-500">{createdByString}</span>}
                     </p>
