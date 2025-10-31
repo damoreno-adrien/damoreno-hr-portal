@@ -230,7 +230,13 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 <div className="space-y-8">
                     <DashboardCard title="This Month's Summary">
                         <div className="space-y-4">
-                           <StatItem icon={Clock} label="Total Hours Worked" value={monthlyStats.totalHours} colorClass="blue" />
+                           <StatItem 
+                                icon={Clock} 
+                                label="Total Hours Worked" 
+                                value={monthlyStats.totalHoursWorked} 
+                                colorClass="blue"
+                                caption={`On total scheduled of ${monthlyStats.totalHoursScheduled}`}
+                           />
                            <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
                            <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
                            <StatItem icon={AlertTriangle} label="Total Time Late" value={monthlyStats.totalTimeLate} colorClass="yellow" />

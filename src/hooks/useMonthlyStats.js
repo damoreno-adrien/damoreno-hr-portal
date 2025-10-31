@@ -1,5 +1,3 @@
-/* src/hooks/useMonthlyStats.js */
-
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import * as dateUtils from '../utils/dateUtils';
@@ -8,6 +6,7 @@ import { DateTime } from 'luxon';
 
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 const DEFAULT_BREAK_MS = 60 * 60 * 1000; // 1 hour in milliseconds
+const DEFAULT_CHECKOUT_TIME = '23:00:00'; // 11:00 PM
 
 // Helper function to format milliseconds into "170h 45m"
 const formatMillisToHours = (ms) => {
@@ -26,17 +25,19 @@ const formatMinutesToHours = (min) => {
     return `${hours}h ${minutes}m`;
 };
 
-export const useMonthlyStats = (db, user) => {
+export const useMonthlyStats = (db, user, companyConfig) => {
     const [monthlyStats, setMonthlyStats] = useState({
-        totalHours: '0h 0m', // This will now be SCHEDULED hours
+        totalHoursWorked: '0h 0m',
+        totalHoursScheduled: '0h 0m',
         workedDays: 0,
         absences: 0,
         totalTimeLate: '0h 0m',
     });
-    // We'll skip 'bonusStatus' for now to focus on stats
+    
+    const [bonusStatus, setBonusStatus] = useState({ onTrack: true, text: 'On Track' });
 
     useEffect(() => {
-        if (!db || !user) return;
+        if (!db || !user || !companyConfig) return;
 
         const fetchStats = async () => {
             const now = DateTime.now().setZone(THAILAND_TIMEZONE);
@@ -45,7 +46,6 @@ export const useMonthlyStats = (db, user) => {
             const today = now.toISODate();
 
             // --- 1. Fetch all data for the month concurrently ---
-            // (Queries are the same as before)
             const attendanceQuery = query(
                 collection(db, 'attendance'),
                 where('staffId', '==', user.uid),
@@ -72,7 +72,6 @@ export const useMonthlyStats = (db, user) => {
             ]);
 
             // --- 2. Process data into fast-lookup maps ---
-            // (Maps are the same as before)
             const attendanceMap = new Map();
             attendanceSnap.forEach(doc => attendanceMap.set(doc.data().date, doc.data()));
 
@@ -95,13 +94,15 @@ export const useMonthlyStats = (db, user) => {
             });
 
             // --- 3. Iterate and calculate stats ---
-            let totalActualMillis = 0; // For bonus stats (internal)
-            let totalScheduledMillis = 0; // For display
+            let totalActualMillis = 0;
+            let totalScheduledMillis = 0;
             let totalLateMinutes = 0;
+            let totalLatesCount = 0;
+            let totalAbsencesCount = 0;
             let workedDays = 0;
-            let absences = 0;
 
             let loopDay = now.startOf('month');
+            // Loop from the start of the month up to (and including) today
             while (loopDay <= now) { 
                 const dateStr = loopDay.toISODate();
                 const dateJS = loopDay.toJSDate(); 
@@ -112,33 +113,39 @@ export const useMonthlyStats = (db, user) => {
 
                 const { status, minutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS);
 
-                // --- A) Calculate Total ACTUAL Hours (with 1h break) ---
-                // This is still needed for bonus calculations, but not for display
-                if (attendance && attendance.checkInTime && attendance.checkOutTime) {
+                // --- A) Calculate Total ACTUAL Hours (Worked) ---
+                if (attendance && attendance.checkInTime) {
+                    workedDays++;
                     const checkIn = attendance.checkInTime.toDate();
-                    const checkOut = attendance.checkOutTime.toDate();
-                    let durationMs = checkOut.getTime() - checkIn.getTime();
-                    
-                    // --- NEW RULE: Subtract 1 default hour, ignore break times ---
-                    durationMs -= DEFAULT_BREAK_MS; 
-                    
-                    if (durationMs > 0) {
-                        totalActualMillis += durationMs;
+                    let checkOut;
+
+                    if (attendance.checkOutTime) {
+                        checkOut = attendance.checkOutTime.toDate();
+                    } else if (dateStr < today) {
+                        // Past day with missing checkout: use 11 PM default
+                        checkOut = DateTime.fromISO(`${dateStr}T${DEFAULT_CHECKOUT_TIME}`, { zone: THAILAND_TIMEZONE }).toJSDate();
+                    } else {
+                        // Today with missing checkout: don't count hours yet
+                        checkOut = null; 
                     }
-                    workedDays++; // Count day as worked if they checked in/out
+
+                    if (checkOut) {
+                        let durationMs = checkOut.getTime() - checkIn.getTime();
+                        durationMs -= DEFAULT_BREAK_MS; // Subtract 1 default hour
+                        if (durationMs > 0) {
+                            totalActualMillis += durationMs;
+                        }
+                    }
                 }
 
-                // --- B) Calculate Total SCHEDULED Hours (with 1h break) ---
-                // This will be displayed on the card
+                // --- B) Calculate Total SCHEDULED Hours ---
                 if (schedule && schedule.type === 'work' && schedule.startTime && schedule.endTime) {
                     try {
                         const start = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: THAILAND_TIMEZONE });
                         const end = DateTime.fromISO(`${schedule.date}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
                         
                         let scheduledDurationMs = end.diff(start).as('milliseconds');
-                        
-                        // --- NEW RULE: Subtract 1 default hour ---
-                        scheduledDurationMs -= DEFAULT_BREAK_MS;
+                        scheduledDurationMs -= DEFAULT_BREAK_MS; // Subtract 1 default hour
 
                         if (scheduledDurationMs > 0) {
                             totalScheduledMillis += scheduledDurationMs;
@@ -148,33 +155,39 @@ export const useMonthlyStats = (db, user) => {
                     }
                 }
                 
-                // --- C) Sum Total Late Minutes ---
+                // --- C) Sum Lates and Absences for Bonus ---
                 if (status === 'Late') {
                     totalLateMinutes += minutes;
+                    totalLatesCount++;
                 }
-
-                // --- D) Count Absences ---
-                if (status === 'Absent' && loopDay.toISODate() < today) {
-                    absences++;
+                if (status === 'Absent' && loopDay.toISODate() < today) { // Only count past absences
+                    totalAbsencesCount++;
                 }
                 
                 loopDay = loopDay.plus({ days: 1 });
             }
 
+            // --- 4. Set Final Stats ---
             setMonthlyStats({
-                // --- UPDATED: This now shows SCHEDULED hours ---
-                totalHours: formatMillisToHours(totalScheduledMillis),
+                totalHoursWorked: formatMillisToHours(totalActualMillis),
+                totalHoursScheduled: formatMillisToHours(totalScheduledMillis),
                 workedDays: workedDays,
-                absences: absences,
+                absences: totalAbsencesCount,
                 totalTimeLate: formatMinutesToHours(totalLateMinutes),
+            });
+
+            // --- 5. Calculate Bonus Status ---
+            const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus || { allowedAbsences: 0, allowedLates: 1 };
+            const isBonusLost = totalAbsencesCount > allowedAbsences || totalLatesCount > allowedLates;
+            
+            setBonusStatus({
+                onTrack: !isBonusLost,
+                text: isBonusLost ? 'Bonus Lost for this month' : 'On Track'
             });
         };
 
         fetchStats().catch(console.error);
-    }, [db, user]);
-
-    // This logic should be updated to use totalActualMillis
-    const bonusStatus = { onTrack: true, text: 'On Track' }; 
+    }, [db, user, companyConfig]); // Add companyConfig as dependency
 
     return { monthlyStats, bonusStatus };
 };
