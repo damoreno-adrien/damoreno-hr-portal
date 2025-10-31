@@ -273,6 +273,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                             {!locationError && isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p className="text-green-400">✓ Location verified.</p>}
                         </div>
                     </DashboardCard>
+                </div>
+                <div className="space-y-8">
                     <DashboardCard title="Bonus Status">
                          <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
@@ -280,8 +282,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Based on monthly attendance.</p>
                     </DashboardCard>
-                </div>
-                <div className="space-y-8">
+                    <UpcomingShiftsCard todaysSchedule={todaysSchedule} tomorrowsSchedule={tomorrowsSchedule} />
+                    <QuickActionsCard setCurrentPage={setCurrentPage} />
                     <DashboardCard title="This Month's Summary">
                         <div className="space-y-4">
                            <StatItem 
@@ -318,10 +320,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                             </div>
                         )}
                     </DashboardCard>
-
-                    <QuickActionsCard setCurrentPage={setCurrentPage} />
-
-                    
                 </div>
             </div>
         </div>
