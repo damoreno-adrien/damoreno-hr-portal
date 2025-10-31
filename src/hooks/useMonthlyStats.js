@@ -1,16 +1,12 @@
-/* src/hooks/useMonthlyStats.js */
-
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import * as dateUtils from '../utils/dateUtils';
-import { calculateAttendanceStatus } from '../utils/statusUtils';
+import { doc, onSnapshot } from 'firebase/firestore'; // Changed imports
 import { DateTime } from 'luxon';
+// --- NEW IMPORT ---
+import { calculateMonthlyStats } from '../utils/attendanceCalculator'; 
 
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
-const DEFAULT_BREAK_MS = 60 * 60 * 1000; // 1 hour in milliseconds
-const DEFAULT_CHECKOUT_TIME = '23:00:00'; // 11:00 PM
 
-// ... (formatMillisToHours and formatMinutesToHours helpers) ...
+// ... (formatMillisToHours and formatMinutesToHours helpers remain the same) ...
 const formatMillisToHours = (ms) => {
     if (ms <= 0) return '0h 0m';
     const totalMinutes = Math.floor(ms / 60000);
@@ -25,7 +21,6 @@ const formatMinutesToHours = (min) => {
     return `${hours}h ${minutes}m`;
 };
 
-
 export const useMonthlyStats = (db, user, companyConfig) => {
     const [monthlyStats, setMonthlyStats] = useState({
         totalHoursWorked: '0h 0m',
@@ -33,176 +28,47 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         workedDays: 0,
         absences: 0,
         totalTimeLate: '0h 0m',
-        totalEarlyDepartures: '0h 0m', // --- NEW ---
+        totalEarlyDepartures: '0h 0m',
     });
-    
     const [bonusStatus, setBonusStatus] = useState({ onTrack: true, text: 'On Track' });
 
     useEffect(() => {
         if (!db || !user || !companyConfig) return;
 
-        const fetchStats = async () => {
-            // ... (All queries are the same) ...
+        // Listen to the user's profile to get their *current* bonus streak
+        const profileRef = doc(db, 'staff_profiles', user.uid);
+        const unsubscribe = onSnapshot(profileRef, (profileSnap) => {
+            if (!profileSnap.exists()) return;
+
+            const staffProfile = { id: profileSnap.id, ...profileSnap.data() };
             const now = DateTime.now().setZone(THAILAND_TIMEZONE);
-            const startOfMonth = now.startOf('month').toISODate();
-            const endOfMonth = now.endOf('month').toISODate();
-            const today = now.toISODate();
+            const currentPayPeriod = { month: now.month, year: now.year };
 
-            const attendanceQuery = query(
-                collection(db, 'attendance'),
-                where('staffId', '==', user.uid),
-                where('date', '>=', startOfMonth),
-                where('date', '<=', endOfMonth)
-            );
-            const schedulesQuery = query(
-                collection(db, 'schedules'),
-                where('staffId', '==', user.uid),
-                where('date', '>=', startOfMonth),
-                where('date', '<=', endOfMonth)
-            );
-            const leaveQuery = query(
-                collection(db, 'leave_requests'),
-                where('staffId', '==', user.uid),
-                where('status', '==', 'approved'),
-                where('endDate', '>=', startOfMonth)
-            );
+            // --- 1. Call the new shared calculator ---
+            calculateMonthlyStats(db, staffProfile, currentPayPeriod, companyConfig)
+                .then(stats => {
+                    // --- 2. Set Final Stats for the dashboard ---
+                    setMonthlyStats({
+                        totalHoursWorked: formatMillisToHours(stats.totalActualMillis),
+                        totalHoursScheduled: formatMillisToHours(stats.totalScheduledMillis),
+                        workedDays: stats.workedDays,
+                        absences: stats.totalAbsencesCount,
+                        totalTimeLate: formatMinutesToHours(stats.totalLateMinutes),
+                        totalEarlyDepartures: formatMinutesToHours(stats.totalEarlyDepartureMinutes),
+                    });
 
-            const [attendanceSnap, schedulesSnap, leaveSnap] = await Promise.all([
-                getDocs(attendanceQuery),
-                getDocs(schedulesQuery),
-                getDocs(leaveQuery),
-            ]);
+                    // --- 3. Calculate Bonus Status ---
+                    setBonusStatus({
+                        onTrack: stats.didQualifyForBonus,
+                        text: stats.didQualifyForBonus ? 'On Track' : 'Bonus Lost for this month'
+                    });
+                })
+                .catch(console.error);
+        });
 
-            // ... (All map processing is the same) ...
-            const attendanceMap = new Map();
-            attendanceSnap.forEach(doc => attendanceMap.set(doc.data().date, doc.data()));
-            const schedulesMap = new Map();
-            schedulesSnap.forEach(doc => schedulesMap.set(doc.data().date, doc.data()));
-            const leaveMap = new Map();
-            leaveSnap.forEach(doc => {
-                const data = doc.data();
-                if (data.startDate > endOfMonth) return;
-                let current = DateTime.fromISO(data.startDate, { zone: THAILAND_TIMEZONE });
-                const end = DateTime.fromISO(data.endDate, { zone: THAILAND_TIMEZONE });
-                while (current <= end) {
-                    const dateStr = current.toISODate();
-                    if (dateStr >= startOfMonth && dateStr <= endOfMonth) {
-                        leaveMap.set(dateStr, data);
-                    }
-                    current = current.plus({ days: 1 });
-                }
-            });
+        return () => unsubscribe(); // Unsubscribe from profile listener
 
-            // --- 3. Iterate and calculate stats ---
-            let totalActualMillis = 0;
-            let totalScheduledMillis = 0;
-            let totalLateMinutes = 0;
-            let totalLatesCount = 0;
-            let totalAbsencesCount = 0;
-            let totalEarlyDepartureMinutes = 0; // --- NEW ---
-            let workedDays = 0;
-
-            let loopDay = now.startOf('month');
-            while (loopDay <= now) { 
-                const dateStr = loopDay.toISODate();
-                const dateJS = loopDay.toJSDate(); 
-
-                const attendance = attendanceMap.get(dateStr);
-                const schedule = schedulesMap.get(dateStr);
-                const leave = leaveMap.get(dateStr);
-
-                const { status, minutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS);
-
-                // --- A) Calculate Total ACTUAL Hours (Worked) ---
-                if (attendance && attendance.checkInTime) {
-                    workedDays++;
-                    const checkIn = attendance.checkInTime.toDate();
-                    let checkOut;
-
-                    if (attendance.checkOutTime) {
-                        checkOut = attendance.checkOutTime.toDate();
-                    } else if (dateStr < today) {
-                        checkOut = DateTime.fromISO(`${dateStr}T${DEFAULT_CHECKOUT_TIME}`, { zone: THAILAND_TIMEZONE }).toJSDate();
-                    } else {
-                        checkOut = null; 
-                    }
-
-                    if (checkOut) {
-                        let durationMs = checkOut.getTime() - checkIn.getTime();
-                        durationMs -= DEFAULT_BREAK_MS; 
-                        if (durationMs > 0) {
-                            totalActualMillis += durationMs;
-                        }
-
-                        // --- NEW: Calculate Early Departure ---
-                        if (schedule && schedule.endTime) {
-                            try {
-                                const scheduledEnd = DateTime.fromISO(`${dateStr}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
-                                const actualEnd = DateTime.fromJSDate(checkOut);
-                                
-                                if (actualEnd < scheduledEnd) {
-                                    const earlyMinutes = scheduledEnd.diff(actualEnd, 'minutes').minutes;
-                                    totalEarlyDepartureMinutes += earlyMinutes;
-                                }
-                            } catch(e) { console.error("Error parsing early departure", e); }
-                        }
-                    }
-                }
-
-                // --- B) Calculate Total SCHEDULED Hours ---
-                if (schedule && schedule.type === 'work' && schedule.startTime && schedule.endTime) {
-                    try {
-                        const start = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: THAILAND_TIMEZONE });
-                        const end = DateTime.fromISO(`${schedule.date}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
-                        let scheduledDurationMs = end.diff(start).as('milliseconds');
-                        scheduledDurationMs -= DEFAULT_BREAK_MS; 
-                        if (scheduledDurationMs > 0) {
-                            totalScheduledMillis += scheduledDurationMs;
-                        }
-                    } catch(e) { console.error("Error parsing schedule time", e); }
-                }
-                
-                // --- C) Sum Lates and Absences for Bonus ---
-                if (status === 'Late') {
-                    totalLateMinutes += minutes;
-                    totalLatesCount++;
-                }
-                if (status === 'Absent' && loopDay.toISODate() < today) {
-                    totalAbsencesCount++;
-                }
-                
-                loopDay = loopDay.plus({ days: 1 });
-            }
-
-            // --- 4. Set Final Stats ---
-            setMonthlyStats({
-                totalHoursWorked: formatMillisToHours(totalActualMillis),
-                totalHoursScheduled: formatMillisToHours(totalScheduledMillis),
-                workedDays: workedDays,
-                absences: totalAbsencesCount,
-                totalTimeLate: formatMinutesToHours(totalLateMinutes),
-                totalEarlyDepartures: formatMinutesToHours(totalEarlyDepartureMinutes), // --- NEW ---
-            });
-            
-            // --- 5. Calculate Bonus Status ---
-            const { allowedAbsences, allowedLates, maxLateMinutesAllowed } = companyConfig.attendanceBonus || { allowedAbsences: 0, allowedLates: 1, maxLateMinutesAllowed: 30 };
-            
-            // --- UPDATED LOGIC ---
-            const isAbsenceOver = totalAbsencesCount > allowedAbsences;
-            const isLateCountOver = totalLatesCount > allowedLates;
-            const isLateTimeOver = totalLateMinutes > maxLateMinutesAllowed;
-            
-            const isBonusLost = isAbsenceOver || isLateCountOver || isLateTimeOver;
-            // --- END OF UPDATE ---
-            
-            setBonusStatus({
-                onTrack: !isBonusLost,
-                text: isBonusLost ? 'Bonus Lost for this month' : 'On Track'
-            });
-        };
-
-        fetchStats().catch(console.error);
-    }, [db, user, companyConfig]); // Dependency array is correct
+    }, [db, user, companyConfig]);
 
     return { monthlyStats, bonusStatus };
 };
