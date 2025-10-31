@@ -273,6 +273,13 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                             {!locationError && isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p className="text-green-400">✓ Location verified.</p>}
                         </div>
                     </DashboardCard>
+                    <DashboardCard title="Bonus Status">
+                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                            <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
+                            {bonusStatus.onTrack ? <CheckCircle className="w-5 h-5 text-green-400"/> : <Award className="w-5 h-5 text-red-400"/>}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">Based on monthly attendance.</p>
+                    </DashboardCard>
                 </div>
                 <div className="space-y-8">
                     <DashboardCard title="This Month's Summary">
@@ -314,13 +321,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
                     <QuickActionsCard setCurrentPage={setCurrentPage} />
 
-                    <DashboardCard title="Bonus Status">
-                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
-                            <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
-                            {bonusStatus.onTrack ? <CheckCircle className="w-5 h-5 text-green-400"/> : <Award className="w-5 h-5 text-red-400"/>}
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">Based on monthly attendance.</p>
-                    </DashboardCard>
+                    
                 </div>
             </div>
         </div>
