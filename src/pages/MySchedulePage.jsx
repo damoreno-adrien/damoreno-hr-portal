@@ -123,15 +123,17 @@ export default function MySchedulePage({ db, user }) {
         let statusElement;
         switch(dayInfo.scheduleStatus.type) {
             case 'Shift':
-                if (dayInfo.attendanceStatus === 'Late') {
-                    statusElement = (
-                        <div className="bg-yellow-400 text-black font-bold py-2 px-4 rounded-lg text-center">
-                            Late ({dayInfo.attendanceMinutes}m)
-                        </div>
-                    );
-                } else {
-                     statusElement = <div className="bg-amber-600 text-white font-bold py-2 px-4 rounded-lg text-center">{dayInfo.scheduleStatus.startTime} - {dayInfo.scheduleStatus.endTime}</div>;
-                }
+                // if (dayInfo.attendanceStatus === 'Late') {
+                //     statusElement = (
+                //         <div className="bg-yellow-400 text-black font-bold py-2 px-4 rounded-lg text-center">
+                //             Late ({dayInfo.attendanceMinutes}m)
+                //         </div>
+                //     );
+                // } else {
+                //      statusElement = <div className="bg-amber-600 text-white font-bold py-2 px-4 rounded-lg text-center">{dayInfo.scheduleStatus.startTime} - {dayInfo.scheduleStatus.endTime}</div>;
+                // }
+                statusElement = <div className="bg-amber-600 text-white font-bold py-2 px-4 rounded-lg text-center">{dayInfo.scheduleStatus.startTime} - {dayInfo.scheduleStatus.endTime}</div>;
+                break;
                 break;
             case 'On Leave':
                 statusElement = <div className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg text-center">On Leave</div>;

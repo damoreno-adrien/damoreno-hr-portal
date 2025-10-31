@@ -81,7 +81,7 @@ export const getStatusClass = (status) => {
         case 'Present':
             return 'bg-green-700 text-white'; // Darker green for contrast
         case 'Late':
-            return 'bg-orange-600 text-white'; // Orange needs white text
+            return 'bg-amber-700 text-white'; // deep, rich yellow. Clearly a "warning" color
         case 'Absent':
             return 'bg-red-700 text-white'; // Darker red
         case 'Leave':
