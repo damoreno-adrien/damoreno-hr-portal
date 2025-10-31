@@ -10,7 +10,6 @@ export default function MySchedulePage({ db, user }) {
     const [weekData, setWeekData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    // --- NEW MODAL STATE ---
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [selectedDayInfo, setSelectedDayInfo] = useState(null);
 
@@ -31,7 +30,6 @@ export default function MySchedulePage({ db, user }) {
             shiftsSnapshot.forEach(doc => shiftsMap.set(doc.data().date, { id: doc.id, ...doc.data() }));
 
             const unsubLeaves = onSnapshot(leaveQuery, (leavesSnapshot) => {
-                // --- UPDATED: Store the full leave object in a map for easier retrieval ---
                 const leaveMap = new Map();
                 const leaves = leavesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(req => req.startDate <= endStr);
                 
@@ -57,7 +55,7 @@ export default function MySchedulePage({ db, user }) {
 
                         const shift = shiftsMap.get(dateStr);
                         const attendance = attendanceMap.get(dateStr); 
-                        const leaveObj = leaveMap.get(dateStr); // --- UPDATED ---
+                        const leaveObj = leaveMap.get(dateStr); 
 
                         const { status, minutes } = calculateAttendanceStatus(shift, attendance, leaveObj, date);
 
@@ -69,13 +67,11 @@ export default function MySchedulePage({ db, user }) {
                             scheduleStatus = { type: 'On Leave' };
                         }
 
-                        // --- UPDATED: Return all data the DayCard and Modal need ---
                         return { 
                             date, 
                             scheduleStatus, 
                             attendanceStatus: status, 
                             attendanceMinutes: minutes,
-                            // --- NEW: Pass raw data for the modal ---
                             rawSchedule: shift || null,
                             rawAttendance: attendance || null,
                             rawLeave: leaveObj || null
@@ -93,11 +89,9 @@ export default function MySchedulePage({ db, user }) {
         return () => unsubShifts();
     }, [db, user, startOfWeek]);
 
-    // --- NEW MODAL HANDLERS ---
+    // --- MODAL HANDLERS ---
     const handleDayCardClick = (dayInfo) => {
-        // Don't open modal for 'Upcoming' shifts
         if (dayInfo.attendanceStatus === 'Upcoming') return;
-
         setSelectedDayInfo(dayInfo);
         setIsDetailModalOpen(true);
     };
@@ -107,15 +101,23 @@ export default function MySchedulePage({ db, user }) {
         setSelectedDayInfo(null);
     };
 
-    // ... (changeWeek and weekRangeString)
+    // --- 🔽 THIS SECTION WAS MISSING 🔽 ---
+    const changeWeek = (offset) => {
+        setStartOfWeek(prevDate => {
+            return dateUtils.addDays(prevDate, 7 * offset);
+        });
+    };
+
+    const endOfWeek = dateUtils.addDays(startOfWeek, 6);
+    const weekRangeString = `${dateUtils.formatCustom(startOfWeek, 'dd MMM')} - ${dateUtils.formatCustom(endOfWeek, 'dd MMM, yyyy')}`;
+    // --- 🔼 END OF MISSING SECTION 🔼 ---
+
 
     const DayCard = ({ dayInfo }) => {
         const today = dateUtils.startOfToday();
         const isToday = dayInfo.date.getTime() === today.getTime();
         
         const statusClass = getStatusClass(dayInfo.attendanceStatus);
-        
-        // --- NEW: Add cursor-pointer if not upcoming ---
         const isClickable = dayInfo.attendanceStatus !== 'Upcoming';
         
         let statusElement;
@@ -147,7 +149,6 @@ export default function MySchedulePage({ db, user }) {
         }
 
         return (
-            // --- UPDATED: Added onClick and cursor-pointer ---
             <div 
                 onClick={() => handleDayCardClick(dayInfo)}
                 className={`p-4 rounded-lg flex items-center justify-between transition-all ${statusClass || 'bg-gray-800'} ${isToday ? 'border-l-4 border-amber-500' : ''} ${isClickable ? 'cursor-pointer hover:shadow-lg hover:ring-2 hover:ring-amber-500/50' : 'opacity-70'}`}
@@ -165,17 +166,17 @@ export default function MySchedulePage({ db, user }) {
 
     return (
         <div>
-            {/* ... (header) ... */}
              <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 space-y-4 sm:space-y-0">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Schedule</h2>
                 <div className="flex items-center space-x-2 sm:space-x-4">
+                    {/* --- These buttons use changeWeek --- */}
                     <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronLeft className="h-6 w-6" /></button>
-                    <h3 className="text-lg sm:text-xl font-semibold w-48 sm:w-64 text-center">{/* weekRangeString */}</h3>
+                    {/* --- This h3 uses weekRangeString --- */}
+                    <h3 className="text-lg sm:text-xl font-semibold w-48 sm:w-64 text-center">{weekRangeString}</h3>
                     <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronRight className="h-6 w-6" /></button>
                 </div>
             </div>
 
-            {/* --- RENDER THE MODAL --- */}
             {isDetailModalOpen && selectedDayInfo && (
                 <ShiftDetailModal
                     isOpen={isDetailModalOpen}
