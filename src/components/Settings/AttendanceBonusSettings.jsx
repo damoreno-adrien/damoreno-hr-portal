@@ -18,6 +18,7 @@ export const AttendanceBonusSettings = ({ db, config }) => {
                 month3: config.attendanceBonus.month3 || 0,
                 allowedAbsences: config.attendanceBonus.allowedAbsences ?? 0,
                 allowedLates: config.attendanceBonus.allowedLates ?? 1,
+                maxLateMinutesAllowed: config.attendanceBonus.maxLateMinutesAllowed ?? 30, // --- NEW FIELD ---
             };
             setLocalBonus(data);
             setOriginalBonus(data);
@@ -35,17 +36,17 @@ export const AttendanceBonusSettings = ({ db, config }) => {
         setIsSaved(false);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
-            // We save using dot notation to avoid overwriting other fields
             const dataToSave = {
                 'attendanceBonus.month1': Number(localBonus.month1),
                 'attendanceBonus.month2': Number(localBonus.month2),
                 'attendanceBonus.month3': Number(localBonus.month3),
                 'attendanceBonus.allowedAbsences': Number(localBonus.allowedAbsences),
                 'attendanceBonus.allowedLates': Number(localBonus.allowedLates),
+                'attendanceBonus.maxLateMinutesAllowed': Number(localBonus.maxLateMinutesAllowed), // --- NEW FIELD ---
             };
             await updateDoc(configDocRef, dataToSave);
             
-            setOriginalBonus(localBonus); // Update original state
+            setOriginalBonus(localBonus); 
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
         } catch (error) {
@@ -60,6 +61,7 @@ export const AttendanceBonusSettings = ({ db, config }) => {
             <h3 className="text-xl font-semibold text-white">Attendance Bonus</h3>
             <p className="text-gray-400 mt-2">Define the rules for the gradual monthly attendance bonus.</p>
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* ... (Month 1, 2, 3 inputs are unchanged) ... */}
                 <div>
                     <label htmlFor="month1" className="block text-sm font-medium text-gray-300 mb-1">Month 1 Bonus (THB)</label>
                     <input type="number" id="month1" value={localBonus.month1 || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
@@ -75,17 +77,22 @@ export const AttendanceBonusSettings = ({ db, config }) => {
             </div>
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
-                    <label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences Allowed</label>
+                    <label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences (Days)</label>
                     <input type="number" id="allowedAbsences" value={localBonus.allowedAbsences ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
                 <div>
-                    <label htmlFor="allowedLates" className="block text-sm font-medium text-gray-300 mb-1">Max Late Arrivals Allowed</label>
+                    <label htmlFor="allowedLates" className="block text-sm font-medium text-gray-300 mb-1">Max Late Incidents (Count)</label>
                     <input type="number" id="allowedLates" value={localBonus.allowedLates ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                </div>
+                {/* --- NEW FIELD --- */}
+                <div>
+                    <label htmlFor="maxLateMinutesAllowed" className="block text-sm font-medium text-gray-300 mb-1">Max Late Time (Minutes)</label>
+                    <input type="number" id="maxLateMinutesAllowed" value={localBonus.maxLateMinutesAllowed ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                 </div>
             </div>
             
-            {/* --- NEW SAVE BUTTON --- */}
-            <div className="flex justify-end mt-6 pt-4 border-t border-gray-700">
+            {/* ... (Save Button is unchanged) ... */}
+             <div className="flex justify-end mt-6 pt-4 border-t border-gray-700">
                 <button
                     onClick={handleSave}
                     disabled={isSaving || !hasChanges}

@@ -183,10 +183,18 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                 totalTimeLate: formatMinutesToHours(totalLateMinutes),
                 totalEarlyDepartures: formatMinutesToHours(totalEarlyDepartureMinutes), // --- NEW ---
             });
-
-            // ... (Bonus Status logic is the same) ...
-            const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus || { allowedAbsences: 0, allowedLates: 1 };
-            const isBonusLost = totalAbsencesCount > allowedAbsences || totalLatesCount > allowedLates;
+            
+            // --- 5. Calculate Bonus Status ---
+            const { allowedAbsences, allowedLates, maxLateMinutesAllowed } = companyConfig.attendanceBonus || { allowedAbsences: 0, allowedLates: 1, maxLateMinutesAllowed: 30 };
+            
+            // --- UPDATED LOGIC ---
+            const isAbsenceOver = totalAbsencesCount > allowedAbsences;
+            const isLateCountOver = totalLatesCount > allowedLates;
+            const isLateTimeOver = totalLateMinutes > maxLateMinutesAllowed;
+            
+            const isBonusLost = isAbsenceOver || isLateCountOver || isLateTimeOver;
+            // --- END OF UPDATE ---
+            
             setBonusStatus({
                 onTrack: !isBonusLost,
                 text: isBonusLost ? 'Bonus Lost for this month' : 'On Track'
@@ -194,7 +202,7 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         };
 
         fetchStats().catch(console.error);
-    }, [db, user, companyConfig]); 
+    }, [db, user, companyConfig]); // Dependency array is correct
 
     return { monthlyStats, bonusStatus };
 };
