@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 // Added 'collection', 'query', 'where', 'limit'
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore'; 
-import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn } from 'lucide-react';
+import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, LogOut } from 'lucide-react';
 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
@@ -240,6 +240,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                            <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
                            <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
                            <StatItem icon={AlertTriangle} label="Total Time Late" value={monthlyStats.totalTimeLate} colorClass="yellow" />
+                           <StatItem icon={LogOut} label="Total Early Departures" value={monthlyStats.totalEarlyDepartures} colorClass="purple" />
                         </div>
                     </DashboardCard>
                     <DashboardCard title="Leave Balance">

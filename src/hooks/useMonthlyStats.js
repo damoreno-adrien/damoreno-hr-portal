@@ -1,3 +1,5 @@
+/* src/hooks/useMonthlyStats.js */
+
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import * as dateUtils from '../utils/dateUtils';
@@ -8,7 +10,7 @@ const THAILAND_TIMEZONE = 'Asia/Bangkok';
 const DEFAULT_BREAK_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 const DEFAULT_CHECKOUT_TIME = '23:00:00'; // 11:00 PM
 
-// Helper function to format milliseconds into "170h 45m"
+// ... (formatMillisToHours and formatMinutesToHours helpers) ...
 const formatMillisToHours = (ms) => {
     if (ms <= 0) return '0h 0m';
     const totalMinutes = Math.floor(ms / 60000);
@@ -16,14 +18,13 @@ const formatMillisToHours = (ms) => {
     const minutes = totalMinutes % 60;
     return `${hours}h ${minutes}m`;
 };
-
-// Helper function to format minutes into "2h 30m"
 const formatMinutesToHours = (min) => {
     if (min <= 0) return '0h 0m';
     const hours = Math.floor(min / 60);
     const minutes = min % 60;
     return `${hours}h ${minutes}m`;
 };
+
 
 export const useMonthlyStats = (db, user, companyConfig) => {
     const [monthlyStats, setMonthlyStats] = useState({
@@ -32,6 +33,7 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         workedDays: 0,
         absences: 0,
         totalTimeLate: '0h 0m',
+        totalEarlyDepartures: '0h 0m', // --- NEW ---
     });
     
     const [bonusStatus, setBonusStatus] = useState({ onTrack: true, text: 'On Track' });
@@ -40,12 +42,12 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         if (!db || !user || !companyConfig) return;
 
         const fetchStats = async () => {
+            // ... (All queries are the same) ...
             const now = DateTime.now().setZone(THAILAND_TIMEZONE);
             const startOfMonth = now.startOf('month').toISODate();
             const endOfMonth = now.endOf('month').toISODate();
             const today = now.toISODate();
 
-            // --- 1. Fetch all data for the month concurrently ---
             const attendanceQuery = query(
                 collection(db, 'attendance'),
                 where('staffId', '==', user.uid),
@@ -71,13 +73,11 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                 getDocs(leaveQuery),
             ]);
 
-            // --- 2. Process data into fast-lookup maps ---
+            // ... (All map processing is the same) ...
             const attendanceMap = new Map();
             attendanceSnap.forEach(doc => attendanceMap.set(doc.data().date, doc.data()));
-
             const schedulesMap = new Map();
             schedulesSnap.forEach(doc => schedulesMap.set(doc.data().date, doc.data()));
-
             const leaveMap = new Map();
             leaveSnap.forEach(doc => {
                 const data = doc.data();
@@ -99,10 +99,10 @@ export const useMonthlyStats = (db, user, companyConfig) => {
             let totalLateMinutes = 0;
             let totalLatesCount = 0;
             let totalAbsencesCount = 0;
+            let totalEarlyDepartureMinutes = 0; // --- NEW ---
             let workedDays = 0;
 
             let loopDay = now.startOf('month');
-            // Loop from the start of the month up to (and including) today
             while (loopDay <= now) { 
                 const dateStr = loopDay.toISODate();
                 const dateJS = loopDay.toJSDate(); 
@@ -122,18 +122,29 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                     if (attendance.checkOutTime) {
                         checkOut = attendance.checkOutTime.toDate();
                     } else if (dateStr < today) {
-                        // Past day with missing checkout: use 11 PM default
                         checkOut = DateTime.fromISO(`${dateStr}T${DEFAULT_CHECKOUT_TIME}`, { zone: THAILAND_TIMEZONE }).toJSDate();
                     } else {
-                        // Today with missing checkout: don't count hours yet
                         checkOut = null; 
                     }
 
                     if (checkOut) {
                         let durationMs = checkOut.getTime() - checkIn.getTime();
-                        durationMs -= DEFAULT_BREAK_MS; // Subtract 1 default hour
+                        durationMs -= DEFAULT_BREAK_MS; 
                         if (durationMs > 0) {
                             totalActualMillis += durationMs;
+                        }
+
+                        // --- NEW: Calculate Early Departure ---
+                        if (schedule && schedule.endTime) {
+                            try {
+                                const scheduledEnd = DateTime.fromISO(`${dateStr}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
+                                const actualEnd = DateTime.fromJSDate(checkOut);
+                                
+                                if (actualEnd < scheduledEnd) {
+                                    const earlyMinutes = scheduledEnd.diff(actualEnd, 'minutes').minutes;
+                                    totalEarlyDepartureMinutes += earlyMinutes;
+                                }
+                            } catch(e) { console.error("Error parsing early departure", e); }
                         }
                     }
                 }
@@ -143,16 +154,12 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                     try {
                         const start = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: THAILAND_TIMEZONE });
                         const end = DateTime.fromISO(`${schedule.date}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
-                        
                         let scheduledDurationMs = end.diff(start).as('milliseconds');
-                        scheduledDurationMs -= DEFAULT_BREAK_MS; // Subtract 1 default hour
-
+                        scheduledDurationMs -= DEFAULT_BREAK_MS; 
                         if (scheduledDurationMs > 0) {
                             totalScheduledMillis += scheduledDurationMs;
                         }
-                    } catch(e) {
-                        console.error("Error parsing schedule time", e);
-                    }
+                    } catch(e) { console.error("Error parsing schedule time", e); }
                 }
                 
                 // --- C) Sum Lates and Absences for Bonus ---
@@ -160,7 +167,7 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                     totalLateMinutes += minutes;
                     totalLatesCount++;
                 }
-                if (status === 'Absent' && loopDay.toISODate() < today) { // Only count past absences
+                if (status === 'Absent' && loopDay.toISODate() < today) {
                     totalAbsencesCount++;
                 }
                 
@@ -174,12 +181,12 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                 workedDays: workedDays,
                 absences: totalAbsencesCount,
                 totalTimeLate: formatMinutesToHours(totalLateMinutes),
+                totalEarlyDepartures: formatMinutesToHours(totalEarlyDepartureMinutes), // --- NEW ---
             });
 
-            // --- 5. Calculate Bonus Status ---
+            // ... (Bonus Status logic is the same) ...
             const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus || { allowedAbsences: 0, allowedLates: 1 };
             const isBonusLost = totalAbsencesCount > allowedAbsences || totalLatesCount > allowedLates;
-            
             setBonusStatus({
                 onTrack: !isBonusLost,
                 text: isBonusLost ? 'Bonus Lost for this month' : 'On Track'
@@ -187,7 +194,7 @@ export const useMonthlyStats = (db, user, companyConfig) => {
         };
 
         fetchStats().catch(console.error);
-    }, [db, user, companyConfig]); // Add companyConfig as dependency
+    }, [db, user, companyConfig]); 
 
     return { monthlyStats, bonusStatus };
 };
