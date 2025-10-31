@@ -7,16 +7,21 @@ import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
-import * as dateUtils from '../utils/dateUtils'; // Import our new standard
+import * as dateUtils from '../utils/dateUtils';
+import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
+import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 
-export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList }) {
+export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
-    const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [todaysAttendance, setTodaysAttendance] = useState(null);
-    const [todaysSchedule, setTodaysSchedule] = useState(null); 
+
+    const [todaysSchedule, setTodaysSchedule] = useState(null); // Will be 'null' (loading), 'undefined' (off), or {object} (shift)
+    const [tomorrowsSchedule, setTomorrowsSchedule] = useState(null);
+    const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
+    const [upcomingLeave, setUpcomingLeave] = useState(null); // For the next upcoming leave
     
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
@@ -56,39 +61,81 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => unsubscribe();
     }, [db, user]);
     
-    // Corrected: Fetch today's schedule using a query
+    // --- UPDATED: Fetch today's AND tomorrow's schedule ---
     useEffect(() => {
         if (!db || !user) return;
+        
         const todayStr = dateUtils.formatISODate(new Date());
+        const tomorrowStr = dateUtils.formatISODate(dateUtils.addDays(new Date(), 1));
+
+        setTodaysSchedule(null); // Set to loading
+        setTomorrowsSchedule(null); // Set to loading
         
         const q = query(
             collection(db, 'schedules'),
             where('staffId', '==', user.uid),
-            where('date', '==', todayStr),
-            limit(1) 
+            where('date', 'in', [todayStr, tomorrowStr])
         );
 
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            if (!querySnapshot.empty) {
-                setTodaysSchedule(querySnapshot.docs[0].data());
-            } else {
-                setTodaysSchedule(null); 
-            }
+            let foundToday = false;
+            let foundTomorrow = false;
+
+            querySnapshot.forEach(doc => {
+                const data = doc.data();
+                if (data.date === todayStr) {
+                    setTodaysSchedule(data);
+                    foundToday = true;
+                } else if (data.date === tomorrowStr) {
+                    setTomorrowsSchedule(data);
+                    foundTomorrow = true;
+                }
+            });
+
+            // If no doc was found, it means it's a day off
+            if (!foundToday) setTodaysSchedule(undefined); 
+            if (!foundTomorrow) setTomorrowsSchedule(undefined);
+
         }, (error) => { 
-            console.error("Error fetching today's schedule:", error);
-            setTodaysSchedule(null);
+            console.error("Error fetching today's/tomorrow's schedule:", error);
+            setTodaysSchedule(undefined); // Set to Day Off on error
+            setTomorrowsSchedule(undefined);
         });
 
         return () => unsubscribe(); 
 
     }, [db, user]); 
 
-    // Check if on leave today
+    // --- UPDATED: Fetch upcoming leave ---
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = dateUtils.formatISODate(new Date()); 
-        const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', '==', 'approved'), where('startDate', '<=', todayStr), where('endDate', '>=', todayStr));
-        getDocs(q).then(snapshot => setIsOnLeaveToday(!snapshot.empty));
+        
+        const q = query(
+            collection(db, 'leave_requests'), 
+            where('staffId', '==', user.uid), 
+            where('status', '==', 'approved'), 
+            where('startDate', '>=', todayStr), // Only get future leave
+            orderBy('startDate', 'asc'), // Get the *next* one
+            limit(1)
+        );
+        
+        getDocs(q).then(snapshot => {
+            if (!snapshot.empty) {
+                const firstLeave = snapshot.docs[0].data();
+                setUpcomingLeave(firstLeave);
+                // Check if this upcoming leave starts today
+                if (firstLeave.startDate === todayStr) {
+                    setIsOnLeaveToday(true);
+                } else {
+                    setIsOnLeaveToday(false);
+                }
+            } else {
+                // No future leave found
+                setUpcomingLeave(null);
+                setIsOnLeaveToday(false);
+            }
+        });
     }, [db, user]);
     
     // Geofence check
@@ -249,7 +296,24 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                             <span className="text-3xl font-bold text-amber-400">{leaveBalances.annual}</span>
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Days available for the rest of the year.</p>
+                        
+                        {/* --- NEW: Upcoming Leave Section --- */}
+                        {upcomingLeave && (
+                            <div className="mt-4 border-t border-gray-700 pt-3">
+                                <p className="text-xs text-gray-400 mb-1">Your next approved leave:</p>
+                                <div className="flex items-center text-sm">
+                                    <Calendar className="w-4 h-4 text-blue-400 mr-2 flex-shrink-0" />
+                                    <div>
+                                        <span className="font-semibold text-blue-300">{upcomingLeave.leaveType}</span>
+                                        <span className="text-gray-300 ml-2">({upcomingLeave.startDate} to {upcomingLeave.endDate})</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </DashboardCard>
+
+                    <QuickActionsCard setCurrentPage={setCurrentPage} />
+                    
                     <DashboardCard title="Bonus Status">
                          <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
