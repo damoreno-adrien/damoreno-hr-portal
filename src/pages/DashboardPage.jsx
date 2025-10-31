@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 // Added 'collection', 'query', 'where', 'limit'
-import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore'; 
+import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore'; 
 import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, LogOut } from 'lucide-react';
 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
@@ -313,7 +313,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     </DashboardCard>
 
                     <QuickActionsCard setCurrentPage={setCurrentPage} />
-                    
+
                     <DashboardCard title="Bonus Status">
                          <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
                             <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
