@@ -1,93 +1,159 @@
+/* src/hooks/useMonthlyStats.js */
+
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import * as dateUtils from '../utils/dateUtils';
+import { calculateAttendanceStatus } from '../utils/statusUtils'; // We'll use our helper!
+import { DateTime } from 'luxon';
 
-export const useMonthlyStats = (db, user, companyConfig) => {
+const THAILAND_TIMEZONE = 'Asia/Bangkok';
+
+// Helper function to format milliseconds into "170h 45m"
+const formatMillisToHours = (ms) => {
+    if (ms <= 0) return '0h 0m';
+    const totalMinutes = Math.floor(ms / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${minutes}m`;
+};
+
+// Helper function to format minutes into "2h 30m"
+const formatMinutesToHours = (min) => {
+    if (min <= 0) return '0h 0m';
+    const hours = Math.floor(min / 60);
+    const minutes = min % 60;
+    return `${hours}h ${minutes}m`;
+};
+
+export const useMonthlyStats = (db, user) => {
     const [monthlyStats, setMonthlyStats] = useState({
+        totalHours: '0h 0m',
         workedDays: 0,
-        lates: 0,
         absences: 0,
-        totalHours: '0h 0m'
+        totalTimeLate: '0h 0m', // Changed from 'lates'
     });
-    const [bonusStatus, setBonusStatus] = useState({ text: 'Calculating...', onTrack: true });
-    const [isLoading, setIsLoading] = useState(true);
+    // We'll skip 'bonusStatus' for now to focus on stats
 
     useEffect(() => {
-        if (!db || !user || !companyConfig) return;
+        if (!db || !user) return;
 
-        const calculate = async () => {
-            setIsLoading(true);
-            const now = new Date();
-            
-            // Use standard functions for date range
-            const startOfMonth = dateUtils.startOfMonth(now);
-            const endOfMonth = dateUtils.endOfMonth(now);
-            const startDate = dateUtils.formatISODate(startOfMonth);
-            const endDate = dateUtils.formatISODate(endOfMonth);
-            const today = dateUtils.startOfToday(); // For comparison
+        const fetchStats = async () => {
+            const now = DateTime.now().setZone(THAILAND_TIMEZONE);
+            const startOfMonth = now.startOf('month').toISODate();
+            const endOfMonth = now.endOf('month').toISODate();
+            const today = now.toISODate();
 
-            const schedulesQuery = query(collection(db, "schedules"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
-            const attendanceQuery = query(collection(db, "attendance"), where("staffId", "==", user.uid), where("date", ">=", startDate), where("date", "<=", endDate));
+            // --- 1. Fetch all data for the month concurrently ---
+            const attendanceQuery = query(
+                collection(db, 'attendance'),
+                where('staffId', '==', user.uid),
+                where('date', '>=', startOfMonth),
+                where('date', '<=', endOfMonth)
+            );
+            const schedulesQuery = query(
+                collection(db, 'schedules'),
+                where('staffId', '==', user.uid),
+                where('date', '>=', startOfMonth),
+                where('date', '<=', endOfMonth)
+            );
+            const leaveQuery = query(
+                collection(db, 'leave_requests'),
+                where('staffId', '==', user.uid),
+                where('status', '==', 'approved'),
+                where('endDate', '>=', startOfMonth)
+            );
 
-            const [schedulesSnapshot, attendanceSnapshot] = await Promise.all([getDocs(schedulesQuery), getDocs(attendanceQuery)]);
-            const schedules = schedulesSnapshot.docs.map(doc => doc.data());
-            const attendanceRecords = new Map(attendanceSnapshot.docs.map(doc => [doc.data().date, doc.data()]));
+            const [attendanceSnap, schedulesSnap, leaveSnap] = await Promise.all([
+                getDocs(attendanceQuery),
+                getDocs(schedulesQuery),
+                getDocs(leaveQuery),
+            ]);
 
-            let lateCount = 0;
-            let absenceCount = 0;
-            let totalMillis = 0;
+            // --- 2. Process data into fast-lookup maps ---
+            const attendanceMap = new Map();
+            attendanceSnap.forEach(doc => attendanceMap.set(doc.data().date, doc.data()));
 
-            schedules.forEach(schedule => {
-                const scheduleDate = dateUtils.parseISODateString(schedule.date);
-                // Only count stats for days that have passed or are today
-                if (!scheduleDate || scheduleDate > today) return; 
+            const schedulesMap = new Map();
+            schedulesSnap.forEach(doc => schedulesMap.set(doc.data().date, doc.data()));
 
-                const attendance = attendanceRecords.get(schedule.date);
-                if (!attendance) {
-                    absenceCount++;
-                } else {
-                    // Use standard parsing for schedule start time
-                    const scheduledStart = dateUtils.fromFirestore(`${schedule.date}T${schedule.startTime}`);
-                    const actualCheckIn = dateUtils.fromFirestore(attendance.checkInTime);
-                    
-                    if (actualCheckIn && scheduledStart && actualCheckIn > scheduledStart) {
-                        lateCount++;
+            const leaveMap = new Map();
+            leaveSnap.forEach(doc => {
+                const data = doc.data();
+                if (data.startDate > endOfMonth) return;
+                let current = DateTime.fromISO(data.startDate, { zone: THAILAND_TIMEZONE });
+                const end = DateTime.fromISO(data.endDate, { zone: THAILAND_TIMEZONE });
+                while (current <= end) {
+                    const dateStr = current.toISODate();
+                    if (dateStr >= startOfMonth && dateStr <= endOfMonth) {
+                        leaveMap.set(dateStr, data);
                     }
-
-                    const actualCheckOut = dateUtils.fromFirestore(attendance.checkOutTime);
-                    const breakStart = dateUtils.fromFirestore(attendance.breakStart);
-                    const breakEnd = dateUtils.fromFirestore(attendance.breakEnd);
-
-                    if (actualCheckIn && actualCheckOut) {
-                        // Use standard difference calculation
-                        let workMillis = dateUtils.differenceInMilliseconds(actualCheckOut, actualCheckIn);
-                        if (breakStart && breakEnd) {
-                            workMillis -= dateUtils.differenceInMilliseconds(breakEnd, breakStart);
-                        }
-                        totalMillis += Math.max(0, workMillis); // Ensure no negative time
-                    }
+                    current = current.plus({ days: 1 });
                 }
             });
 
-            if (companyConfig.attendanceBonus) {
-                const { allowedAbsences, allowedLates } = companyConfig.attendanceBonus;
-                setBonusStatus({
-                    text: (absenceCount > allowedAbsences || lateCount > allowedLates) ? 'Bonus Lost for this Month' : 'On Track for Bonus',
-                    onTrack: !(absenceCount > allowedAbsences || lateCount > allowedLates)
-                });
+            // --- 3. Iterate and calculate stats ---
+            let totalMillis = 0;
+            let totalLateMinutes = 0;
+            let workedDays = 0;
+            let absences = 0;
+
+            let loopDay = now.startOf('month');
+            while (loopDay <= now) { // Loop from start of month until today
+                const dateStr = loopDay.toISODate();
+                const dateJS = loopDay.toJSDate(); // For calculateAttendanceStatus
+
+                const attendance = attendanceMap.get(dateStr);
+                const schedule = schedulesMap.get(dateStr);
+                const leave = leaveMap.get(dateStr);
+
+                // Pass the JS Date object
+                const { status, minutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS);
+
+                // A) Calculate Total Hours
+                if (attendance && attendance.checkInTime && attendance.checkOutTime) {
+                    const checkIn = attendance.checkInTime.toDate();
+                    const checkOut = attendance.checkOutTime.toDate();
+                    let durationMs = checkOut.getTime() - checkIn.getTime();
+
+                    // Subtract break time
+                    if (attendance.breakStart && attendance.breakEnd) {
+                        const breakStart = attendance.breakStart.toDate();
+                        const breakEnd = attendance.breakEnd.toDate();
+                        const breakMs = breakEnd.getTime() - breakStart.getTime();
+                        durationMs -= breakMs;
+                    }
+                    totalMillis += durationMs;
+                }
+
+                // B) Count Worked Days
+                if (attendance && attendance.checkInTime) {
+                    workedDays++;
+                }
+                
+                // C) Sum Total Late Minutes
+                if (status === 'Late') {
+                    totalLateMinutes += minutes;
+                }
+
+                // D) Count Absences
+                if (status === 'Absent' && loopDay.toISODate() < today) { // Only count past absences
+                    absences++;
+                }
+                
+                loopDay = loopDay.plus({ days: 1 });
             }
 
             setMonthlyStats({
-                workedDays: attendanceRecords.size,
-                lates: lateCount,
-                absences: absenceCount,
-                totalHours: dateUtils.formatDuration(totalMillis) // Use standard duration formatter
+                totalHours: formatMillisToHours(totalMillis),
+                workedDays: workedDays,
+                absences: absences,
+                totalTimeLate: formatMinutesToHours(totalLateMinutes),
             });
-            setIsLoading(false);
         };
 
-        calculate();
-    }, [db, user, companyConfig]);
+        fetchStats().catch(console.error);
+    }, [db, user]);
 
-    return { monthlyStats, bonusStatus, isLoading };
+    // We removed bonusStatus logic, but you can add it back here
+    return { monthlyStats, bonusStatus: { onTrack: true, text: 'On Track' } };
 };

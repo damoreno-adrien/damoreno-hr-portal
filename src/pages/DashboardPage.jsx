@@ -233,7 +233,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                            <StatItem icon={Clock} label="Total Hours Worked" value={monthlyStats.totalHours} colorClass="blue" />
                            <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
                            <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
-                           <StatItem icon={AlertTriangle} label="Late Arrivals" value={monthlyStats.lates} colorClass="yellow" />
+                           <StatItem icon={AlertTriangle} label="Total Time Late" value={monthlyStats.totalTimeLate} colorClass="yellow" />
                         </div>
                     </DashboardCard>
                     <DashboardCard title="Leave Balance">
