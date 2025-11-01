@@ -1,7 +1,6 @@
 import React from 'react';
-import * as dateUtils from '../../utils/dateUtils'; // Use new standard
-// --- NEW: Import Pencil icon ---
-import { Clock, XCircle, CheckCircle, CalendarDays, Plane, Pencil } from 'lucide-react';
+import * as dateUtils from '../../utils/dateUtils';
+import { Clock, XCircle, CheckCircle, CalendarDays, Plane, Pencil, Edit } from 'lucide-react';
 
 // Helper to format timestamps safely
 const formatTime = (timestamp) => {
@@ -13,8 +12,8 @@ const formatTime = (timestamp) => {
     }
 };
 
-// --- NEW: Add onEdit to props ---
-export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit }) {
+// --- NEW: Add onEditAttendance to props ---
+export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit, onEditAttendance }) {
     if (!isOpen || !dayInfo) return null;
 
     const { 
@@ -29,17 +28,11 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit }) {
 
     const displayDate = dateUtils.formatCustom(date, 'EEEE, dd MMMM yyyy');
 
-    // --- NEW: Handler for the Edit button ---
-    const handleEdit = () => {
-        // We need to find the staffId from the raw data
+    // Handler for the Edit Shift button
+    const handleEditShift = () => {
         const staffId = rawSchedule?.staffId || rawAttendance?.staffId;
+        if (!staffId) return;
         
-        if (!staffId) {
-            console.error("Could not find staffId to edit shift.");
-            return;
-        }
-
-        // Pass the required info back to PlanningPage to open the editor
         onEdit({
             staffId: staffId,
             date: date,
@@ -48,9 +41,24 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit }) {
         });
     };
 
-    // --- NEW: Decide when to show the Edit button ---
+    // --- NEW: Handler for the Edit Attendance button ---
+    const handleEditAttendance = () => {
+        const staffId = rawSchedule?.staffId || rawAttendance?.staffId;
+        if (!staffId) return;
+
+        // Pass all the info needed by EditAttendanceModal
+        onEditAttendance({
+            staffId: staffId,
+            staffName: staffName,
+            date: date,
+            rawAttendance: rawAttendance,
+            rawSchedule: rawSchedule // Pass schedule in case we need to create an attendance record
+        });
+    };
+
+    // Decide when to show the Edit buttons
     // Only show if the status is Work-related (not Leave or Off)
-    const showEditButton = ['Present', 'Late', 'Absent'].includes(attendanceStatus);
+    const showEditButtons = ['Present', 'Late', 'Absent'].includes(attendanceStatus);
 
     const renderStatusDetails = () => {
         switch (attendanceStatus) {
@@ -113,7 +121,6 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit }) {
                     <div className="bg-gray-900 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                         <div className="sm:flex sm:items-start w-full">
                             <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
-                                {/* --- NEW: Added staffName to title --- */}
                                 <h3 className="text-lg leading-6 font-medium text-amber-400 mb-2">
                                     {staffName} - {displayDate}
                                 </h3>
@@ -123,23 +130,32 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit }) {
                             </div>
                         </div>
                     </div>
-                    {/* --- UPDATED: Footer with conditional Edit button --- */}
+                    {/* --- UPDATED: Footer with conditional Edit buttons --- */}
                     <div className="bg-gray-800 px-4 py-3 sm:px-6 flex flex-row-reverse justify-between">
                         <button
                             type="button" onClick={onClose}
-                            className="px-4 py-2 bg-gray-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 focus:ring-offset-gray-900"
+                            className="px-4 py-2 bg-gray-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-gray-500"
                         >
                             Close
                         </button>
                         
-                        {showEditButton && (
-                            <button
-                                type="button" onClick={handleEdit}
-                                className="flex items-center px-4 py-2 bg-blue-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-gray-900"
-                            >
-                                <Pencil className="h-4 w-4 mr-2" />
-                                Edit Shift
-                            </button>
+                        {showEditButtons && (
+                            <div className="flex space-x-2">
+                                <button
+                                    type="button" onClick={handleEditAttendance}
+                                    className="flex items-center px-4 py-2 bg-gray-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-gray-500"
+                                >
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit Attendance
+                                </button>
+                                <button
+                                    type="button" onClick={handleEditShift}
+                                    className="flex items-center px-4 py-2 bg-blue-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-blue-700"
+                                >
+                                    <Pencil className="h-4 w-4 mr-2" />
+                                    Edit Shift
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>

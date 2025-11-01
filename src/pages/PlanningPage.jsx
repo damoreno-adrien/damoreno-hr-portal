@@ -3,16 +3,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../firebase.js" // Adjusted import path
+import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
 import { ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react';
 import ShiftModal from '../components/Planning/ShiftModal.jsx';
-// --- NEW: Import the ShiftDetailModal ---
 import ShiftDetailModal from '../components/Planning/ShiftDetailModal.jsx'; 
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
 import ExportOptionsModal from '../components/common/ExportOptionsModal.jsx'; 
 import * as dateUtils from '../utils/dateUtils'; 
 import { calculateAttendanceStatus, getStatusClass } from '../utils/statusUtils';
+import Modal from '../components/common/Modal.jsx';
+import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1");
@@ -56,6 +57,10 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     // --- NEW: State for the detail viewer modal ---
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [selectedDayInfo, setSelectedDayInfo] = useState(null);
+    
+    // --- NEW: State for the Edit Attendance modal ---
+    const [isEditAttendanceModalOpen, setIsEditAttendanceModalOpen] = useState(false);
+    const [attendanceRecordToEdit, setAttendanceRecordToEdit] = useState(null);
 
     // State for export loading indicator
     const [isExporting, setIsExporting] = useState(false);
@@ -115,6 +120,37 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     const closeDetailModal = () => {
         setIsDetailModalOpen(false);
         setSelectedDayInfo(null);
+    };
+
+    // --- NEW: Handlers for Edit Attendance Modal ---
+    const handleOpenAttendanceEditor = (data) => {
+        const { staffId, staffName, date, rawAttendance } = data;
+        const dateString = dateUtils.formatISODate(date);
+
+        // This formats the data perfectly for EditAttendanceModal
+        // It handles both existing and new (absent) records
+        const recordForModal = {
+            id: rawAttendance?.id || `${staffId}_${dateString}`,
+            staffName: staffName,
+            date: dateString,
+            fullRecord: rawAttendance ? {
+                ...rawAttendance,
+                checkInTime: rawAttendance.checkInTime?.toDate(),
+                checkOutTime: rawAttendance.checkOutTime?.toDate(),
+                breakStart: rawAttendance.breakStart?.toDate(),
+                breakEnd: rawAttendance.breakEnd?.toDate(),
+            } : null // Pass null if no record exists, modal will know it's a new entry
+        };
+        
+        setAttendanceRecordToEdit(recordForModal);
+        closeDetailModal(); // Close the detail modal
+        setIsEditAttendanceModalOpen(true); // Open the attendance editor
+    };
+
+    const handleCloseAttendanceEditor = () => {
+        setIsEditAttendanceModalOpen(false);
+        setAttendanceRecordToEdit(null);
+        refetchWeekData(); // Refresh data in case we made a change
     };
 
     // Formatted date range string for display using standard utils
@@ -289,8 +325,24 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                     isOpen={isDetailModalOpen}
                     onClose={closeDetailModal}
                     dayInfo={selectedDayInfo}
-                    onEdit={handleOpenEditorFromDetail}
+                    onEdit={handleOpenEditorFromDetail} 
+                    onEditAttendance={handleOpenAttendanceEditor}
                 />
+            )}
+
+            {/* --- NEW: Add the Edit Attendance Modal --- */}
+            {isEditAttendanceModalOpen && (
+                <Modal
+                    isOpen={isEditAttendanceModalOpen}
+                    onClose={handleCloseAttendanceEditor}
+                    title="Edit Attendance Record"
+                >
+                    <EditAttendanceModal
+                        db={db}
+                        record={attendanceRecordToEdit}
+                        onClose={handleCloseAttendanceEditor}
+                    />
+                </Modal>
             )}
 
             {/* --- NEW Import Confirmation Modal --- */}
