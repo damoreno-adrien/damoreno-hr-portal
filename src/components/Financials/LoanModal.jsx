@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, addDoc, updateDoc, collection, serverTimestamp } from 'firebase/firestore';
-import Modal from './Modal';
+import Modal from '../common/Modal';
 
 export default function LoanModal({ isOpen, onClose, db, staffId, existingLoan }) {
     const [formData, setFormData] = useState({

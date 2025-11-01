@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { PlusIcon, TrashIcon } from '../Icons'; // You can change these to lucide-react if you want
+import { PlusIcon, TrashIcon } from '../common/Icons';
 import { Check } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 

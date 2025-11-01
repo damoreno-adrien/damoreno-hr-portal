@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TrashIcon } from '../Icons';
+import { Trash2 } from 'lucide-react';
 
 export const DocumentManager = ({ documents = [], onUploadFile, onDeleteFile }) => {
     const [fileToUpload, setFileToUpload] = useState(null);
@@ -61,7 +61,7 @@ export const DocumentManager = ({ documents = [], onUploadFile, onDeleteFile }) 
                                     className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity ml-4 flex-shrink-0"
                                     title="Delete this file"
                                 >
-                                    <TrashIcon className="h-5 w-5"/>
+                                    <Trash2 className="h-5 w-5"/>
                                 </button>
                             </div>
                         ))

@@ -1,11 +1,11 @@
 // src/pages/StaffManagementPage.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import Modal from '../components/Modal';
-import AddStaffForm from '../components/AddStaffForm';
-import StaffProfileModal from '../components/StaffProfileModal';
-import ImportConfirmationModal from '../components/ImportConfirmationModal'; // <-- Import the new modal
-import { PlusIcon, DownloadIcon, UploadIcon } from '../components/Icons';
+import Modal from '../components/common/Modal';
+import AddStaffForm from '../components/StaffProfile/AddStaffForm.jsx';
+import StaffProfileModal from '../components/StaffProfile/StaffProfileModal.jsx';
+import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx'; // <-- Import the new modal
+import { PlusIcon, DownloadIcon, UploadIcon } from '../components/common/Icons.jsx';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 import { app } from "../../firebase.js"; // Ensure app is imported for functions
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 
 export default function EditAttendanceModal({ db, record, onClose }) {
     // isCreating is now false when we pass a 'fullRecord' (even a partial one)

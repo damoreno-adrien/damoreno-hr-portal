@@ -2,13 +2,12 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import Modal from '../components/Modal';
-import EditAttendanceModal from '../components/EditAttendanceModal';
-import ImportConfirmationModal from '../components/ImportConfirmationModal';
-import { DownloadIcon, UploadIcon, TrashIcon } from '../components/Icons'; // --- Added TrashIcon ---
+import Modal from '../components/common/Modal';
+import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
+import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
 import * as dateUtils from '../utils/dateUtils';
 import { app } from "../../firebase.js";
-import { ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, Download, Upload, Trash2 } from 'lucide-react';
 
 // --- Functions pointing to the correct 'us-central1' region ---
 const functions = getFunctions(app, "us-central1"); 
@@ -525,7 +524,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         disabled={isExporting || isLoading || isImporting || isConfirmingImport || cleanupLoading}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
-                        <DownloadIcon className="h-5 w-5 mr-2" />
+                        <Download className="h-5 w-5 mr-2" />
                         {isExporting ? 'Exporting...' : 'Export CSV'}
                     </button>
                      <button
@@ -533,7 +532,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         disabled={isImporting || isConfirmingImport || isLoading || isExporting || cleanupLoading}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
-                        <UploadIcon className="h-5 w-5 mr-2" />
+                        <Upload className="h-5 w-5 mr-2" />
                         {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
                     </button>
                      <input
@@ -549,7 +548,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         disabled={isExporting || isLoading || isImporting || isConfirmingImport || cleanupLoading}
                         className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed text-white font-semibold transition duration-150 ease-in-out"
                     >
-                        <TrashIcon className="h-5 w-5 mr-2" />
+                        <Trash2 className="h-5 w-5 mr-2" />
                         {cleanupLoading ? 'Cleaning...' : 'Run Cleanup'}
                     </button>
                 </div>

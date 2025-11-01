@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { TrashIcon } from './Icons';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import { Trash2 } from 'lucide-react';
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 
 export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, date, existingShift, onSaveSuccess }) {
     const [startTime, setStartTime] = useState('');
@@ -177,7 +177,7 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                                     type="button" onClick={handleDelete} disabled={isSaving || isDeleting}
                                     className="flex items-center px-4 py-2 bg-red-800 text-base font-medium text-white rounded-md shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 focus:ring-offset-gray-900 disabled:opacity-50"
                                 >
-                                    {isDeleting ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Deleting...</> : <><TrashIcon className="h-4 w-4 mr-1"/> Delete</>}
+                                    {isDeleting ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Deleting...</> : <><Trash2 className="h-4 w-4 mr-1"/> Delete</>}
                                 </button>
                             )}
                         </div>

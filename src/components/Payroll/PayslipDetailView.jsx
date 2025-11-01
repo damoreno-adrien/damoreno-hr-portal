@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { InfoIcon } from './Icons';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import { Info } from 'lucide-react';
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -120,7 +120,7 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                                 <div className="flex items-center gap-2">
                                     <p>Leave Payout:</p>
                                     <button onMouseEnter={() => setShowLeaveTooltip(true)} onMouseLeave={() => setShowLeaveTooltip(false)} className="text-gray-400 hover:text-white">
-                                        <InfoIcon className="h-4 w-4" />
+                                        <Info className="h-4 w-4" />
                                     </button>
                                 </div>
                                 <p>{formatCurrency(details.earnings.leavePayout)}</p>
@@ -152,7 +152,7 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                                 <p>Absences {absenceSummary}:</p>
                                 {hasAbsences && (
                                     <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white">
-                                        <InfoIcon className="h-4 w-4" />
+                                        <Info className="h-4 w-4" />
                                     </button>
                                 )}
                             </div>

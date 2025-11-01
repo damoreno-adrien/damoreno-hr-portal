@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '../components/Icons';
-import LoanModal from '../components/LoanModal';
-import AdvanceModal from '../components/AdvanceModal';
-import AdjustmentModal from '../components/AdjustmentModal';
+import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon } from '../components/common/Icons';
+import LoanModal from '../components/Financials/LoanModal';
+import AdvanceModal from '../components/SalaryAdvance/AdvanceModal';
+import AdjustmentModal from '../components/Payroll/AdjustmentModal';
 
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1];

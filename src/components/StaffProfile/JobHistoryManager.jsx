@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PlusIcon, TrashIcon } from '../Icons';
+import { Plus, Trash2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 
 const formatRate = (job) => {
@@ -67,7 +67,7 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
                     <div className="flex justify-end space-x-2"><button onClick={() => { setIsAddingJob(false); setError(''); }} className="px-4 py-1 rounded-md bg-gray-500 hover:bg-gray-400">Cancel</button><button onClick={handleSaveNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600 hover:bg-green-500 disabled:bg-gray-600">{isSaving ? 'Saving...' : 'Save Job'}</button></div>
                     {error && <p className="text-red-400 text-sm text-right mt-2">{error}</p>}
                 </div>
-            ) : ( <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white"><PlusIcon className="h-5 w-5 mr-2"/>Add New Job Role</button> )}
+            ) : ( <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white"><Plus className="h-5 w-5 mr-2"/>Add New Job Role</button> )}
             
             <div className="space-y-2 max-h-40 overflow-y-auto">
                 {sortedJobHistory.length === 0 && !isAddingJob && (
@@ -83,7 +83,7 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
                             {/* Use standard display format */}
                             <p className="text-sm text-gray-300">{dateUtils.formatDisplayDate(job.startDate)}</p>
                             <button onClick={() => onDeleteJob(job)} className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete this entry">
-                                <TrashIcon className="h-5 w-5"/>
+                                <Trash2 className="h-5 w-5"/>
                             </button>
                         </div>
                     </div>

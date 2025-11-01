@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PlusIcon, TrashIcon } from '../Icons';
+import { PlusIcon, TrashIcon } from '../common/Icons';
 
 export const DepartmentManager = ({ departments = [], onAddDepartment, onDeleteDepartment }) => {
     const [newDepartment, setNewDepartment] = useState('');

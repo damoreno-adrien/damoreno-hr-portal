@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import Modal from './Modal';
+import Modal from '../common/Modal';
 
 export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdvance, onSuccess }) {
     const [amount, setAmount] = useState('');

@@ -1,5 +1,10 @@
 import React from 'react';
-import { UserIcon, UsersIcon, BriefcaseIcon, CalendarIcon, SendIcon, SettingsIcon, LogOutIcon, BarChartIcon, DollarSignIcon, XIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
+// --- This is the new import line ---
+import { 
+    User, Users, Briefcase, Calendar, Send, Settings, LogOut, 
+    BarChart, DollarSign, X, ChevronLeft, ChevronRight, 
+    ChevronDown, ChevronUp 
+} from 'lucide-react';
 
 const settingsSections = [
     { id: 'company-info', title: 'Company Information' },
@@ -46,19 +51,19 @@ export default function Sidebar({
                     <p className="text-sm text-amber-400 capitalize">{userRole} Portal</p>
                 </div>
                 <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white">
-                    <XIcon className="h-6 w-6" />
+                    <X className="h-6 w-6" />
                 </button>
             </div>
             <nav className="flex-1 space-y-2 px-4 overflow-y-auto">
                 {userRole === 'manager' && (
                     <>
-                        <NavLink page="dashboard" label="Dashboard" icon={<UserIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="staff" label="Manage Staff" icon={<BriefcaseIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="planning" label="Planning" icon={<CalendarIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="leave" label="Leave Management" icon={<SendIcon className="h-5 w-5" />} badgeCount={pendingLeaveCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="reports" label="Reports" icon={<BarChartIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="financials" label="Financials" icon={<DollarSignIcon className="h-5 w-5" />} badgeCount={pendingAdvanceCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="payroll" label="Payroll" icon={<DollarSignIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="dashboard" label="Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="staff" label="Manage Staff" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="planning" label="Planning" icon={<Calendar className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="leave" label="Leave Management" icon={<Send className="h-5 w-5" />} badgeCount={pendingLeaveCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="reports" label="Reports" icon={<BarChart className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="financials" label="Financials" icon={<DollarSign className="h-5 w-5" />} badgeCount={pendingAdvanceCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="payroll" label="Payroll" icon={<DollarSign className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
 
                         <div>
                             <button
@@ -66,10 +71,10 @@ export default function Sidebar({
                                 className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === 'settings' ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}
                             >
                                 <div className="flex items-center">
-                                    <SettingsIcon className="h-5 w-5" />
+                                    <Settings className="h-5 w-5" />
                                     <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Settings</span>
                                 </div>
-                                {!isSidebarCollapsed && ((isSettingsMenuOpen || currentPage === 'settings') ? <ChevronUpIcon className="h-5 w-5" /> : <ChevronDownIcon className="h-5 w-5" />)}
+                                {!isSidebarCollapsed && ((isSettingsMenuOpen || currentPage === 'settings') ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />)}
                             </button>
                             {(isSettingsMenuOpen || currentPage === 'settings') && !isSidebarCollapsed && (
                                 <div className="py-2 pl-8 space-y-1">
@@ -97,11 +102,11 @@ export default function Sidebar({
                 )}
                 {userRole === 'staff' && (
                     <>
-                        <NavLink page="dashboard" label="My Dashboard" icon={<UserIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="my-profile" label="My Profile" icon={<BriefcaseIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="planning" label="My Schedule" icon={<CalendarIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="team-schedule" label="Team Schedule" icon={<UsersIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        <NavLink page="leave" label="My Leave" icon={<SendIcon className="h-5 w-5" />} badgeCount={unreadLeaveUpdatesCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="dashboard" label="My Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="my-profile" label="My Profile" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="planning" label="My Schedule" icon={<Calendar className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="team-schedule" label="Team Schedule" icon={<Users className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        <NavLink page="leave" label="My Leave" icon={<Send className="h-5 w-5" />} badgeCount={unreadLeaveUpdatesCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
 
                         <div>
                             <button
@@ -109,16 +114,16 @@ export default function Sidebar({
                                 className="flex items-center justify-between w-full px-4 py-3 text-left rounded-lg hover:bg-gray-700 text-gray-300"
                             >
                                 <div className="flex items-center">
-                                    <DollarSignIcon className="h-5 w-5" />
+                                    <DollarSign className="h-5 w-5" />
                                     <span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Financials</span>
                                 </div>
-                                {!isSidebarCollapsed && ((isFinancialsMenuOpen || ['financials-dashboard', 'salary-advance', 'my-payslips'].includes(currentPage)) ? <ChevronUpIcon className="h-5 w-5" /> : <ChevronDownIcon className="h-5 w-5" />)}
+                                {!isSidebarCollapsed && ((isFinancialsMenuOpen || ['financials-dashboard', 'salary-advance', 'my-payslips'].includes(currentPage)) ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />)}
                             </button>
                             {(isFinancialsMenuOpen || ['financials-dashboard', 'salary-advance', 'my-payslips'].includes(currentPage)) && !isSidebarCollapsed && (
                                 <div className="py-2 pl-8 space-y-2">
-                                    <NavLink page="financials-dashboard" label="Dashboard" icon={<BarChartIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                                    <NavLink page="salary-advance" label="Salary Advance" icon={<SendIcon className="h-5 w-5" />} badgeCount={unreadAdvanceUpdatesCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                                    <NavLink page="my-payslips" label="My Payslips" icon={<BriefcaseIcon className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                                    <NavLink page="financials-dashboard" label="Dashboard" icon={<BarChart className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                                    <NavLink page="salary-advance" label="Salary Advance" icon={<Send className="h-5 w-5" />} badgeCount={unreadAdvanceUpdatesCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                                    <NavLink page="my-payslips" label="My Payslips" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                                 </div>
                             )}
                         </div>
@@ -130,12 +135,12 @@ export default function Sidebar({
                     <p className="text-sm text-gray-400 truncate">{user.email}</p>
                 </div>
                 <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700`}>
-                    <LogOutIcon className="h-5 w-5" />
+                    <LogOut className="h-5 w-5" />
                     <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span>
                 </button>
                 <div className="hidden md:block border-t border-gray-700 mt-4 pt-4">
                     <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="flex items-center justify-center w-full py-2 text-gray-400 hover:bg-gray-700 rounded-lg">
-                        {isSidebarCollapsed ? <ChevronRightIcon className="h-6 w-6" /> : <ChevronLeftIcon className="h-6 w-6" />}
+                        {isSidebarCollapsed ? <ChevronRight className="h-6 w-6" /> : <ChevronLeft className="h-6 w-6" />}
                     </button>
                 </div>
             </div>

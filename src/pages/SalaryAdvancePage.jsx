@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-// *** Correct import path for firebase.js (assuming it's in root) ***
 import { app } from "../../firebase.js";
 import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
-import { PlusIcon } from '../components/Icons';
-import RequestAdvanceModal from '../components/RequestAdvanceModal';
+import { PlusIcon } from '../components/common/Icons';
+import RequestAdvanceModal from '../components/SalaryAdvance/RequestAdvanceModal';
 import { EligibilityCard } from '../components/SalaryAdvance/EligibilityCard';
 import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryTable';
 

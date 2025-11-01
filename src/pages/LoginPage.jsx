@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogInIcon } from '../components/Icons';
+import { LogInIcon } from '../components/common/Icons';
 
 export default function LoginPage({ handleLogin, loginError }) {
     const [email, setEmail] = useState('');

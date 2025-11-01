@@ -1,8 +1,8 @@
 // src/components/ExportOptionsModal.jsx
 import React, { useState, useMemo, useEffect } from 'react';
 import Modal from './Modal';
-import { DownloadIcon, XIcon } from './Icons'; // Assuming you have an XIcon for closing
-import * as dateUtils from '../utils/dateUtils'; // Use your standard date utils
+import { Download, X } from 'lucide-react';
+import * as dateUtils from '../../utils/dateUtils'; // Use your standard date utils
 
 // Helper to get display name (copied from PlanningPage)
 const getDisplayName = (staff) => {
@@ -151,7 +151,7 @@ export default function ExportOptionsModal({
                     >
                         {isExporting ? 'Exporting...' : (
                             <>
-                                <DownloadIcon className="inline-block h-5 w-5 mr-2" />
+                                <Download className="inline-block h-5 w-5 mr-2" />
                                 Export
                             </>
                         )}

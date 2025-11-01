@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import Modal from '../components/Modal';
-import PayslipDetailView from '../components/PayslipDetailView';
-import PayrollHistory from '../components/PayrollHistory';
-import PayrollGenerator from '../components/PayrollGenerator';
+import Modal from '../components/common/Modal';
+import PayslipDetailView from '../components/Payroll/PayslipDetailView';
+import PayrollHistory from '../components/Payroll/PayrollHistory';
+import PayrollGenerator from '../components/Payroll/PayrollGenerator';
 import * as dateUtils from '../utils/dateUtils'; // Import new standard
 
 export default function PayrollPage({ db, staffList, companyConfig }) {

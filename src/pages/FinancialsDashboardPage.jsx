@@ -2,11 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 // *** Correct import path to firebase.js ***
 import { app } from "../../firebase.js"
-import { FinancialCard } from '../components/FinancialsDashboard/FinancialCard';
 import { PayEstimateCard } from '../components/FinancialsDashboard/PayEstimateCard';
 import { SideCards } from '../components/FinancialsDashboard/SideCards';
-import Modal from '../components/Modal';
-import PayslipDetailView from '../components/PayslipDetailView';
+import Modal from '../components/common/Modal';
+import PayslipDetailView from '../components/Payroll/PayslipDetailView';
 
 // *** CORRECT INITIALIZATION FOR ASIA REGION ***
 const functionsAsia = getFunctions(app, "asia-southeast1"); // Use correct region AND variable name

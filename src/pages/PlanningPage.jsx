@@ -6,9 +6,9 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js" // Adjusted import path
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
 import { ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react';
-import ShiftModal from '../components/ShiftModal';
-import ImportConfirmationModal from '../components/ImportConfirmationModal';
-import ExportOptionsModal from '../components/ExportOptionsModal'; 
+import ShiftModal from '../components/Planning/ShiftModal.jsx';
+import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
+import ExportOptionsModal from '../components/common/ExportOptionsModal.jsx'; 
 import * as dateUtils from '../utils/dateUtils'; 
 // --- NEW IMPORTS ---
 import { calculateAttendanceStatus, getStatusClass } from '../utils/statusUtils';

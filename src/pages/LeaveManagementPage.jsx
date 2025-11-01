@@ -1,12 +1,12 @@
 // src/pages/LeaveManagementPage.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
-import Modal from '../components/Modal';
-import LeaveRequestForm from '../components/LeaveRequestForm';
-import { PlusIcon } from '../components/Icons';
+import Modal from '../components/common/Modal';
+import LeaveRequestForm from '../components/LeaveManagement/LeaveRequestForm';
 import { Search } from 'lucide-react';
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
 import * as dateUtils from '../utils/dateUtils';
+import { Plus } from 'lucide-react';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -202,7 +202,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                 {/* --- HEADER --- */}
                 <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-6">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Leave Management</h2>
-                    <button onClick={openNewRequestModal} className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />New Request for Staff</button>
+                    <button onClick={openNewRequestModal} className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />New Request for Staff</button>
                 </div>
                 
                 {/* --- FILTER BAR --- */}
@@ -281,7 +281,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
             </Modal>
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Leave Requests</h2>
-                <button onClick={openNewRequestModal} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Request New Leave</button>
+                <button onClick={openNewRequestModal} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />Request New Leave</button>
             </div>
             <div className="bg-gray-800 rounded-lg shadow-lg">
                 <div className="divide-y divide-gray-700">

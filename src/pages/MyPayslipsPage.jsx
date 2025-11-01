@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import Modal from '../components/Modal';
-import PayslipDetailView from '../components/PayslipDetailView'; // New Import
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import Modal from '../components/common/Modal';
+import PayslipDetailView from '../components/Payroll/PayslipDetailView';
+import * as dateUtils from '../utils/dateUtils';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

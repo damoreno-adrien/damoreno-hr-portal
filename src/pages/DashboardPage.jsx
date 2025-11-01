@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
-// Added 'collection', 'query', 'where', 'limit'
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore'; 
-// --- NEW: Import 'Calendar' from lucide-react ---
 import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, LogOut, Calendar } from 'lucide-react';
-
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
@@ -11,10 +8,8 @@ import { DailySummary } from '../components/Dashboard/DailySummary';
 import * as dateUtils from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
-
-// --- NEW: Import Modal, EditAttendanceModal, and ManagerAlerts ---
-import Modal from '../components/Modal';
-import EditAttendanceModal from '../components/EditAttendanceModal';
+import Modal from '../components/common/Modal';
+import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {

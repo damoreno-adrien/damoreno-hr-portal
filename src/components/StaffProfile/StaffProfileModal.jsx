@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../firebase.js"; // Correct path
+import { app } from '../../../firebase.js'; // Correct path
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { ProfileDetailsView } from './StaffProfile/ProfileDetailsView';
-import { ProfileDetailsEdit } from './StaffProfile/ProfileDetailsEdit';
-import { JobHistoryManager } from './StaffProfile/JobHistoryManager';
-import { DocumentManager } from './StaffProfile/DocumentManager';
-import { ProfileActionButtons } from './StaffProfile/ProfileActionButtons';
+import { ProfileDetailsView } from './ProfileDetailsView.jsx';
+import { ProfileDetailsEdit } from './ProfileDetailsEdit';
+import { JobHistoryManager } from './JobHistoryManager';
+import { DocumentManager } from './DocumentManager';
+import { ProfileActionButtons } from './ProfileActionButtons';
 import { Archive, UserCheck, Trash, Key } from 'lucide-react'; // Import needed icons
-import * as dateUtils from '../utils/dateUtils';
+import * as dateUtils from '../../utils/dateUtils.js';
 
 // Initialize Functions
 const functionsDefault = getFunctions(app); // For us-central1

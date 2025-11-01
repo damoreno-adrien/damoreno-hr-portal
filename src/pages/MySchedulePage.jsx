@@ -3,7 +3,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import * as dateUtils from '../utils/dateUtils'; 
 import { calculateAttendanceStatus, getStatusClass } from '../utils/statusUtils';
-import ShiftDetailModal from '../components/ShiftDetailModal'; 
+import ShiftDetailModal from '../components/Planning/ShiftDetailModal'; 
 
 export default function MySchedulePage({ db, user }) {
     const [startOfWeek, setStartOfWeek] = useState(dateUtils.startOfWeek(new Date()));
@@ -123,17 +123,7 @@ export default function MySchedulePage({ db, user }) {
         let statusElement;
         switch(dayInfo.scheduleStatus.type) {
             case 'Shift':
-                // if (dayInfo.attendanceStatus === 'Late') {
-                //     statusElement = (
-                //         <div className="bg-yellow-400 text-black font-bold py-2 px-4 rounded-lg text-center">
-                //             Late ({dayInfo.attendanceMinutes}m)
-                //         </div>
-                //     );
-                // } else {
-                //      statusElement = <div className="bg-amber-600 text-white font-bold py-2 px-4 rounded-lg text-center">{dayInfo.scheduleStatus.startTime} - {dayInfo.scheduleStatus.endTime}</div>;
-                // }
                 statusElement = <div className="bg-amber-600 text-white font-bold py-2 px-4 rounded-lg text-center">{dayInfo.scheduleStatus.startTime} - {dayInfo.scheduleStatus.endTime}</div>;
-                break;
                 break;
             case 'On Leave':
                 statusElement = <div className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg text-center">On Leave</div>;

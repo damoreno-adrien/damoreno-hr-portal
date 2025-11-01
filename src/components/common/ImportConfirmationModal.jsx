@@ -1,8 +1,7 @@
 // src/components/ImportConfirmationModal.jsx
 import React, { useMemo } from 'react';
-import Modal from './Modal'; // Assuming Modal.jsx is in the same directory
-// --- Import Icons (Assuming you have this file) ---
-import { CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowRightIcon, PlusIcon } from './Icons'; 
+import Modal from './Modal';
+import { CheckCircle, AlertTriangle, Info, ArrowRight, Plus } from 'lucide-react'; 
 
 // Helper to get a consistent display name
 const getRowName = (row) => {
@@ -34,7 +33,7 @@ const renderUpdateChanges = (details) => {
                 <li key={field}>
                     <span className="font-semibold">{field}</span>:
                     <span className="text-red-400 line-through ml-1">{formatValue(change.from)}</span>
-                    <ArrowRightIcon className="inline-block mx-1 h-3 w-3 text-gray-400" />
+                    <ArrowRight className="inline-block mx-1 h-3 w-3 text-gray-400" />
                     <span className="text-green-400">{formatValue(change.to)}</span>
                 </li>
             ))}
@@ -145,25 +144,25 @@ export default function ImportConfirmationModal({
                 <div className="space-y-4">
                     <AnalysisSection
                         title="Errors"
-                        icon={<ExclamationTriangleIcon className="h-5 w-5" />}
+                        icon={<AlertTriangle className="h-5 w-5" />}
                         data={errors}
                         colorClass="text-red-400"
                     />
                     <AnalysisSection
                         title={`New ${isPlanningImport ? 'Schedules' : 'Staff'} to Create`}
-                        icon={<PlusIcon className="h-5 w-5" />}
+                        icon={<Plus className="h-5 w-5" />}
                         data={creates}
                         colorClass="text-green-400"
                     />
                     <AnalysisSection
                         title={`${isPlanningImport ? 'Schedules' : 'Staff'} to Update`}
-                        icon={<CheckCircleIcon className="h-5 w-5" />}
+                        icon={<CheckCircle className="h-5 w-5" />}
                         data={updates}
                         colorClass="text-yellow-400"
                     />
                     <AnalysisSection
                         title="No Changes Detected"
-                        icon={<InformationCircleIcon className="h-5 w-5" />}
+                        icon={<Info className="h-5 w-5" />}
                         data={noChanges}
                         colorClass="text-gray-400"
                     />

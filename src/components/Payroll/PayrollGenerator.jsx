@@ -1,9 +1,8 @@
 import React from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import usePayrollGenerator from '../hooks/usePayrollGenerator';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
-
+import usePayrollGenerator from '../../hooks/usePayrollGenerator';
+import * as dateUtils from '../../utils/dateUtils';
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 

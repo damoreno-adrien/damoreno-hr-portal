@@ -1,7 +1,7 @@
 // src/components/LeaveManagement/LeaveRequestItem.jsx
 import React from 'react';
-import * as dateUtils from '../../utils/dateUtils'; // Use new standard
-import { BriefcaseIcon, TrashIcon } from '../Icons'; // Correct: Go up one level
+import * as dateUtils from '../../utils/dateUtils'; 
+import { Briefcase, Trash2 } from 'lucide-react';
 
 // Reusable StatusBadge component
 const StatusBadge = ({ status }) => {
@@ -48,8 +48,8 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0">
                     <StatusBadge status={req.status} />
-                    <button onClick={() => onEditRequest(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><BriefcaseIcon className="h-4 w-4"/></button>
-                    <button onClick={() => onDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-800 hover:bg-red-700" title="Delete Request"><TrashIcon className="h-4 w-4"/></button>
+                    <button onClick={() => onEditRequest(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><Briefcase className="h-4 w-4"/></button>
+                    <button onClick={() => onDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-800 hover:bg-red-700" title="Delete Request"><Trash2 className="h-4 w-4"/></button>
                     {req.status === 'pending' && (
                         <>
                             <button onClick={() => onUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700">Reject</button>

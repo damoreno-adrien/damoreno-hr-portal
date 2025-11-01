@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { ChevronUpIcon, ChevronDownIcon } from '../components/Icons';
-import Modal from '../components/Modal';
-import EditAttendanceModal from '../components/EditAttendanceModal';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import Modal from '../components/common/Modal';
+import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
+import * as dateUtils from '../utils/dateUtils';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -165,7 +165,7 @@ export default function AttendancePage({ db, staffList }) {
             <div className="bg-gray-800 rounded-lg">
                 <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center p-4">
                     <h3 className="text-xl font-semibold text-white">{title} ({staff.length})</h3>
-                    {isOpen ? <ChevronUpIcon className="h-6 w-6 text-gray-400" /> : <ChevronDownIcon className="h-6 w-6 text-gray-400" />}
+                    {isOpen ? <ChevronUp className="h-6 w-6 text-gray-400" /> : <ChevronDown className="h-6 w-6 text-gray-400" />}
                 </button>
                 {isOpen && (
                     <div className="px-4 pb-4 space-y-3">

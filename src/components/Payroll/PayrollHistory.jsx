@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../firebase.js" // Adjusted import path
-import usePayrollHistory from '../hooks/usePayrollHistory';
-import { TrashIcon } from './Icons';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
+import { app } from "../../../firebase.js" // Adjusted import path
+import usePayrollHistory from '../../hooks/usePayrollHistory';
+import { Trash2 } from 'lucide-react';
+import * as dateUtils from '../../utils/dateUtils.js'; // Use new standard
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
 const functionsDefault = getFunctions(app, "us-central1");
@@ -77,7 +77,7 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
                                             className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
                                             title="Delete this payroll run"
                                         >
-                                            <TrashIcon className="h-5 w-5" />
+                                            <Trash2 className="h-5 w-5" />
                                         </button>
                                     )}
                                 </div>
