@@ -1,5 +1,5 @@
 import React from 'react';
-import dateUtils from '../../utils/dateUtils';
+import * as dateUtils from '../../utils/dateUtils'; // Use new standard
 // --- NEW: Import Pencil icon ---
 import { Clock, XCircle, CheckCircle, CalendarDays, Plane, Pencil } from 'lucide-react';
 
