@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { PlusIcon, TrashIcon } from '../common/Icons';
+import { Plus, Trash2 } from 'lucide-react';
 import { Check } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
@@ -92,7 +92,7 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
             <form onSubmit={handleAddSubmit} className="mt-6 flex flex-col sm:flex-row items-stretch sm:space-x-4 space-y-2 sm:space-y-0">
                 <input type="date" id="date" value={newHoliday.date} onChange={handleHolidayInputChange} className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"/>
                 <input type="text" id="name" value={newHoliday.name} onChange={handleHolidayInputChange} placeholder="Holiday name" className="flex-grow px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
-                <button type="submit" className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><PlusIcon className="h-5 w-5 mr-2" />Add Holiday</button>
+                <button type="submit" className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />Add Holiday</button>
             </form>
             <div className="mt-8 space-y-3 max-h-60 overflow-y-auto">
                 {sortedHolidays.map(holiday => (
@@ -102,7 +102,7 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
                             <span className="text-sm text-gray-400 ml-4">{dateUtils.formatDisplayDate(holiday.date)}</span>
                         </div>
                         <button onClick={() => onDeleteHoliday(holiday)} className="text-red-400 hover:text-red-300" title="Delete holiday">
-                            <TrashIcon className="h-5 w-5" />
+                            <Trash2 className="h-5 w-5" />
                         </button>
                     </div>
                 ))}

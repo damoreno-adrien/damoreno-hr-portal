@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PlusIcon, TrashIcon } from '../common/Icons';
+import { Plus, Trash2 } from 'lucide-react';
 
 export const DepartmentManager = ({ departments = [], onAddDepartment, onDeleteDepartment }) => {
     const [newDepartment, setNewDepartment] = useState('');
@@ -26,7 +26,7 @@ export const DepartmentManager = ({ departments = [], onAddDepartment, onDeleteD
                     type="submit" 
                     className="flex-shrink-0 flex items-center justify-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg"
                 >
-                    <PlusIcon className="h-5 w-5 mr-2" />
+                    <Plus className="h-5 w-5 mr-2" />
                     <span>Add</span>
                 </button>
             </form>
@@ -38,7 +38,7 @@ export const DepartmentManager = ({ departments = [], onAddDepartment, onDeleteD
                     <div key={dept} className="flex justify-between items-center bg-gray-700 p-3 rounded-lg">
                         <span className="text-white">{dept}</span>
                         <button onClick={() => onDeleteDepartment(dept)} className="text-red-400 hover:text-red-300" title={`Delete ${dept}`}>
-                            <TrashIcon className="h-5 w-5" />
+                            <Trash2 className="h-5 w-5" />
                         </button>
                     </div>
                 ))}
