@@ -145,7 +145,7 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                                             <label htmlFor="endTime" className="block text-sm font-medium text-gray-300">End Time</label>
                                             <input
                                                 type="time" id="endTime" value={endTime}
-                                                onChange={(e) => setEndTime(e.g.target.value)} required
+                                                onChange={(e) => setEndTime(e.target.value)} required
                                                 className="mt-1 block w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 sm:text-sm text-white"
                                             />
                                         </div>
