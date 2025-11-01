@@ -5,7 +5,7 @@ import Modal from '../components/common/Modal';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm.jsx';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal.jsx';
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx'; // <-- Import the new modal
-import { PlusIcon, DownloadIcon, UploadIcon } from '../components/common/Icons.jsx';
+import { Plus, Download, Upload } from 'lucide-react';
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 import { app } from "../../firebase.js"; // Ensure app is imported for functions
 
@@ -365,18 +365,18 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     </div>
                     {/* Export Button */}
                     <button onClick={handleExport} disabled={isExporting || isImporting || isConfirmingImport} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <DownloadIcon className="h-5 w-5 mr-2" />
+                        <Download className="h-5 w-5 mr-2" />
                         {isExporting ? 'Exporting...' : 'Export CSV'}
                     </button>
                     {/* Import Button */}
                     <button onClick={handleImportClick} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <UploadIcon className="h-5 w-5 mr-2" />
+                        <Upload className="h-5 w-5 mr-2" />
                          {/* Show correct loading state */}
                         {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
                     </button>
                     {/* Invite Button */}
                     <button onClick={() => setIsAddModalOpen(true)} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <PlusIcon className="h-5 w-5 mr-2" />
+                        <Plus className="h-5 w-5 mr-2" />
                         Invite Staff
                     </button>
                     {/* Hidden File Input */}
