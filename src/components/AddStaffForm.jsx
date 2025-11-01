@@ -36,7 +36,21 @@ export default function AddStaffForm({ auth, onClose, departments }) {
             const response = await fetch(functionUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ email, password, firstName, lastName, nickname, position, department, startDate, payType, rate }),
+                body: JSON.stringify({
+                    data: {
+                        email, 
+                        password, 
+                        firstName, 
+                        lastName, 
+                        nickname, 
+                        position, 
+                        department, 
+                        startDate, 
+                        payType, 
+                        rate,
+                        bonusStreak: 0
+                    }
+                }),
             });
             
             const responseData = await response.json();
