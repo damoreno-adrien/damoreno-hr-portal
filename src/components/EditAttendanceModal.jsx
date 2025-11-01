@@ -3,8 +3,11 @@ import { doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore
 import * as dateUtils from '../utils/dateUtils'; // Use new standard
 
 export default function EditAttendanceModal({ db, record, onClose }) {
-    const isCreating = !record.fullRecord;
+    // isCreating is now false when we pass a 'fullRecord' (even a partial one)
+    const isCreating = !record.fullRecord; 
     
+    // --- UPDATED: Handle partial 'fullRecord' from alert ---
+    // If 'fullRecord' exists, use it. Otherwise, initialize with empty strings.
     const [formData, setFormData] = useState({
         checkIn: record.fullRecord?.checkInTime ? dateUtils.formatCustom(record.fullRecord.checkInTime, 'HH:mm') : '',
         breakStart: record.fullRecord?.breakStart ? dateUtils.formatCustom(record.fullRecord.breakStart, 'HH:mm') : '',
@@ -42,6 +45,7 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             };
 
             if (isCreating) {
+                // This path is for creating a *new* record from scratch
                 const newDocId = `${record.staffId}_${record.date}`;
                 const docRef = doc(db, 'attendance', newDocId);
                 await setDoc(docRef, {
@@ -51,9 +55,19 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     date: record.date,
                 });
             } else {
-                const docRef = doc(db, 'attendance', record.id);
+                // This path is for *updating* an existing record (like from an alert)
+                // record.id here is the attendanceDocId
+                const docRef = doc(db, 'attendance', record.id); 
                 await updateDoc(docRef, dataToSave);
             }
+
+            // --- NEW: Delete the alert if it exists ---
+            if (record.alertId) {
+                const alertRef = doc(db, 'manager_alerts', record.alertId);
+                await deleteDoc(alertRef);
+            }
+            // --- END NEW BLOCK ---
+
             onClose();
         } catch (err) {
             setError('Failed to save changes. Please check the times and try again.');
@@ -69,6 +83,14 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             try {
                 const docRef = doc(db, 'attendance', record.id);
                 await deleteDoc(docRef);
+
+                // --- NEW: Also delete the alert ---
+                if (record.alertId) {
+                    const alertRef = doc(db, 'manager_alerts', record.alertId);
+                    await deleteDoc(alertRef);
+                }
+                // --- END NEW BLOCK ---
+
                 onClose();
             } catch (err) { setError('Failed to delete the record.');
             } finally { setIsSaving(false); }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 // Added 'collection', 'query', 'where', 'limit'
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore'; 
-import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, LogOut } from 'lucide-react';
+// --- NEW: Import 'Calendar' from lucide-react ---
+import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, LogOut, Calendar } from 'lucide-react';
 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
@@ -10,6 +11,11 @@ import { DailySummary } from '../components/Dashboard/DailySummary';
 import * as dateUtils from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
+
+// --- NEW: Import Modal, EditAttendanceModal, and ManagerAlerts ---
+import Modal from '../components/Modal';
+import EditAttendanceModal from '../components/EditAttendanceModal';
+import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -23,10 +29,16 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [upcomingLeave, setUpcomingLeave] = useState(null); // For the next upcoming leave
     
+    // --- NEW: State for the manual fix modal ---
+    const [alertToFix, setAlertToFix] = useState(null); // Will hold the alert data
+
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
     const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
+
+    // --- NEW: Get user role from the user object (assuming it's there from useAuth) ---
+    const userRole = user?.role;
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
@@ -35,6 +47,33 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return birthDateStr === todayStr;
     }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
+
+    // --- NEW: Handlers for the manual fix modal ---
+    
+    /**
+     * Prepares the data for the EditAttendanceModal.
+     * The modal expects a specific 'record' object format.
+     * We also add the 'alertId' so the modal can delete the alert on save.
+     */
+    const handleOpenManualFix = (alert) => {
+        const recordForModal = {
+            id: alert.attendanceDocId, // The ID of the attendance doc
+            staffName: alert.staffName,
+            date: alert.date,
+            // Pre-fill the modal with the known check-in time
+            fullRecord: { 
+                checkInTime: alert.checkInTime.toDate() // convert Firestore Timestamp to JS Date
+            },
+            alertId: alert.id // Pass the alert ID for deletion on save
+        };
+        setAlertToFix(recordForModal);
+    };
+
+    const handleCloseManualFix = () => {
+        setAlertToFix(null);
+    };
+    // --- END NEW HANDLERS ---
+
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -174,7 +213,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const calculateDistance = (lat1, lon1, lat2, lon2) => {
         const R = 6371e3;
         const φ1 = lat1 * Math.PI / 180; const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180; const Δλ = (lon2 - lon1) * Math.PI / 180;
+        const Δφ = (lat2 - 1) * Math.PI / 180; const Δλ = (lon2 - 1) * Math.PI / 180;
         const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
@@ -254,8 +293,26 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
     return (
         <div>
+            {/* --- NEW: Manual Fix Modal --- */}
+            {alertToFix && (
+                <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
+                    <EditAttendanceModal
+                        db={db}
+                        record={alertToFix}
+                        onClose={handleCloseManualFix}
+                    />
+                </Modal>
+            )}
+
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday to you! We wish you all the best! 🎂</div>}
             {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p><p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(getDisplayName).join(', ')}!</p></div>}
+
+            {/* --- NEW: Manager Alerts Section --- */}
+            {userRole === 'manager' && (
+                <div className="mb-8">
+                    <ManagerAlerts onManualFix={handleOpenManualFix} />
+                </div>
+            )}
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -316,7 +373,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                                         <span className="font-semibold text-blue-300">{upcomingLeave.leaveType}</span>
                                         <span className="text-gray-300 ml-2">({upcomingLeave.startDate} to {upcomingLeave.endDate})</span>
                                     </div>
-                                </div>
+                                 </div>
                             </div>
                         )}
                     </DashboardCard>
