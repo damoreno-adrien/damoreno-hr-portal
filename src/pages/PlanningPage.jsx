@@ -7,10 +7,11 @@ import { app } from "../../firebase.js" // Adjusted import path
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
 import { ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react';
 import ShiftModal from '../components/Planning/ShiftModal.jsx';
+// --- NEW: Import the ShiftDetailModal ---
+import ShiftDetailModal from '../components/Planning/ShiftDetailModal.jsx'; 
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
 import ExportOptionsModal from '../components/common/ExportOptionsModal.jsx'; 
 import * as dateUtils from '../utils/dateUtils'; 
-// --- NEW IMPORTS ---
 import { calculateAttendanceStatus, getStatusClass } from '../utils/statusUtils';
 
 // *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
@@ -28,7 +29,7 @@ const getDisplayName = (staff) => {
 
 // Helper function to get current job using standard date utils
 const getCurrentJob = (staff) => {
-    if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) {
+    if (!staff || !staff.jobHistory || !staff.jobHistory.length === 0) {
         return { position: 'N/A', department: 'Unassigned' };
     }
     // Ensure sorting is robust using date-fns
@@ -46,12 +47,15 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     });
 
     // Custom hook to fetch weekly schedule data
-    // --- NOTE: The *structure* of weekData is now { staffId: { dateString: { schedule, attendance, leave } } } ---
     const { weekData, weekDates = [], loading, refetchWeekData } = useWeeklyPlannerData(db, currentWeekStart);
 
     // State for the shift editing modal
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
     const [selectedShiftInfo, setSelectedShiftInfo] = useState({ staffId: null, date: null, shift: null });
+
+    // --- NEW: State for the detail viewer modal ---
+    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+    const [selectedDayInfo, setSelectedDayInfo] = useState(null);
 
     // State for export loading indicator
     const [isExporting, setIsExporting] = useState(false);
@@ -73,17 +77,44 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         setCurrentWeekStart(prevDate => dateUtils.addDays(prevDate, 7));
     };
 
-    // Click handler using standard date parsing
-    const handleCellClick = (staffId, dateString, shift) => {
-        const dateObject = dateUtils.parseISODateString(dateString);
-        setSelectedShiftInfo({ staffId, date: dateObject, shift });
-        setIsShiftModalOpen(true);
-    };
+    // --- UPDATED: Click handler for branching logic ---
+    const handleCellClick = (staff, dateObj, shiftData, status) => {
+        const { dateObject } = dateObj;
+        const { schedule, attendance, leave } = shiftData || {};
 
-    // Handler to close the shift modal
-    const closeModal = () => {
+        if (status === 'Off') {
+            // --- Path 1: Empty cell, open EDITOR ---
+            setSelectedShiftInfo({ staffId: staff.id, date: dateObject, shift: null });
+            setIsShiftModalOpen(true);
+        } else {
+            // --- Path 2: Non-empty cell, open VIEWER ---
+            // Recalculate status to get 'minutes'
+            const { minutes } = calculateAttendanceStatus(schedule, attendance, leave, dateObject);
+            
+            const dayInfoForModal = {
+                date: dateObject,
+                attendanceStatus: status,
+                attendanceMinutes: minutes,
+                rawSchedule: schedule,
+                rawAttendance: attendance,
+                rawLeave: leave,
+                staffName: getDisplayName(staff) // Pass staff name
+            };
+            setSelectedDayInfo(dayInfoForModal);
+            setIsDetailModalOpen(true);
+        }
+    };
+    
+    // Handler to close the shift editor modal
+    const closeEditorModal = () => {
         setIsShiftModalOpen(false);
         setSelectedShiftInfo({ staffId: null, date: null, shift: null });
+    };
+
+    // --- NEW: Handler to close the detail viewer modal ---
+    const closeDetailModal = () => {
+        setIsDetailModalOpen(false);
+        setSelectedDayInfo(null);
     };
 
     // Formatted date range string for display using standard utils
@@ -216,7 +247,25 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         setImportCsvContent(null);
         setImportError(null);
     };
-    // --- END NEW HANDLERS ---
+    
+    // --- NEW: Handler to open the editor from the detail modal ---
+    const handleOpenEditorFromDetail = (shiftInfo) => {
+        // shiftInfo comes from the detail modal's onEdit prop
+        // It contains { staffId, date, shift, staffName }
+        
+        // 1. Close the detail modal
+        closeDetailModal();
+        
+        // 2. Set the data for the editor modal
+        setSelectedShiftInfo({
+            staffId: shiftInfo.staffId,
+            date: shiftInfo.date,
+            shift: shiftInfo.shift
+        });
+        
+        // 3. Open the editor modal
+        setIsShiftModalOpen(true);
+    };
 
     // Main component render
     return (
@@ -224,7 +273,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             {isShiftModalOpen && (
                 <ShiftModal
                     isOpen={isShiftModalOpen}
-                    onClose={closeModal}
+                    onClose={closeEditorModal} // Use correct close handler
                     db={db}
                     staffId={selectedShiftInfo.staffId}
                     staffName={getDisplayName(staffList.find(s => s.id === selectedShiftInfo.staffId)) || 'Unknown Staff'}
@@ -234,16 +283,26 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                 />
             )}
 
+            {/* --- NEW: Add the Detail Modal --- */}
+            {isDetailModalOpen && (
+                <ShiftDetailModal
+                    isOpen={isDetailModalOpen}
+                    onClose={closeDetailModal}
+                    dayInfo={selectedDayInfo}
+                    onEdit={handleOpenEditorFromDetail}
+                />
+            )}
+
             {/* --- NEW Import Confirmation Modal --- */}
             {importAnalysis && (
                 <ImportConfirmationModal
                     isOpen={!!importAnalysis}
                     onClose={handleImportCancel}
                     onConfirm={handleImportConfirm}
-                    analysis={importAnalysis}
-                    isLoading={isImporting}
+                    analysis={importAnalysis} // Changed from 'analysisResult' to 'analysis'
+                    isConfirming={isImporting} // Changed from 'isLoading' to 'isConfirming'
                     fileName="Planning Import"
-                    error={importError}
+                    // error={importError} // Prop name mismatch, let's assume 'analysis' object contains errors
                 />
             )}
             
@@ -360,10 +419,11 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                                 return (
                                                     <td
                                                         key={dateObj.dateString}
-                                                        onClick={() => handleCellClick(staff.id, dateObj.dateString, shift)}
+                                                        // --- UPDATED: Pass all info to the new handler ---
+                                                        onClick={() => handleCellClick(staff, dateObj, shiftData, status)}
                                                         // --- UPDATED: Apply the status class ---
                                                         className={`px-3 py-3 text-center text-sm transition-colors cursor-pointer w-32 min-w-[8rem] ${statusClass || 'text-white hover:bg-gray-700'}`}
-                                                        title={shift ? `Click to edit ${getDisplayName(staff)}'s shift` : `Click to add shift for ${getDisplayName(staff)}`}
+                                                        title={shift ? `Click to view details for ${getDisplayName(staff)}` : `Click to add shift for ${getDisplayName(staff)}`}
                                                     >
                                                         {/* --- UPDATED: Show 'LEAVE' text --- */}
                                                         {displayTime || (status === 'Leave' ? <span className="text-gray-300 italic">LEAVE</span> : <span className="text-gray-600 italic">OFF</span>)}

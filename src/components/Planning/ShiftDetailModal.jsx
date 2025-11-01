@@ -1,6 +1,8 @@
 import React from 'react';
-import * as dateUtils from '../../utils/dateUtils';
-import {Clock, XCircle, CheckCircle, CalendarDays, Plane } from 'lucide-react';
+import dateUtils from '../../utils/dateUtils';
+// --- NEW: Import Pencil icon ---
+import { Clock, XCircle, CheckCircle, CalendarDays, Plane, Pencil } from 'lucide-react';
+
 // Helper to format timestamps safely
 const formatTime = (timestamp) => {
     if (!timestamp) return 'N/A';
@@ -11,7 +13,8 @@ const formatTime = (timestamp) => {
     }
 };
 
-export default function ShiftDetailModal({ isOpen, onClose, dayInfo }) {
+// --- NEW: Add onEdit to props ---
+export default function ShiftDetailModal({ isOpen, onClose, dayInfo, onEdit }) {
     if (!isOpen || !dayInfo) return null;
 
     const { 
@@ -20,10 +23,34 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo }) {
         attendanceMinutes, 
         rawSchedule, 
         rawAttendance, 
-        rawLeave 
+        rawLeave,
+        staffName // We passed this from PlanningPage
     } = dayInfo;
 
     const displayDate = dateUtils.formatCustom(date, 'EEEE, dd MMMM yyyy');
+
+    // --- NEW: Handler for the Edit button ---
+    const handleEdit = () => {
+        // We need to find the staffId from the raw data
+        const staffId = rawSchedule?.staffId || rawAttendance?.staffId;
+        
+        if (!staffId) {
+            console.error("Could not find staffId to edit shift.");
+            return;
+        }
+
+        // Pass the required info back to PlanningPage to open the editor
+        onEdit({
+            staffId: staffId,
+            date: date,
+            shift: rawSchedule,
+            staffName: staffName
+        });
+    };
+
+    // --- NEW: Decide when to show the Edit button ---
+    // Only show if the status is Work-related (not Leave or Off)
+    const showEditButton = ['Present', 'Late', 'Absent'].includes(attendanceStatus);
 
     const renderStatusDetails = () => {
         switch (attendanceStatus) {
@@ -60,7 +87,6 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo }) {
                         <h4 className="text-lg font-semibold text-white mb-3">Leave Details</h4>
                         <div className="space-y-2">
                             <p className="flex items-center"><Plane className="h-5 w-5 mr-2 text-blue-400" />Status: <strong className="ml-2">On Leave</strong></p>
-                            {/* We stored 'leaveObj' in the main page, but didn't pass it. Let's assume rawLeave is the object */}
                             <p className="flex items-center"><CalendarDays className="h-5 w-5 mr-2 text-gray-400" />Type: <strong className="ml-2">{rawLeave?.leaveType || 'N/A'}</strong></p>
                              <p className="flex items-center"><CalendarDays className="h-5 w-5 mr-2 text-gray-400" />Dates: <strong className="ml-2">{rawLeave?.startDate} to {rawLeave?.endDate}</strong></p>
                         </div>
@@ -87,8 +113,9 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo }) {
                     <div className="bg-gray-900 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                         <div className="sm:flex sm:items-start w-full">
                             <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
+                                {/* --- NEW: Added staffName to title --- */}
                                 <h3 className="text-lg leading-6 font-medium text-amber-400 mb-2">
-                                    {displayDate}
+                                    {staffName} - {displayDate}
                                 </h3>
                                 <div className="mt-4 border-t border-gray-700 pt-4 text-gray-300">
                                     {renderStatusDetails()}
@@ -96,13 +123,24 @@ export default function ShiftDetailModal({ isOpen, onClose, dayInfo }) {
                             </div>
                         </div>
                     </div>
-                    <div className="bg-gray-800 px-4 py-3 sm:px-6 flex flex-row-reverse">
+                    {/* --- UPDATED: Footer with conditional Edit button --- */}
+                    <div className="bg-gray-800 px-4 py-3 sm:px-6 flex flex-row-reverse justify-between">
                         <button
                             type="button" onClick={onClose}
                             className="px-4 py-2 bg-gray-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 focus:ring-offset-gray-900"
                         >
                             Close
                         </button>
+                        
+                        {showEditButton && (
+                            <button
+                                type="button" onClick={handleEdit}
+                                className="flex items-center px-4 py-2 bg-blue-600 text-base font-medium text-white rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-gray-900"
+                            >
+                                <Pencil className="h-4 w-4 mr-2" />
+                                Edit Shift
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
