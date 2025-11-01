@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js";
 import { collection, query, where, onSnapshot, orderBy, writeBatch, doc } from 'firebase/firestore';
-import { PlusIcon } from '../components/common/Icons';
+import { Plus } from 'lucide-react';
 import RequestAdvanceModal from '../components/SalaryAdvance/RequestAdvanceModal';
 import { EligibilityCard } from '../components/SalaryAdvance/EligibilityCard';
 import { RequestHistoryTable } from '../components/SalaryAdvance/RequestHistoryTable';
@@ -92,7 +92,7 @@ export default function SalaryAdvancePage({ db, user }) {
                     disabled={isLoadingEligibility || !eligibility || eligibility.maxAdvance <= 0}
                     className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500 disabled:cursor-not-allowed"
                 >
-                    <PlusIcon className="h-5 w-5 mr-2" />
+                    <Plus className="h-5 w-5 mr-2" />
                     Request New Advance
                 </button>
             </div>
