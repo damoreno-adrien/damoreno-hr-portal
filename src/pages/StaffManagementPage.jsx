@@ -419,6 +419,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Display Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Position</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Bonus Streak</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Start Date</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
                         </tr>
@@ -426,7 +427,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     {sortedDepartments.length === 0 && (
                          <tbody>
                             <tr>
-                                <td colSpan="4" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td>
+                                <td colSpan="5" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td>
                             </tr>
                          </tbody>
                     )}
@@ -434,7 +435,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         <React.Fragment key={department}>
                             <tbody className="divide-y divide-gray-700">
                                 <tr className="bg-gray-900 sticky top-0 z-10"> {/* Make header sticky */}
-                                    <th colSpan="4" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
+                                    <th colSpan="5" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
                                         {department} ({groupedStaff[department].length}) {/* Show count */}
                                     </th>
                                 </tr>
@@ -442,6 +443,13 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                     <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{getCurrentJob(staff).position}</td>
+                                        
+                                        {/* --- Add this new cell --- */}
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">
+                                            {staff.bonusStreak || 0}
+                                        </td>
+                                        {/* --- End new cell --- */}
+
                                         {/* Use safe access to convert Timestamp back to Date for formatting */}
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(staff.startDate?.seconds ? staff.startDate.toDate() : staff.startDate)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
