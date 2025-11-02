@@ -245,7 +245,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
         totalActualMillis,
         totalScheduledMillis,
         workedDays,
-        totalAbsencesCount, // This is ONLY unexcused absences
+        totalAbsencesCount: totalUnexcusedAbsenceCount, // This is ONLY unexcused absences
         totalLatesCount,
         totalLateMinutes,
         totalEarlyDepartureMinutes,
