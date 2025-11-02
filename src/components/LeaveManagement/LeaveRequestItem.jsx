@@ -1,7 +1,8 @@
 // src/components/LeaveManagement/LeaveRequestItem.jsx
 import React from 'react';
 import * as dateUtils from '../../utils/dateUtils'; 
-import { Briefcase, Trash2 } from 'lucide-react';
+// --- NEW: Import AlertTriangle ---
+import { Briefcase, Trash2, AlertTriangle } from 'lucide-react';
 
 // Reusable StatusBadge component
 const StatusBadge = ({ status }) => {
@@ -59,8 +60,11 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
                 </div>
             </div>
             {req.reason && (<p className="mt-2 text-sm text-amber-300 bg-gray-700 p-2 rounded-md"><span className="font-semibold">Reason:</span> {req.reason}</p>)}
-            {req.leaveType === 'Sick Leave' && req.totalDays >= 3 && (
-                <div className="mt-3 pt-3 border-t border-gray-700">
+            
+            {/* --- UPDATED: SICK LEAVE BLOCK --- */}
+            {req.leaveType === 'Sick Leave' && (
+                <div className="mt-3 pt-3 border-t border-gray-700 space-y-3">
+                    {/* 1. Show checkbox for ALL sick leave */}
                     <label className="flex items-center space-x-2 cursor-pointer">
                         <input 
                             type="checkbox" 
@@ -70,8 +74,20 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
                         />
                         <span className="text-sm text-gray-300">Medical Certificate Received</span>
                     </label>
+
+                    {/* 2. Show warning if 3+ days and MC is not received */}
+                    {req.totalDays >= 3 && !req.mcReceived && (
+                        <div className="flex items-start gap-2 p-2 bg-yellow-900/50 border border-yellow-700 rounded-md">
+                            <AlertTriangle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-xs text-yellow-300">
+                                This leave is {req.totalDays} days. A medical certificate may be required.
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
+            {/* --- END UPDATED BLOCK --- */}
+
         </div>
     );
 };

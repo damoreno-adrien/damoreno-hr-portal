@@ -3,11 +3,9 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase"
 import * as dateUtils from '../utils/dateUtils';
-// --- NEW IMPORT ---
+// --- Import our "brain" ---
 import { calculateMonthlyStats } from '../utils/attendanceCalculator';
-import { DateTime } from 'luxon'; // --- NEW: Import Luxon
 
-// --- REMOVED calculateBonus function ---
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips');
 
@@ -37,7 +35,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
     const [selectedForPayroll, setSelectedForPayroll] = useState(new Set());
 
     const handleGeneratePayroll = async () => {
-        // ... (All date period setup is unchanged) ...
         const now = new Date();
         const currentYear = dateUtils.getYear(now);
         const currentMonth = dateUtils.getMonth(now);
@@ -52,6 +49,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             setPayrollData([]); setIsMonthFullyFinalized(false); return;
         }
         if (!companyConfig) { setError("Company settings are not loaded yet. Please wait and try again."); return; }
+        
+        if (!staffList || staffList.length === 0) {
+            setError("Staff list is not loaded yet. Please wait and try again.");
+            return; 
+        }
 
         setIsLoading(true); setError(''); setIsMonthFullyFinalized(false);
 
@@ -62,16 +64,9 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const endDateStr = dateUtils.formatISODate(endOfMonth);
             const daysInMonth = dateUtils.getDaysInMonth(payPeriodDate);
 
-            // --- NEW: Define sick leave quota ---
-            const SICK_LEAVE_QUOTA_DAYS = 30;
-            const startOfYear = DateTime.fromObject({ year: payPeriod.year, day: 1 }).toISODate();
-            const endOfPayPeriod = endDateStr; // We only care about days up to this month
-
-            // ... (Fetch Finalized Data is unchanged) ...
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
-            // ... (Filter Eligible Staff is unchanged) ...
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
                 const staffStartDate = dateUtils.fromFirestore(staff.startDate);
@@ -84,7 +79,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                                        dateUtils.getYear(staffEndDate) === payPeriod.year &&
                                        dateUtils.getMonth(staffEndDate) === payPeriod.month;
                 const isEligibleForPeriod = isCurrentlyActive || leftThisPeriod;
-                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod && isEligibleForPeriod;
+                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod && isEligEbleForPeriod;
             });
 
             if (staffToProcess.length === 0 && staffList.length > 0 && finalizedStaffIds.size === staffList.filter(s => s.status !== 'inactive').length) {
@@ -99,24 +94,14 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 advancesSnapshot,
                 loansSnapshot,
                 adjustmentsSnapshot,
-                // --- NEW: Fetch all sick leave for the year ---
-                yearlySickLeaveSnapshot,
+                // --- Call our "brain" for all staff ---
                 allStaffStats
             ] = await Promise.all([
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
-                // --- NEW ---
-                getDocs(query(
-                    collection(db, "leave_requests"),
-                    where("status", "==", "approved"),
-                    where("leaveType", "==", "Sick Leave"),
-                    where("startDate", ">=", startOfYear),
-                    where("startDate", "<=", endOfPayPeriod)
-                )),
-                // --- This replaces attendance, schedule, leave, and bonus fetches ---
                 Promise.all(staffToProcess.map(staff => 
-                    calculateMonthlyStats(db, staff, payPeriod, companyConfig)
+                    calculateMonthlyStats(db, staff, payPeriod, companyConfig) // --- THIS IS IT ---
                         .then(stats => ({ staffId: staff.id, ...stats }))
                 ))
             ]);
@@ -125,8 +110,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const advancesData = advancesSnapshot.docs.map(doc => doc.data());
             const loansData = loansSnapshot.docs.map(doc => doc.data());
             const adjustmentsData = adjustmentsSnapshot.docs.map(doc => doc.data());
-            // --- NEW: Create maps for sick leave and stats ---
-            const yearlySickLeaveData = yearlySickLeaveSnapshot.docs.map(doc => doc.data());
             const statsMap = new Map(allStaffStats.map(res => [res.staffId, res]));
             const publicHolidays = companyConfig.publicHolidays.map(h => h.date);
 
@@ -135,10 +118,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const currentJob = getCurrentJob(staff);
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
                 
-                // --- NEW: Get all stats from our calculator ---
                 const stats = statsMap.get(staff.id);
                 if (!stats) {
-                    // This should not happen, but good to guard
                     return { id: staff.id, name: staff.firstName, error: "Failed to calculate stats" };
                 }
 
@@ -146,12 +127,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 let autoDeductions = 0;
                 let leavePayout = null;
                 
-                // --- Unpaid Absences (Simplified) ---
                 const unpaidAbsences = [{ 
                     date: `${stats.totalAbsencesCount} unexcused day(s)`, 
-                    hours: stats.totalAbsencesCount * 8 // Estimate
+                    hours: stats.totalAbsencesCount * 8
                 }];
-
 
                 const staffEndDate = dateUtils.fromFirestore(staff.endDate);
                 const isLastMonth = staffEndDate &&
@@ -166,8 +145,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         // ... (Leave Payout logic is unchanged) ...
                         const daysWorked = dateUtils.differenceInCalendarDays(dateUtils.formatISODate(staffEndDate), startDateStr);
                         basePay = dailyRate * daysWorked;
-                        
-                        // --- Fetch leave data (This is now redundant, but OK) ---
                         const hireDate = dateUtils.fromFirestore(staff.startDate);
                         let annualLeaveEntitlement = 0;
                         if (hireDate) {
@@ -183,10 +160,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                              return holidayDate && holidayDate <= staffEndDate && dateUtils.getYear(holidayDate) === payPeriod.year;
                         });
                         const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-
-                        // This is inefficient, we already fetched this in the calculator
-                        // But for a minimal change, we leave it.
-                        const staffLeaveTaken = []; // Ideally get this from the calculator
+                        const staffLeaveTaken = []; // This is still a weak point, but we'll leave it
                         let usedAnnual = 0, usedPublicHoliday = 0;
                         staffLeaveTaken.forEach(l => {
                             const leaveStartDate = dateUtils.parseISODateString(l.startDate);
@@ -198,44 +172,12 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         const finalAnnualBalance = Math.max(0, annualLeaveEntitlement - usedAnnual);
                         const finalHolidayCredit = Math.max(0, earnedCredits - usedPublicHoliday);
                         leavePayout = { annualDays: finalAnnualBalance, holidayCredits: finalHolidayCredit, dailyRate: dailyRate, total: (finalAnnualBalance + finalHolidayCredit) * dailyRate };
-
                     } else { 
                         basePay = fullMonthSalary; 
                     }
                     
-                    // --- UPDATED: Absence deduction logic ---
-                    
-                    // 1. Start with unexcused absences
-                    let daysToDeduct = stats.totalAbsencesCount;
-
-                    // 2. Calculate paid vs. unpaid sick leave
-                    const staffYearlySickLeave = yearlySickLeaveData
-                        .filter(l => l.staffId === staff.id && l.mcReceived === true);
-                    
-                    let totalYearlySickDays = 0;
-                    staffYearlySickLeave.forEach(l => {
-                        totalYearlySickDays += l.totalDays;
-                    });
-
-                    // 'totalJustifiedSickLeaveCount' is just for THIS month.
-                    // 'totalYearlySickDays' is the running total *including* this month.
-                    const paidSickDaysThisYear = Math.min(totalYearlySickDays, SICK_LEAVE_QUOTA_DAYS);
-                    const unpaidSickDaysThisYear = totalYearlySickDays - paidSickDaysThisYear;
-
-                    // Find how many of *this month's* justified days were unpaid
-                    const paidSickDaysBeforeThisMonth = paidSickDaysThisYear - stats.totalJustifiedSickLeaveCount;
-                    const remainingPaidQuota = SICK_LEAVE_QUOTA_DAYS - paidSickDaysBeforeThisMonth;
-                    
-                    let unpaidJustifiedDaysThisMonth = 0;
-                    if (remainingPaidQuota < stats.totalJustifiedSickLeaveCount) {
-                        unpaidJustifiedDaysThisMonth = stats.totalJustifiedSickLeaveCount - remainingPaidQuota;
-                    }
-
-                    // 3. Add unpaid sick leave (both justified-over-quota and unjustified)
-                    daysToDeduct += unpaidJustifiedDaysThisMonth;
-                    
-                    // 4. Final deduction calculation
-                    autoDeductions = dailyRate * daysToDeduct;
+                    // --- UPDATED: Get the final deduction count from the calculator ---
+                    autoDeductions = dailyRate * stats.daysToDeduct;
 
                 } // End Monthly Pay Logic
 
@@ -245,7 +187,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const otherEarnings = otherEarningsList.reduce((sum, item) => sum + item.amount, 0);
                 const otherDeductions = otherDeductionsList.reduce((sum, item) => sum + item.amount, 0);
                 
-                // --- REFACTORED: Get bonus from our calculator ---
+                // --- UPDATED: Get bonus info directly from calculator ---
                 const attendanceBonus = isLastMonth ? 0 : stats.bonusAmount;
                 const bonusInfo = { newStreak: isLastMonth ? staff.bonusStreak : stats.newStreak };
 
@@ -267,8 +209,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     displayName: displayName, 
                     payType: currentJob.position, 
                     totalEarnings, totalDeductions, netPay, 
-                    bonusInfo: bonusInfo, // Contains the newStreak
-                    earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: otherEarningsList }, 
+                    bonusInfo: bonusInfo,
+                    earnings: { basePay, attendanceBonus: attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: otherEarningsList }, 
                     deductions: { absences: autoDeductions, unpaidAbsences: unpaidAbsences, totalAbsenceHours: stats.totalAbsencesCount * 8, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: otherDeductionsList }
                 };
             });
@@ -276,9 +218,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         } catch (err) { setError('Failed to generate payroll. Check browser console (F12) for details.'); console.error(err);
         } finally { setIsLoading(false); }
     };
-
-    // ... (The rest of the hook is unchanged) ...
-    // ... (useEffect, handleFinalizePayroll, handleSelectOne, handleSelectAll, totalSelectedNetPay) ...
     
     useEffect(() => {
         if (payrollData.length > 0) {
