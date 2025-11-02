@@ -1,7 +1,8 @@
-// src/components/LeaveRequestForm.jsx
+// src/components/LeaveManagement/LeaveRequestForm.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { addDoc, collection, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import * as dateUtils from '../../utils/dateUtils'; // Use new standard
+import { AlertTriangle } from 'lucide-react'; // --- NEW: Import icon
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -22,6 +23,32 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     const [error, setError] = useState('');
 
     const isManagerCreating = userRole === 'manager' && !existingRequest;
+    
+    // --- NEW: Calculate current year's sick leave usage ---
+    const yearlySickLeaveUsage = useMemo(() => {
+        if (userRole !== 'staff' && !isManagerCreating) return { used: 0, quota: 30 };
+
+        const staffIdToCheck = isManagerCreating ? selectedStaffId : user.uid;
+        if (!staffIdToCheck) return { used: 0, quota: 30 };
+        
+        const currentYear = dateUtils.getYear(new Date());
+        let daysUsed = 0;
+
+        existingRequests.forEach(req => {
+            // Check if it's for the correct staff, is an approved sick leave, and started this year
+            if (
+                req.staffId === staffIdToCheck &&
+                req.leaveType === 'Sick Leave' &&
+                req.status === 'approved' &&
+                dateUtils.getYear(dateUtils.parseISODateString(req.startDate)) === currentYear
+            ) {
+                daysUsed += req.totalDays;
+            }
+        });
+
+        return { used: daysUsed, quota: 30 }; // Assuming 30-day quota
+
+    }, [existingRequests, user.uid, userRole, isManagerCreating, selectedStaffId]);
 
     useEffect(() => {
         if (existingRequest) {
@@ -49,6 +76,9 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     }, [startDate, endDate]);
 
     const totalDays = dateUtils.differenceInCalendarDays(endDate, startDate);
+    
+    // --- NEW: Calculate quota warning ---
+    const daysOverQuota = (yearlySickLeaveUsage.used + totalDays) - yearlySickLeaveUsage.quota;
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -77,6 +107,13 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     setError(`You only have ${leaveBalances.annual} annual leave days available.`);
                     return;
                 }
+            }
+        }
+        
+        // --- UPDATED: Allow submission even if over quota, but confirm if needed ---
+        if (userRole === 'staff' && leaveType === 'Sick Leave' && daysOverQuota > 0) {
+            if (!window.confirm(`This request will exceed your 30-day paid sick leave quota. The ${daysOverQuota} days over the limit will be unpaid. Do you still want to submit?`)) {
+                return; // Stop submission
             }
         }
 
@@ -186,6 +223,27 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                     </div>
                 )}
             </div>
+
+            {/* --- NEW: Sick Leave Warning Block --- */}
+            {(userRole === 'staff' || (isManagerCreating && selectedStaffId)) && leaveType === 'Sick Leave' && (
+                <div className="p-3 bg-gray-700/50 rounded-lg border border-gray-600">
+                    <p className="text-sm text-gray-300">
+                        Paid Sick Leave Taken (This Year): 
+                        <span className="font-bold text-white ml-2">{yearlySickLeaveUsage.used} / {yearlySickLeaveUsage.quota} days</span>
+                    </p>
+                    {daysOverQuota > 0 && (
+                        <div className="mt-2 flex items-start gap-2 p-2 bg-yellow-900/50 border border-yellow-700 rounded-md">
+                            <AlertTriangle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-xs text-yellow-300">
+                                This request will exceed your 30-day paid quota. 
+                                <span className="font-bold"> The {daysOverQuota} day(s) over the limit will be unpaid.</span>
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+            {/* --- END: Sick Leave Warning Block --- */}
+
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
