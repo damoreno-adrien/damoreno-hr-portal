@@ -66,6 +66,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
         while (current <= end) {
             const dateStr = current.toISODate();
             if (dateStr >= startOfMonth && dateStr <= endOfMonth) {
+                // --- UPDATED: Store the full leave object ---
                 leaveMap.set(dateStr, data);
             }
             current = current.plus({ days: 1 });
@@ -77,13 +78,14 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
     let totalScheduledMillis = 0;
     let totalLateMinutes = 0;
     let totalLatesCount = 0;
-    let totalAbsencesCount = 0;
+    let totalUnexcusedAbsenceCount = 0; // --- UPDATED: Renamed
+    let totalUnjustifiedSickLeaveCount = 0; // --- NEW: For bonus disqualification
+    let totalJustifiedSickLeaveCount = 0; // --- NEW: For 30-day quota check
     let totalEarlyDepartureMinutes = 0;
     let workedDays = 0;
 
     let loopDay = DateTime.fromISO(startOfMonth, { zone: THAILAND_TIMEZONE });
     
-    // Use 'endOfLoop' for stats, but 'endOfMonth' for scheduled hours
     const loopUntil = (payPeriod.year === now.year && payPeriod.month === now.month) ? endOfLoop : DateTime.fromISO(endOfMonth, { zone: THAILAND_TIMEZONE });
 
     while (loopDay <= loopUntil) {
@@ -146,18 +148,44 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
                 totalLatesCount++;
             }
             if (status === 'Absent' && loopDay.toISODate() < today) {
-                totalAbsencesCount++;
+                totalUnexcusedAbsenceCount++; // --- UPDATED: Renamed
+            }
+            
+            // --- NEW: Check for Sick Leave infractions ---
+            if (status === 'Leave' && leave.leaveType === 'Sick Leave') {
+                if (leave.mcReceived === true) {
+                    // They provided a certificate
+                    totalJustifiedSickLeaveCount++;
+                } else {
+                    // mcReceived is false or undefined
+                    totalUnjustifiedSickLeaveCount++;
+                }
             }
         }
         loopDay = loopDay.plus({ days: 1 });
     }
 
     // --- 4. Check Bonus Qualification ---
-    const { allowedAbsences, allowedLates, maxLateMinutesAllowed } = companyConfig.attendanceBonus || { allowedAbsences: 0, allowedLates: 1, maxLateMinutesAllowed: 30 };
-    const isAbsenceOver = totalAbsencesCount > allowedAbsences;
+    // --- UPDATED: Use the settings from the screenshot ---
+    const { 
+        allowedAbsences = 0, 
+        allowedLates = 3, 
+        maxLateMinutesAllowed = 30 
+    } = companyConfig.attendanceBonus || {};
+
+    const isAbsenceOver = totalUnexcusedAbsenceCount > allowedAbsences;
     const isLateCountOver = totalLatesCount > allowedLates;
     const isLateTimeOver = totalLateMinutes > maxLateMinutesAllowed;
-    const didQualify = !(isAbsenceOver || isLateCountOver || isLateTimeOver);
+    // --- NEW: Check for unjustified sick leave ---
+    const isUnjustifiedLeaveOver = totalUnjustifiedSickLeaveCount > 0;
+
+    // --- UPDATED: Add the new check to the disqualifiers ---
+    const didQualify = !(
+        isAbsenceOver || 
+        isLateCountOver || 
+        isLateTimeOver || 
+        isUnjustifiedLeaveOver
+    );
 
     // --- 5. Calculate Streak and Bonus Amount ---
     const currentStreak = staff.bonusStreak || 0;
@@ -166,12 +194,13 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
 
     if (didQualify) {
         newStreak = currentStreak + 1;
+        // --- UPDATED: Use the tiered amounts from the screenshot ---
         if (newStreak === 1) {
-            bonusAmount = companyConfig.attendanceBonus.month1 || 0;
+            bonusAmount = companyConfig.attendanceBonus.month1 || 400;
         } else if (newStreak === 2) {
-            bonusAmount = companyConfig.attendanceBonus.month2 || 0;
+            bonusAmount = companyConfig.attendanceBonus.month2 || 800;
         } else {
-            bonusAmount = companyConfig.attendanceBonus.month3 || 0;
+            bonusAmount = companyConfig.attendanceBonus.month3 || 1200;
         }
     } else {
         newStreak = 0; // Streak is lost
@@ -183,10 +212,13 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
         totalActualMillis,
         totalScheduledMillis,
         workedDays,
-        totalAbsencesCount,
+        totalAbsencesCount: totalUnexcusedAbsenceCount, // --- UPDATED: Pass back the correct count
         totalLatesCount,
         totalLateMinutes,
         totalEarlyDepartureMinutes,
+        // --- NEW: Pass back leave counts ---
+        totalJustifiedSickLeaveCount,
+        totalUnjustifiedSickLeaveCount,
         // Bonus Info
         didQualifyForBonus: didQualify,
         bonusAmount,
