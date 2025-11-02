@@ -64,7 +64,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
         autoTable(doc, {
             body: [
-                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, details.name],
+                // --- THIS IS FIX #1 ---
+                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, details.staffName || 'Unknown Staff'],
                 [{ content: 'Company:', styles: { fontStyle: 'bold' } }, companyConfig?.companyName || ''],
                 [{ content: 'Address:', styles: { fontStyle: 'bold' } }, companyConfig?.companyAddress || ''],
                 [{ content: 'Tax ID:', styles: { fontStyle: 'bold' } }, companyConfig?.companyTaxId || ''],
@@ -104,7 +105,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
         doc.text("Net Pay:", 14, doc.lastAutoTable.finalY + 10);
         doc.text(`${formatCurrency(details.netPay)} THB`, 196, doc.lastAutoTable.finalY + 10, { align: 'right' });
         
-        doc.save(`payslip_${details.name.replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
+        // --- THIS IS FIX #2 ---
+        doc.save(`payslip_${(details.staffName || 'Unknown_Staff').replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
     };
 
     return (
