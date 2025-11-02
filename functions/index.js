@@ -5,7 +5,8 @@ admin.initializeApp();
 const { createUserHandler } = require('./src/auth/createUser');
 const { setStaffAuthStatusHandler } = require('./src/auth/setStaffAuthStatus');
 const { setStaffPasswordHandler } = require('./src/auth/setStaffPassword');
-const { autoCheckoutHandler } = require('./src/attendance/autoCheckout');
+const { createMissingCheckoutAlerts } = require('./src/attendance/autoCheckout'); 
+const { autoFixSingleShift } = require('./src/attendance/autoFixSingleShift'); 
 const { calculateAdvanceEligibilityHandler } = require('./src/financials/calculateAdvanceEligibility');
 const { calculateLivePayEstimateHandler } = require('./src/financials/calculateLivePayEstimate');
 const { calculateBonusHandler } = require('./src/payroll/calculateBonus');
@@ -20,11 +21,13 @@ const { exportAttendanceDataHandler } = require('./src/attendance/exportAttendan
 const { importAttendanceDataHandler } = require('./src/attendance/importAttendanceData');
 const { cleanupBadAttendanceIdsHandler } = require('./src/attendance/cleanupBadAttendanceIds');
 
+
 // --- Directly export the handlers defined with v2 syntax ---
 exports.createUser = createUserHandler;
 exports.setStaffAuthStatus = setStaffAuthStatusHandler;
 exports.setStaffPassword = setStaffPasswordHandler;
-exports.autoCheckout = autoCheckoutHandler;
+exports.createMissingCheckoutAlerts = createMissingCheckoutAlerts;
+exports.autoFixSingleShift = autoFixSingleShift;
 exports.calculateAdvanceEligibility = calculateAdvanceEligibilityHandler;
 exports.calculateLivePayEstimate = calculateLivePayEstimateHandler;
 exports.calculateBonus = calculateBonusHandler;
