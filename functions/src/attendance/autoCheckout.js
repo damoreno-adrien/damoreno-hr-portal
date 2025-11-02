@@ -20,7 +20,8 @@ const db = getFirestore();
 // Define the target timezone
 const timeZone = "Asia/Bangkok"; // IANA timezone string for Luxon
 
-exports.createMissingCheckoutAlerts = onSchedule({ // <-- Renamed export for clarity
+// This export name comes from your index.js file
+exports.createMissingCheckoutAlerts = onSchedule({ 
     region: "asia-southeast1",
     schedule: "every day 05:00",
     timeZone: timeZone,
@@ -36,33 +37,44 @@ exports.createMissingCheckoutAlerts = onSchedule({ // <-- Renamed export for cla
         // --- Luxon Date Handling ---
         const scheduledTimeUtc = DateTime.fromISO(event.time, { zone: 'utc' });
         const scheduledTimeZoned = scheduledTimeUtc.setZone(timeZone);
-        const yesterdayZoned = scheduledTimeZoned.minus({ days: 1 }).startOf('day');
-        const yesterdayStr = yesterdayZoned.toISODate(); // e.g., "2025-10-24"
+        // --- UPDATED: We now get TODAY's date, not yesterday's ---
+        const todayStr = scheduledTimeZoned.toISODate(); // e.g., "2025-11-02"
         // --- End Luxon Date Handling ---
 
-        console.log(`Checking for incomplete records for date: ${yesterdayStr} (Timezone: ${timeZone})`);
+        console.log(`Checking for all incomplete records before ${todayStr} (Timezone: ${timeZone})`);
 
+        // --- UPDATED QUERY ---
+        // Instead of filtering by date, we just find all records missing a checkout.
+        // This is a collection scan, but is fine for this purpose and requires no new index.
         const attendanceQuery = db.collection("attendance")
-            .where("date", "==", yesterdayStr)
             .where("checkInTime", "!=", null)
             .where("checkOutTime", "==", null);
 
         const incompleteRecordsSnap = await attendanceQuery.get();
 
         if (incompleteRecordsSnap.empty) {
-            console.log(`No incomplete records found for ${yesterdayStr}. Exiting.`);
+            console.log(`No incomplete records found. Exiting.`);
             return null;
         }
 
-        console.log(`Found ${incompleteRecordsSnap.size} incomplete records for ${yesterdayStr}. Creating alerts...`);
+        console.log(`Found ${incompleteRecordsSnap.size} total incomplete records. Filtering and creating alerts...`);
 
         const batch = db.batch();
+        let alertsCreated = 0;
 
         incompleteRecordsSnap.forEach(doc => {
             const attendanceData = doc.data();
             
+            // --- NEW: Server-side filter ---
+            // Skip any records for "today" (e.g., if the function runs at 5 AM
+            // and someone already checked in but not out).
+            if (attendanceData.date === todayStr) {
+                return; // Skip this record
+            }
+            // --- END NEW FILTER ---
+
             // We will use the attendance doc ID as the alert ID.
-            // This is "idempotent" - it ensures we can't create duplicate alerts for the same shift.
+            // This is "idempotent" - it ensures we can't create duplicate alerts.
             const alertRef = db.collection("manager_alerts").doc(doc.id);
 
             // Create a new alert document
@@ -75,10 +87,15 @@ exports.createMissingCheckoutAlerts = onSchedule({ // <-- Renamed export for cla
                 checkInTime: attendanceData.checkInTime, // This is a Timestamp
                 createdAt: Timestamp.now(),
             });
+            alertsCreated++;
         });
 
-        await batch.commit();
-        console.log(`Successfully created ${incompleteRecordsSnap.size} alerts.`);
+        if (alertsCreated > 0) {
+            await batch.commit();
+            console.log(`Successfully created or updated ${alertsCreated} alerts.`);
+        } else {
+            console.log("No past incomplete records found.");
+        }
 
     } catch (error) {
         console.error("Error during createMissingCheckoutAlerts process:", error);
