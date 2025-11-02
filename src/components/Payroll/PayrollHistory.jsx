@@ -92,7 +92,7 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-700">
-                                            {run.payslips.sort((a,b) => a.name.localeCompare(b.name)).map(p => {
+                                            {run.payslips.sort((a,b) => (a.staffName || '').localeCompare(b.staffName || '')).map(p => {
                                                 const staffMember = staffList.find(s => s.id === p.staffId);
                                                 const displayName = staffMember ? `${staffMember.nickname || staffMember.firstName} (${getCurrentJob(staffMember).department || 'N/A'})` : p.name;
                                                 return (
