@@ -5,6 +5,7 @@ import { app } from "../../firebase"
 import * as dateUtils from '../utils/dateUtils';
 // --- NEW IMPORT ---
 import { calculateMonthlyStats } from '../utils/attendanceCalculator';
+import { DateTime } from 'luxon'; // --- NEW: Import Luxon
 
 // --- REMOVED calculateBonus function ---
 const functionsAsia = getFunctions(app, "asia-southeast1");
@@ -61,6 +62,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const endDateStr = dateUtils.formatISODate(endOfMonth);
             const daysInMonth = dateUtils.getDaysInMonth(payPeriodDate);
 
+            // --- NEW: Define sick leave quota ---
+            const SICK_LEAVE_QUOTA_DAYS = 30;
+            const startOfYear = DateTime.fromObject({ year: payPeriod.year, day: 1 }).toISODate();
+            const endOfPayPeriod = endDateStr; // We only care about days up to this month
+
             // ... (Fetch Finalized Data is unchanged) ...
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
@@ -93,12 +99,21 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 advancesSnapshot,
                 loansSnapshot,
                 adjustmentsSnapshot,
-                // --- NEW: Run the calculator for all staff ---
+                // --- NEW: Fetch all sick leave for the year ---
+                yearlySickLeaveSnapshot,
                 allStaffStats
             ] = await Promise.all([
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
+                // --- NEW ---
+                getDocs(query(
+                    collection(db, "leave_requests"),
+                    where("status", "==", "approved"),
+                    where("leaveType", "==", "Sick Leave"),
+                    where("startDate", ">=", startOfYear),
+                    where("startDate", "<=", endOfPayPeriod)
+                )),
                 // --- This replaces attendance, schedule, leave, and bonus fetches ---
                 Promise.all(staffToProcess.map(staff => 
                     calculateMonthlyStats(db, staff, payPeriod, companyConfig)
@@ -110,7 +125,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const advancesData = advancesSnapshot.docs.map(doc => doc.data());
             const loansData = loansSnapshot.docs.map(doc => doc.data());
             const adjustmentsData = adjustmentsSnapshot.docs.map(doc => doc.data());
-            // --- NEW: Create the stats map ---
+            // --- NEW: Create maps for sick leave and stats ---
+            const yearlySickLeaveData = yearlySickLeaveSnapshot.docs.map(doc => doc.data());
             const statsMap = new Map(allStaffStats.map(res => [res.staffId, res]));
             const publicHolidays = companyConfig.publicHolidays.map(h => h.date);
 
@@ -129,15 +145,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 let basePay = 0;
                 let autoDeductions = 0;
                 let leavePayout = null;
-                let totalAbsenceHours = stats.totalAbsencesCount * 8; // Estimate, or refine
                 
                 // --- Unpaid Absences (Simplified) ---
-                // We just use the count from our calculator.
-                // You can make this more complex by passing absence dates back
-                // from the calculator if needed.
                 const unpaidAbsences = [{ 
-                    date: `${stats.totalAbsencesCount} day(s)`, 
-                    hours: totalAbsenceHours 
+                    date: `${stats.totalAbsencesCount} unexcused day(s)`, 
+                    hours: stats.totalAbsencesCount * 8 // Estimate
                 }];
 
 
@@ -152,8 +164,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                     if (isLastMonth) {
                         // ... (Leave Payout logic is unchanged) ...
-                        // (This logic should also probably move into the calculator,
-                        // but we can leave it for now)
                         const daysWorked = dateUtils.differenceInCalendarDays(dateUtils.formatISODate(staffEndDate), startDateStr);
                         basePay = dailyRate * daysWorked;
                         
@@ -193,8 +203,40 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         basePay = fullMonthSalary; 
                     }
                     
-                    // --- REFACTORED: Absence deduction ---
-                    autoDeductions = dailyRate * stats.totalAbsencesCount;
+                    // --- UPDATED: Absence deduction logic ---
+                    
+                    // 1. Start with unexcused absences
+                    let daysToDeduct = stats.totalAbsencesCount;
+
+                    // 2. Calculate paid vs. unpaid sick leave
+                    const staffYearlySickLeave = yearlySickLeaveData
+                        .filter(l => l.staffId === staff.id && l.mcReceived === true);
+                    
+                    let totalYearlySickDays = 0;
+                    staffYearlySickLeave.forEach(l => {
+                        totalYearlySickDays += l.totalDays;
+                    });
+
+                    // 'totalJustifiedSickLeaveCount' is just for THIS month.
+                    // 'totalYearlySickDays' is the running total *including* this month.
+                    const paidSickDaysThisYear = Math.min(totalYearlySickDays, SICK_LEAVE_QUOTA_DAYS);
+                    const unpaidSickDaysThisYear = totalYearlySickDays - paidSickDaysThisYear;
+
+                    // Find how many of *this month's* justified days were unpaid
+                    const paidSickDaysBeforeThisMonth = paidSickDaysThisYear - stats.totalJustifiedSickLeaveCount;
+                    const remainingPaidQuota = SICK_LEAVE_QUOTA_DAYS - paidSickDaysBeforeThisMonth;
+                    
+                    let unpaidJustifiedDaysThisMonth = 0;
+                    if (remainingPaidQuota < stats.totalJustifiedSickLeaveCount) {
+                        unpaidJustifiedDaysThisMonth = stats.totalJustifiedSickLeaveCount - remainingPaidQuota;
+                    }
+
+                    // 3. Add unpaid sick leave (both justified-over-quota and unjustified)
+                    daysToDeduct += stats.totalUnjustifiedSickLeaveCount;
+                    daysToDeduct += unpaidJustifiedDaysThisMonth;
+                    
+                    // 4. Final deduction calculation
+                    autoDeductions = dailyRate * daysToDeduct;
 
                 } // End Monthly Pay Logic
 
@@ -228,7 +270,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     totalEarnings, totalDeductions, netPay, 
                     bonusInfo: bonusInfo, // Contains the newStreak
                     earnings: { basePay, attendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: otherEarningsList }, 
-                    deductions: { absences: autoDeductions, unpaidAbsences: unpaidAbsences, totalAbsenceHours: totalAbsenceHours, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: otherDeductionsList }
+                    deductions: { absences: autoDeductions, unpaidAbsences: unpaidAbsences, totalAbsenceHours: stats.totalAbsencesCount * 8, sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, others: otherDeductionsList }
                 };
             });
             setPayrollData(data);
