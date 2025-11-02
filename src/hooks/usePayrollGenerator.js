@@ -79,7 +79,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                                        dateUtils.getYear(staffEndDate) === payPeriod.year &&
                                        dateUtils.getMonth(staffEndDate) === payPeriod.month;
                 const isEligibleForPeriod = isCurrentlyActive || leftThisPeriod;
-                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod && isEligEbleForPeriod;
+                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod && isEligibleForPeriod;
             });
 
             if (staffToProcess.length === 0 && staffList.length > 0 && finalizedStaffIds.size === staffList.filter(s => s.status !== 'inactive').length) {
