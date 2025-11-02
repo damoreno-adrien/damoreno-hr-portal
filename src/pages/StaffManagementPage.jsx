@@ -2,16 +2,48 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
-import AddStaffForm from '../components/StaffProfile/AddStaffForm.jsx';
-import StaffProfileModal from '../components/StaffProfile/StaffProfileModal.jsx';
-import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx'; // <-- Import the new modal
-import { Plus, Download, Upload } from 'lucide-react';
-import * as dateUtils from '../utils/dateUtils'; // Use new standard
-import { app } from "../../firebase.js"; // Ensure app is imported for functions
+import AddStaffForm from '../components/StaffProfile/AddStaffForm';
+import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
+import ImportConfirmationModal from '../components/common/ImportConfirmationModal';
+import { Plus, Download, Upload } from 'lucide-react'; // Replaced custom icons
+import * as dateUtils from '../utils/dateUtils';
+import { app } from "../../firebase.js";
+
+// --- NEW: Currency Formatter ---
+const formatCurrency = (num) => {
+    if (typeof num !== 'number') {
+        num = 0;
+    }
+    return new Intl.NumberFormat('en-US', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+    }).format(num);
+};
+
+// --- NEW: Seniority Calculator ---
+const getSeniority = (startDateInput) => {
+    const startDate = dateUtils.fromFirestore(startDateInput);
+    if (!startDate) return 'Invalid date';
+
+    const today = new Date();
+    // Use differenceInCalendarMonths for a more intuitive "X years, Y months"
+    const totalMonths = dateUtils.differenceInCalendarMonths(today, startDate);
+
+    if (totalMonths < 0) return 'Starts in future';
+    if (totalMonths === 0) return 'New this month';
+
+    const years = Math.floor(totalMonths / 12);
+    const months = totalMonths % 12;
+
+    let parts = [];
+    if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`);
+    if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`);
+    
+    return parts.length > 0 ? parts.join(', ') : 'Less than a month';
+};
 
 // StatusBadge component
 const StatusBadge = ({ status }) => {
-    // Determine status text and classes
     let statusText = 'Active';
     let statusClasses = "bg-green-500/20 text-green-300";
 
@@ -19,12 +51,10 @@ const StatusBadge = ({ status }) => {
         statusText = 'Inactive';
         statusClasses = "bg-red-500/20 text-red-300";
     } else if (status === null || status === undefined) {
-        // Explicitly handle null/undefined as Active
         statusText = 'Active';
         statusClasses = "bg-green-500/20 text-green-300";
     } else if (status !== 'active') {
-         // Fallback for unexpected status values
-         statusText = status; // Display the raw status if unknown
+         statusText = status;
          statusClasses = "bg-gray-500/20 text-gray-300";
     }
 
@@ -41,40 +71,34 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const [selectedStaff, setSelectedStaff] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
-
-    // --- State for Import ---
-    const [isImporting, setIsImporting] = useState(false); // Used for initial file read/analysis
+    const [isImporting, setIsImporting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [isConfirmingImport, setIsConfirmingImport] = useState(false); // Used for final confirmation step
-    const [importResult, setImportResult] = useState(null); // { message: string, errors: string[], password?: string } - For FINAL result
-    const [analysisResult, setAnalysisResult] = useState(null); // Stores result from dry run
-    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false); // Controls confirmation modal
-    const [csvDataToConfirm, setCsvDataToConfirm] = useState(null); // Stores CSV data between steps
-    const fileInputRef = useRef(null); // Ref for hidden file input
+    const [isConfirmingImport, setIsConfirmingImport] = useState(false);
+    const [importResult, setImportResult] = useState(null);
+    const [analysisResult, setAnalysisResult] = useState(null);
+    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+    const [csvDataToConfirm, setCsvDataToConfirm] = useState(null);
+    const fileInputRef = useRef(null);
 
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
 
-    // Helper to get display name
     const getDisplayName = (staff) => {
-        if (!staff) return 'Unknown'; // Added safety check
+        if (!staff) return 'Unknown';
         if (staff.nickname) return staff.nickname;
         if (staff.firstName) return `${staff.firstName} ${staff.lastName}`;
-        return staff.fullName || 'Unknown'; // Added fallback
+        return staff.fullName || 'Unknown';
     };
 
-    // Helper to get current job (using safe access to Firestore Timestamps)
     const getCurrentJob = (staff) => {
         if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-            return { position: 'N/A', department: 'Unassigned' };
+            return { position: 'N/A', department: 'Unassigned', rate: 0 }; // --- Added rate
         }
-        // Ensure sorting is robust even if startDate is missing or not a Timestamp briefly
         return [...staff.jobHistory].sort((a, b) => {
-             // Safe access to seconds for comparison, default to 0 if not a Timestamp
              const timeA = a.startDate?.seconds ? a.startDate.toMillis() : 0;
              const timeB = b.startDate?.seconds ? b.startDate.toMillis() : 0;
-             return timeB - timeA; // Descending order
-        })[0] || { position: 'N/A', department: 'Unassigned' }; // Add fallback for safety
+             return timeB - timeA;
+        })[0] || { position: 'N/A', department: 'Unassigned', rate: 0 }; // --- Added rate
     };
 
 
@@ -82,20 +106,15 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         const normalizedQuery = searchQuery.toLowerCase().trim();
 
         const filteredList = staffList.filter(staff => {
-            // --- Filter 1: Archive Status ---
             const isArchived = staff.status === 'inactive';
-            // If "Show Archived" is NOT checked AND the staff is archived, filter them out.
+            // This filter correctly handles the "Show Archived" toggle
             if (!showArchived && isArchived) {
                 return false;
             }
-
-            // --- Filter 2: Search Query ---
             if (normalizedQuery) {
                 const name = getDisplayName(staff).toLowerCase();
                 const nickname = (staff.nickname || '').toLowerCase();
                 const position = getCurrentJob(staff).position.toLowerCase();
-
-                // If the query doesn't match name, nickname, OR position, filter them out.
                 if (
                     !name.includes(normalizedQuery) &&
                     !nickname.includes(normalizedQuery) &&
@@ -104,12 +123,9 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     return false;
                 }
             }
-
-            // If it passes all filters, include it
             return true;
         });
 
-        // --- Grouping (This logic remains the same) ---
         const grouped = filteredList.reduce((acc, staff) => {
             const department = getCurrentJob(staff).department || 'Unassigned';
             if (!acc[department]) {
@@ -119,35 +135,22 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             return acc;
         }, {});
 
-        // --- Sorting (This logic remains the same) ---
         Object.keys(grouped).forEach(dept => {
             grouped[dept].sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
         });
 
-        // --- Archived Departments (This logic remains the same) ---
-        if (showArchived) {
-            staffList.forEach(staff => {
-                if (staff.status === 'inactive') {
-                    // ... (this block is unchanged) ...
-                }
-            });
-        }
-
         return grouped;
-    }, [staffList, showArchived, searchQuery]); // <-- CRITICAL: Add searchQuery here
+    }, [staffList, showArchived, searchQuery]);
 
     const sortedDepartments = useMemo(() => Object.keys(groupedStaff).sort(), [groupedStaff]);
 
     useEffect(() => {
-        // Update selected staff details if the main list changes while modal is open
         if (selectedStaff) {
             const updatedStaff = staffList.find(staff => staff.id === selectedStaff.id);
-            setSelectedStaff(updatedStaff || null); // Close modal if staff no longer exists
+            setSelectedStaff(updatedStaff || null);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [staffList, selectedStaff]); // Rerun when staffList or selectedStaff changes
+    }, [staffList, selectedStaff]);
 
-    // --- Export Handler ---
     const handleExport = async () => {
         setIsExporting(true);
         try {
@@ -159,9 +162,8 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
             if (!csvData) {
                 alert("No staff data to export.");
-                return; // Exit early
+                return;
             }
-
             const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
@@ -169,22 +171,19 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             link.setAttribute("download", filename);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
-            link.click(); // Trigger download
-            document.body.removeChild(link); // Clean up link element
-            URL.revokeObjectURL(url); // Clean up blob URL
-
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         } catch (error) {
             console.error("Error exporting data:", error);
-            alert(`Failed to export staff data: ${error.message}`); // Show more specific error
+            alert(`Failed to export staff data: ${error.message}`);
         } finally {
             setIsExporting(false);
         }
     };
 
-    // --- Import Handlers ---
     const handleImportClick = () => {
         if (fileInputRef.current) {
-            // Clear previous results before opening file dialog
             setImportResult(null);
             setAnalysisResult(null);
             setCsvDataToConfirm(null);
@@ -192,18 +191,15 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         }
     };
 
-    // Step 1: Read file and perform DRY RUN analysis
     const handleFileSelected = (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
-        event.target.value = ''; // Reset file input
+        event.target.value = '';
 
-        // ... (file type check remains the same) ...
          if (!file.name.toLowerCase().endsWith('.csv') || file.type !== 'text/csv') {
             alert("Invalid file type. Please upload a CSV file (.csv).");
             return;
         }
-
 
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -212,51 +208,31 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 alert("Could not read file content.");
                 return;
             }
-
-            setIsImporting(true); // Indicate analysis is running
+            setIsImporting(true);
             setAnalysisResult(null);
-            setImportResult(null); // Clear previous final results
-            console.log("Import Step 1: Calling importStaffData with confirm: false (Dry Run)..."); // <-- ADD LOG
-
+            setImportResult(null);
             try {
                 const functions = getFunctions();
                 const importStaffData = httpsCallable(functions, 'importStaffData');
-                // *** Call with confirm: false for dry run ***
                 const result = await importStaffData({ csvData, confirm: false });
-
-                // *** ADD LOGS TO INSPECT RESPONSE ***
-                console.log("Import Step 1: Received response from dry run:", result);
-                console.log("Import Step 1: Checking result.data:", result.data);
-                console.log("Import Step 1: Checking result.data.analysis:", result.data?.analysis);
-                // *** END ADDED LOGS ***
-
-                // Check specifically for the 'analysis' key in the response data
                 if (result.data && result.data.analysis) {
-                    console.log("Import Step 1: Analysis data found. Opening confirmation modal."); // <-- ADD LOG
-                    setAnalysisResult(result.data.analysis); // Store analysis result
-                    setCsvDataToConfirm(csvData); // Store CSV data for confirmation step
-                    setIsConfirmModalOpen(true); // Open confirmation modal
+                    setAnalysisResult(result.data.analysis);
+                    setCsvDataToConfirm(csvData);
+                    setIsConfirmModalOpen(true);
                 } else {
-                     // Handle cases where analysis might fail or return unexpected structure
-                     console.error("Import Step 1: Analysis data MISSING in response. Setting final result.", result.data); // <-- ADD LOG
                      setImportResult({
-                         message: result.data?.result || "Analysis failed or returned no data.", // Use optional chaining
-                         errors: result.data?.errors || ["Unknown analysis error."] // Use optional chaining
+                         message: result.data?.result || "Analysis failed or returned no data.",
+                         errors: result.data?.errors || ["Unknown analysis error."]
                      });
                 }
-
             } catch (error) {
-                console.error("Import Step 1: Error during import analysis call:", error); // <-- ENHANCED LOG
-                 // Try to get more specific error details
                  const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
                 setImportResult({
                     message: `Import analysis failed: ${error.message}`,
-                    // Ensure errors is always an array
                     errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
                 });
             } finally {
-                setIsImporting(false); // Analysis finished
-                 console.log("Import Step 1: Analysis phase finished."); // <-- ADD LOG
+                setIsImporting(false);
             }
         };
         reader.onerror = () => {
@@ -266,31 +242,23 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         reader.readAsText(file);
     };
 
-    // Step 2: Handle confirmation from the modal
     const handleConfirmImport = async () => {
         if (!csvDataToConfirm) {
             alert("No CSV data to confirm.");
             return;
         }
-
-        setIsConfirmingImport(true); // Indicate confirmation is running
-        setIsConfirmModalOpen(false); // Close the confirmation modal
-        setImportResult(null); // Clear previous final results
-
+        setIsConfirmingImport(true);
+        setIsConfirmModalOpen(false);
+        setImportResult(null);
         try {
             const functions = getFunctions();
             const importStaffData = httpsCallable(functions, 'importStaffData');
-            // *** Call with confirm: true to execute ***
             const result = await importStaffData({ csvData: csvDataToConfirm, confirm: true });
-
-            // Store the FINAL result to display
             setImportResult({
                 message: result.data.result,
                 errors: result.data.errors || [],
                 password: result.data.defaultPassword || null
             });
-             // No need to manually refresh staffList, Firestore listener should handle it
-
         } catch (error) {
             console.error("Error confirming import call:", error);
             const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
@@ -299,22 +267,18 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
             });
         } finally {
-            setIsConfirmingImport(false); // Confirmation finished
-            setCsvDataToConfirm(null); // Clear stored CSV data
-            setAnalysisResult(null); // Clear analysis data
+            setIsConfirmingImport(false);
+            setCsvDataToConfirm(null);
+            setAnalysisResult(null);
         }
     };
 
-    // Handler for Cancel button in confirmation modal
     const handleCancelImport = () => {
         setIsConfirmModalOpen(false);
         setAnalysisResult(null);
         setCsvDataToConfirm(null);
-        // Optionally clear the file input ref again, though it should be clear already
         if (fileInputRef.current) fileInputRef.current.value = '';
     }
-    // --- END: Import Handlers ---
-
 
     return (
         <div>
@@ -333,17 +297,16 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
              {/* Import Confirmation Modal */}
              <ImportConfirmationModal
                 isOpen={isConfirmModalOpen}
-                onClose={handleCancelImport} // Use cancel handler
+                onClose={handleCancelImport}
                 analysisResult={analysisResult}
-                onConfirm={handleConfirmImport} // Use confirm handler
-                isConfirming={isConfirmingImport} // Pass confirming state
+                onConfirm={handleConfirmImport}
+                isConfirming={isConfirmingImport}
             />
-
 
             {/* Header and Action Buttons */}
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
-                <div className="flex flex-wrap items-center gap-4 justify-start md:justify-end"> {/* Control alignment */}
+                <div className="flex flex-wrap items-center gap-4 justify-start md:justify-end">
                     <div className="flex-grow w-full md:w-auto md:flex-grow-0">
                         <input
                             type="text"
@@ -363,28 +326,23 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
-                    {/* Export Button */}
                     <button onClick={handleExport} disabled={isExporting || isImporting || isConfirmingImport} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                         <Download className="h-5 w-5 mr-2" />
                         {isExporting ? 'Exporting...' : 'Export CSV'}
                     </button>
-                    {/* Import Button */}
                     <button onClick={handleImportClick} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                         <Upload className="h-5 w-5 mr-2" />
-                         {/* Show correct loading state */}
                         {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
                     </button>
-                    {/* Invite Button */}
                     <button onClick={() => setIsAddModalOpen(true)} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                         <Plus className="h-5 w-5 mr-2" />
                         Invite Staff
                     </button>
-                    {/* Hidden File Input */}
                      <input
                         type="file"
                         ref={fileInputRef}
                         onChange={handleFileSelected}
-                        accept=".csv, text/csv" // Be more specific with accept types
+                        accept=".csv, text/csv"
                         style={{ display: 'none' }}
                     />
                 </div>
@@ -419,7 +377,9 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Display Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Position</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Bonus Streak</th>
+                            {/* --- NEW: Salary Column --- */}
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">Salary (THB)</th>
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">Bonus Streak</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Start Date</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
                         </tr>
@@ -427,36 +387,49 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     {sortedDepartments.length === 0 && (
                          <tbody>
                             <tr>
-                                <td colSpan="5" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td>
+                                {/* --- UPDATED: colSpan to 6 --- */}
+                                <td colSpan="6" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td>
                             </tr>
                          </tbody>
                     )}
                     {sortedDepartments.map(department => (
                         <React.Fragment key={department}>
                             <tbody className="divide-y divide-gray-700">
-                                <tr className="bg-gray-900 sticky top-0 z-10"> {/* Make header sticky */}
-                                    <th colSpan="5" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
-                                        {department} ({groupedStaff[department].length}) {/* Show count */}
+                                <tr className="bg-gray-900 sticky top-0 z-10">
+                                    {/* --- UPDATED: colSpan to 6 --- */}
+                                    <th colSpan="6" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
+                                        {department} ({groupedStaff[department].length})
                                     </th>
                                 </tr>
-                                {groupedStaff[department].map(staff => (
-                                    <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{getCurrentJob(staff).position}</td>
-                                        
-                                        {/* --- Add this new cell --- */}
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">
-                                            {staff.bonusStreak || 0}
-                                        </td>
-                                        {/* --- End new cell --- */}
+                                {groupedStaff[department].map(staff => {
+                                    const currentJob = getCurrentJob(staff);
+                                    const startDate = staff.startDate?.seconds ? staff.startDate.toDate() : staff.startDate;
 
-                                        {/* Use safe access to convert Timestamp back to Date for formatting */}
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(staff.startDate?.seconds ? staff.startDate.toDate() : staff.startDate)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                            <StatusBadge status={staff.status} />
-                                        </td>
-                                    </tr>
-                                ))}
+                                    return (
+                                        <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{currentJob.position}</td>
+                                            
+                                            {/* --- NEW: Salary Cell --- */}
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(currentJob.rate)}</td>
+                                            
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">
+                                                {staff.bonusStreak || 0}
+                                            </td>
+
+                                            {/* --- UPDATED: Start Date Cell with Tooltip --- */}
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                                <span className="cursor-help" title={getSeniority(startDate)}>
+                                                    {dateUtils.formatDisplayDate(startDate)}
+                                                </span>
+                                            </td>
+
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                <StatusBadge status={staff.status} />
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </React.Fragment>
                     ))}
