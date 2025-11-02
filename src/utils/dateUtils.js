@@ -310,3 +310,12 @@ export const endOfYear = (date) => {
   if (!dateObj) return null;
   return dfnsEndOfYear(dateObj);
 };
+
+export const differenceInCalendarMonths = (dateLeft, dateRight) => {
+  const d1 = fromFirestore(dateLeft);
+  const d2 = fromFirestore(dateRight);
+  if (!d1 || !d2) return 0;
+
+  // Calculate total months
+  return (d1.getFullYear() - d2.getFullYear()) * 12 + (d1.getMonth() - d2.getMonth());
+};
