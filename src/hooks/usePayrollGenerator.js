@@ -232,7 +232,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     }
 
                     // 3. Add unpaid sick leave (both justified-over-quota and unjustified)
-                    daysToDeduct += stats.totalUnjustifiedSickLeaveCount;
                     daysToDeduct += unpaidJustifiedDaysThisMonth;
                     
                     // 4. Final deduction calculation
