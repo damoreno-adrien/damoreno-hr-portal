@@ -4,6 +4,8 @@ import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
 import { ChevronUp, ChevronDown } from 'lucide-react';
+// --- NEW: Import ManagerAlerts and the EditAttendanceModal ---
+import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -66,6 +68,9 @@ export default function AttendancePage({ db, staffList }) {
     const [editingRecord, setEditingRecord] = useState(null);
     const [showArchived, setShowArchived] = useState(false); // NEW state
 
+    // --- NEW: State for the manual fix modal ---
+    const [alertToFix, setAlertToFix] = useState(null); // Will hold the alert data
+
     useEffect(() => {
         if (!db) return;
         const todayStr = dateUtils.formatISODate(new Date()); // Use dateUtils
@@ -105,6 +110,25 @@ export default function AttendancePage({ db, staffList }) {
         };
         setEditingRecord(recordForModal);
     };
+
+    // --- NEW: Handlers for the manual fix modal ---
+    const handleOpenManualFix = (alert) => {
+        const recordForModal = {
+            id: alert.attendanceDocId,
+            staffName: alert.staffName,
+            date: alert.date,
+            fullRecord: { 
+                checkInTime: alert.checkInTime.toDate()
+            },
+            alertId: alert.id
+        };
+        setAlertToFix(recordForModal);
+    };
+
+    const handleCloseManualFix = () => {
+        setAlertToFix(null);
+    };
+    // --- END NEW HANDLERS ---
 
     // NEW: Memoized list of staff to display
     const staffToDisplay = useMemo(() => {
@@ -184,6 +208,18 @@ export default function AttendancePage({ db, staffList }) {
                     <EditAttendanceModal db={db} record={editingRecord} onClose={() => setEditingRecord(null)} />
                 </Modal>
             )}
+
+            {/* --- NEW: Manual Fix Modal for Alerts --- */}
+            {alertToFix && (
+                <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
+                    <EditAttendanceModal
+                        db={db}
+                        record={alertToFix}
+                        onClose={handleCloseManualFix}
+                    />
+                </Modal>
+            )}
+
             <div className="flex justify-between items-center mb-8">
                 <div className="flex items-center space-x-4">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
@@ -194,6 +230,12 @@ export default function AttendancePage({ db, staffList }) {
                 </div>
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
+
+            {/* --- NEW: Manager Alerts Section --- */}
+            <div className="mb-8">
+                <ManagerAlerts onManualFix={handleOpenManualFix} />
+            </div>
+
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />
             </div>

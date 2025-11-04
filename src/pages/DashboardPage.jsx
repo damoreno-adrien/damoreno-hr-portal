@@ -8,9 +8,7 @@ import { DailySummary } from '../components/Dashboard/DailySummary';
 import * as dateUtils from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
-import Modal from '../components/common/Modal';
-import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
-import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
+// --- REMOVED ManagerAlerts and its related Modals ---
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -19,21 +17,19 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
     const [todaysAttendance, setTodaysAttendance] = useState(null);
 
-    const [todaysSchedule, setTodaysSchedule] = useState(null); // Will be 'null' (loading), 'undefined' (off), or {object} (shift)
+    const [todaysSchedule, setTodaysSchedule] = useState(null);
     const [tomorrowsSchedule, setTomorrowsSchedule] = useState(null);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
-    const [upcomingLeave, setUpcomingLeave] = useState(null); // For the next upcoming leave
+    const [upcomingLeave, setUpcomingLeave] = useState(null);
     
-    // --- NEW: State for the manual fix modal ---
-    const [alertToFix, setAlertToFix] = useState(null); // Will hold the alert data
+    // --- REMOVED alertToFix state ---
 
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
 
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
     const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
 
-    // --- NEW: Get user role from the user object (assuming it's there from useAuth) ---
-    const userRole = user?.role;
+    // --- REMOVED userRole variable (no longer needed here) ---
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
@@ -43,32 +39,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
 
-    // --- NEW: Handlers for the manual fix modal ---
-    
-    /**
-     * Prepares the data for the EditAttendanceModal.
-     * The modal expects a specific 'record' object format.
-     * We also add the 'alertId' so the modal can delete the alert on save.
-     */
-    const handleOpenManualFix = (alert) => {
-        const recordForModal = {
-            id: alert.attendanceDocId, // The ID of the attendance doc
-            staffName: alert.staffName,
-            date: alert.date,
-            // Pre-fill the modal with the known check-in time
-            fullRecord: { 
-                checkInTime: alert.checkInTime.toDate() // convert Firestore Timestamp to JS Date
-            },
-            alertId: alert.id // Pass the alert ID for deletion on save
-        };
-        setAlertToFix(recordForModal);
-    };
-
-    const handleCloseManualFix = () => {
-        setAlertToFix(null);
-    };
-    // --- END NEW HANDLERS ---
-
+    // --- REMOVED handleOpenManualFix and handleCloseManualFix functions ---
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -95,26 +66,21 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => unsubscribe();
     }, [db, user]);
     
-    // --- UPDATED: Fetch today's AND tomorrow's schedule ---
+    // (The rest of the useEffect hooks are unchanged)
     useEffect(() => {
         if (!db || !user) return;
-        
         const todayStr = dateUtils.formatISODate(new Date());
         const tomorrowStr = dateUtils.formatISODate(dateUtils.addDays(new Date(), 1));
-
-        setTodaysSchedule(null); // Set to loading
-        setTomorrowsSchedule(null); // Set to loading
-        
+        setTodaysSchedule(null);
+        setTomorrowsSchedule(null);
         const q = query(
             collection(db, 'schedules'),
             where('staffId', '==', user.uid),
             where('date', 'in', [todayStr, tomorrowStr])
         );
-
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             let foundToday = false;
             let foundTomorrow = false;
-
             querySnapshot.forEach(doc => {
                 const data = doc.data();
                 if (data.date === todayStr) {
@@ -125,54 +91,43 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     foundTomorrow = true;
                 }
             });
-
-            // If no doc was found, it means it's a day off
             if (!foundToday) setTodaysSchedule(undefined); 
             if (!foundTomorrow) setTomorrowsSchedule(undefined);
-
         }, (error) => { 
             console.error("Error fetching today's/tomorrow's schedule:", error);
-            setTodaysSchedule(undefined); // Set to Day Off on error
+            setTodaysSchedule(undefined);
             setTomorrowsSchedule(undefined);
         });
-
         return () => unsubscribe(); 
-
     }, [db, user]); 
 
-    // --- UPDATED: Fetch upcoming leave ---
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = dateUtils.formatISODate(new Date()); 
-        
         const q = query(
             collection(db, 'leave_requests'), 
             where('staffId', '==', user.uid), 
             where('status', '==', 'approved'), 
-            where('startDate', '>=', todayStr), // Only get future leave
-            orderBy('startDate', 'asc'), // Get the *next* one
+            where('startDate', '>=', todayStr),
+            orderBy('startDate', 'asc'),
             limit(1)
         );
-        
         getDocs(q).then(snapshot => {
             if (!snapshot.empty) {
                 const firstLeave = snapshot.docs[0].data();
                 setUpcomingLeave(firstLeave);
-                // Check if this upcoming leave starts today
                 if (firstLeave.startDate === todayStr) {
                     setIsOnLeaveToday(true);
                 } else {
                     setIsOnLeaveToday(false);
                 }
             } else {
-                // No future leave found
                 setUpcomingLeave(null);
                 setIsOnLeaveToday(false);
             }
         });
     }, [db, user]);
     
-    // Geofence check
     useEffect(() => {
         if (!companyConfig?.geofence) {
             setLocationError("Geofence settings are not configured.");
@@ -289,26 +244,12 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
     return (
         <div>
-            {/* --- NEW: Manual Fix Modal --- */}
-            {alertToFix && (
-                <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
-                    <EditAttendanceModal
-                        db={db}
-                        record={alertToFix}
-                        onClose={handleCloseManualFix}
-                    />
-                </Modal>
-            )}
+            {/* --- REMOVED Manual Fix Modal --- */}
 
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday to you! We wish you all the best! 🎂</div>}
             {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p><p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(getDisplayName).join(', ')}!</p></div>}
 
-            {/* --- NEW: Manager Alerts Section --- */}
-            {userRole === 'manager' && (
-                <div className="mb-8">
-                    <ManagerAlerts onManualFix={handleOpenManualFix} />
-                </div>
-            )}
+            {/* --- REMOVED Manager Alerts Section --- */}
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -359,7 +300,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Days available for the rest of the year.</p>
                         
-                        {/* --- NEW: Upcoming Leave Section --- */}
                         {upcomingLeave && (
                             <div className="mt-4 border-t border-gray-700 pt-3">
                                 <p className="text-xs text-gray-400 mb-1">Your next approved leave:</p>
