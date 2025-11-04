@@ -5,13 +5,7 @@ import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
-// import * as dateUtils from '../utils/dateUtils';
-import { 
-    fromFirestore, 
-    differenceInCalendarMonths, 
-    formatISODate, 
-    formatDisplayDate 
-} from '../utils/dateUtils';
+import * as dateUtils from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 // --- REMOVED ManagerAlerts and its related Modals ---
@@ -39,8 +33,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
-        const birthDateStr = formatCustom(birthdate, 'MM-dd');
-        const todayStr = formatCustom(new Date(), 'MM-dd');
+        const birthDateStr = dateUtils.formatCustom(birthdate, 'MM-dd');
+        const todayStr = dateUtils.formatCustom(new Date(), 'MM-dd');
         return birthDateStr === todayStr;
     }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
@@ -52,7 +46,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => clearInterval(timer);
     }, []);
 
-    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${formatISODate(new Date())}`);
+    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${dateUtils.formatISODate(new Date())}`);
 
     useEffect(() => {
         if (!db || !user) return;
@@ -75,8 +69,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     // (The rest of the useEffect hooks are unchanged)
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = formatISODate(new Date());
-        const tomorrowStr = formatISODate(addDays(new Date(), 1));
+        const todayStr = dateUtils.formatISODate(new Date());
+        const tomorrowStr = dateUtils.formatISODate(dateUtils.addDays(new Date(), 1));
         setTodaysSchedule(null);
         setTomorrowsSchedule(null);
         const q = query(
@@ -109,7 +103,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = formatISODate(new Date()); 
+        const todayStr = dateUtils.formatISODate(new Date()); 
         const q = query(
             collection(db, 'leave_requests'), 
             where('staffId', '==', user.uid), 
@@ -177,7 +171,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     };
     
     const handleCheckIn = async () => {
-        const localDateString = formatISODate(new Date());
+        const localDateString = dateUtils.formatISODate(new Date());
         await setDoc(getDocRef(), { 
             staffId: user.uid, 
             staffName: user.displayName || user.email, 
@@ -228,14 +222,14 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     </div>
                 );
             case 'on-break': {
-                const breakStartTime = fromFirestore(todaysAttendance?.breakStart);
+                const breakStartTime = dateUtils.fromFirestore(todaysAttendance?.breakStart);
                 const minutesOnBreak = breakStartTime ? (currentTime - breakStartTime) / 60000 : 0;
                 const canEndBreak = minutesOnBreak >= 50;
                 const remainingBreakMinutes = Math.max(0, 60 - minutesOnBreak);
                 return (
                     <div>
                         <div className="text-center mb-4 space-y-1">
-                            {breakStartTime && <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{formatCustom(breakStartTime, 'HH:mm')}</span></p>}
+                            {breakStartTime && <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{dateUtils.formatCustom(breakStartTime, 'HH:mm')}</span></p>}
                             <p className="text-lg font-bold text-yellow-300">{Math.floor(remainingBreakMinutes)} minutes remaining</p>
                         </div>
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence || !canEndBreak} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>
@@ -262,8 +256,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 <div className="lg:col-span-2">
                     <DashboardCard title="Time Clock" className="p-2 sm:p-6">
                         <div className="text-center mb-6">
-                            <p className="text-base sm:text-lg text-gray-300">{formatCustom(currentTime, 'EEEE, dd MMMM')}</p>
-                            <p className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold tracking-tight sm:tracking-widest mt-1">{formatCustom(currentTime, 'HH:mm:ss')}</p>
+                            <p className="text-base sm:text-lg text-gray-300">{dateUtils.formatCustom(currentTime, 'EEEE, dd MMMM')}</p>
+                            <p className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold tracking-tight sm:tracking-widest mt-1">{dateUtils.formatCustom(currentTime, 'HH:mm:ss')}</p>
                         </div>
                         <div className="mt-6 px-2 sm:px-0">{renderButtons()}</div>
                         <DailySummary todaysAttendance={todaysAttendance} />

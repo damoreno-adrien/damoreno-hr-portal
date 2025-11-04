@@ -6,7 +6,13 @@ import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal';
 import { Plus, Download, Upload } from 'lucide-react'; // Replaced custom icons
-import * as dateUtils from '../utils/dateUtils';
+// import * as dateUtils from '../utils/dateUtils';
+import { 
+    fromFirestore, 
+    differenceInCalendarMonths, 
+    formatISODate, 
+    formatDisplayDate 
+} from '../utils/dateUtils';
 import { app } from "../../firebase.js";
 
 // --- NEW: Currency Formatter ---
@@ -22,12 +28,12 @@ const formatCurrency = (num) => {
 
 // --- NEW: Seniority Calculator ---
 const getSeniority = (startDateInput) => {
-    const startDate = dateUtils.fromFirestore(startDateInput);
+    const startDate = fromFirestore(startDateInput);
     if (!startDate) return 'Invalid date';
 
     const today = new Date();
     // Use differenceInCalendarMonths for a more intuitive "X years, Y months"
-    const totalMonths = dateUtils.differenceInCalendarMonths(today, startDate);
+    const totalMonths = differenceInCalendarMonths(today, startDate);
 
     if (totalMonths < 0) return 'Starts in future';
     if (totalMonths === 0) return 'New this month';
@@ -158,7 +164,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             const exportStaffData = httpsCallable(functions, 'exportStaffData');
             const result = await exportStaffData();
             const csvData = result.data.csvData;
-            const filename = result.data.filename || `staff_export_${dateUtils.formatISODate(new Date())}_fallback.csv`;
+            const filename = result.data.filename || `staff_export_${formatISODate(new Date())}_fallback.csv`;
 
             if (!csvData) {
                 alert("No staff data to export.");
@@ -420,7 +426,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                             {/* --- UPDATED: Start Date Cell with Tooltip --- */}
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                                 <span className="cursor-help" title={getSeniority(startDate)}>
-                                                    {dateUtils.formatDisplayDate(startDate)}
+                                                    {formatDisplayDate(startDate)}
                                                 </span>
                                             </td>
 
