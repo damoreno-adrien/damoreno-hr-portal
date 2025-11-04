@@ -3,7 +3,8 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../../../firebase"; // Ensure firebase.js exports db and app
 import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { AlertTriangle, Clock, Loader2, CheckCircle } from 'lucide-react';
-import * as dateUtils from '../../utils/dateUtils'; // Assuming you have this
+// --- FIX 1: Import the correct function by name ---
+import { formatDisplayTime } from '../../utils/dateUtils';
 
 // Get the callable function reference
 const autoFixShiftFunc = httpsCallable(getFunctions(app, "asia-southeast1"), 'autoFixSingleShift');
@@ -17,8 +18,9 @@ const AlertItem = ({ alert, onManualFix }) => {
     const [success, setSuccess] = useState(null);
 
     const checkInTime = alert.checkInTime?.toDate();
+    // --- FIX 2: Use the correct function name ---
     const formattedCheckIn = checkInTime 
-        ? dateUtils.formatTime(checkInTime) 
+        ? formatDisplayTime(checkInTime) // Was dateUtils.formatTime
         : 'Unknown';
 
     const handleAutoFix = async () => {
