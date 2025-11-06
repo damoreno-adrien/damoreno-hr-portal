@@ -133,6 +133,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
             id: rawAttendance?.id || `${staffId}_${dateString}`,
             staffName: staffName,
             date: dateString,
+            staffId: staffId,
             fullRecord: rawAttendance ? {
                 ...rawAttendance,
                 checkInTime: rawAttendance.checkInTime?.toDate(),
