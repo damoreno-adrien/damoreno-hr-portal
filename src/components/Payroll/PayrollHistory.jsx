@@ -5,9 +5,11 @@ import usePayrollHistory from '../../hooks/usePayrollHistory';
 import { Trash2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils.js'; // Use new standard
 
-// *** INITIALIZE FUNCTIONS FOR ASIA REGION ***
-const functionsDefault = getFunctions(app, "us-central1");
-const deletePayrollRun = httpsCallable(functionsDefault, 'deletePayrollRun');
+// *** FIX 1: Point to the correct region ***
+const functions = getFunctions(app, "asia-southeast1"); 
+
+// *** FIX 2: Use the correct exported function name ***
+const deletePayrollRun = httpsCallable(functions, 'deletePayrollRunHandler');
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
@@ -40,7 +42,7 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
 
         setIsDeleting(run.id);
         try {
-            // Use the correctly initialized callable function
+            // This call will now work correctly
             const result = await deletePayrollRun({ payPeriod: { year: run.year, month: run.month } });
             alert(result.data.result);
             // The hook should automatically update the history list via the listener
