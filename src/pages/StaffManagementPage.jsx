@@ -304,9 +304,9 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
              <ImportConfirmationModal
                 isOpen={isConfirmModalOpen}
                 onClose={handleCancelImport}
-                analysisResult={analysisResult}
+                analysis={analysisResult}
                 onConfirm={handleConfirmImport}
-                isConfirming={isConfirmingImport}
+                isLoading={isConfirmingImport}
             />
 
             {/* Header and Action Buttons */}
