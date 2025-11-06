@@ -1,5 +1,12 @@
 const { HttpsError, https } = require("firebase-functions/v2");
 const { getFirestore } = require('firebase-admin/firestore');
+const admin = require('firebase-admin'); // <-- 1. IMPORT ADMIN SDK
+
+// 2. INITIALIZE THE APP
+// This safely initializes the app only if it's not already running
+if (admin.apps.length === 0) {
+    admin.initializeApp();
+}
 
 const db = getFirestore();
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
