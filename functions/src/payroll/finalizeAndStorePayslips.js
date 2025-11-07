@@ -1,7 +1,13 @@
 const { HttpsError, https } = require("firebase-functions/v2");
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
-const db = getFirestore();
+const admin = require('firebase-admin');
+
+if (admin.apps.length === 0) {
+    admin.initializeApp();
+}
+
+const db = getFirestore(); // <-- 3. THIS CALL IS NOW SAFE
 
 exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast1" }, async (request) => { // Updated region
     // 1. Input Validation & Authentication

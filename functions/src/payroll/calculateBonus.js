@@ -2,6 +2,13 @@ const { HttpsError, https } = require("firebase-functions/v2");
 const { onCall } = require("firebase-functions/v2/https"); // Import onCall
 const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https"); // Import HttpsError for onCall
 const { getFirestore } = require('firebase-admin/firestore');
+const admin = require('firebase-admin'); // <-- 1. IMPORT ADMIN
+
+// 2. ADD INITIALIZATION BLOCK
+// This safely initializes the app only if it's not already running
+if (admin.apps.length === 0) {
+    admin.initializeApp();
+}
 
 // *** Use Luxon for Timezone Handling ***
 console.log("calculateBonus: Attempting to require luxon...");
