@@ -9,7 +9,7 @@ import * as dateUtils from '../../utils/dateUtils.js'; // Use new standard
 const functions = getFunctions(app, "asia-southeast1"); 
 
 // *** FIX 2: Use the correct exported function name ***
-const deletePayrollRun = httpsCallable(functions, 'deletePayrollRunHandler');
+const deletePayrollRun = httpsCallable(functions, 'deletePayrollRun');
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
