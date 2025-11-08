@@ -9,7 +9,6 @@ import { calculateMonthlyStats } from '../utils/attendanceCalculator';
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips');
 
-// ... (getCurrentJob function is unchanged) ...
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
         return { rate: 0, payType: 'Monthly', department: 'N/A' };
@@ -67,6 +66,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
+            // --- FIX 1 (Bug 1): Correctly filter staff who were active *during* the pay period ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
                 const staffStartDate = dateUtils.fromFirestore(staff.startDate);
@@ -74,48 +74,70 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 if (!staffStartDate) return false;
                 const hasStarted = staffStartDate <= endOfMonth;
                 const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startOfMonth;
-                const isCurrentlyActive = staff.status === undefined || staff.status === null || staff.status === 'active';
-                const leftThisPeriod = staffEndDate &&
-                                       dateUtils.getYear(staffEndDate) === payPeriod.year &&
-                                       dateUtils.getMonth(staffEndDate) === payPeriod.month;
-                const isEligibleForPeriod = isCurrentlyActive || leftThisPeriod;
-                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod && isEligibleForPeriod;
+                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod;
             });
-
-            if (staffToProcess.length === 0 && staffList.length > 0 && finalizedStaffIds.size === staffList.filter(s => s.status !== 'inactive').length) {
-                 setIsMonthFullyFinalized(true);
-                 setPayrollData([]);
-                 setIsLoading(false);
-                 return;
+            
+            // Check if month is fully finalized (using the same correct logic)
+            if (staffToProcess.length === 0 && staffList.length > 0) {
+                 const eligibleStaffIds = new Set(staffList
+                    .filter(s => {
+                        const staffStartDate = dateUtils.fromFirestore(s.startDate);
+                        const staffEndDate = dateUtils.fromFirestore(s.endDate);
+                        if (!staffStartDate) return false;
+                        const hasStarted = staffStartDate <= endOfMonth;
+                        const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startOfMonth;
+                        return hasStarted && wasEmployedDuringPeriod;
+                    })
+                    .map(s => s.id)
+                 );
+                 const allEligibleFinalized = [...eligibleStaffIds].every(id => finalizedStaffIds.has(id));
+                 if (allEligibleFinalized && eligibleStaffIds.size > 0) {
+                    setIsMonthFullyFinalized(true);
+                    setPayrollData([]);
+                    setIsLoading(false);
+                    return;
+                 }
              }
 
-            // --- REFACTORED: Prepare Data Fetching ---
+            // --- FIX 4 (Law): Get job info *before* calling the calculator ---
+            const staffWithJobs = staffToProcess.map(staff => {
+                return { ...staff, currentJob: getCurrentJob(staff) };
+            });
+
+            // ---
+            // --- THIS IS THE FIX FOR THE CRASH ---
+            // We fetch all data *first*.
+            // ---
             const [
                 advancesSnapshot,
                 loansSnapshot,
                 adjustmentsSnapshot,
-                // --- Call our "brain" for all staff ---
                 allStaffStats
             ] = await Promise.all([
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month), where("status", "==", "approved"))),
                 getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
-                Promise.all(staffToProcess.map(staff => 
-                    calculateMonthlyStats(db, staff, payPeriod, companyConfig) // --- THIS IS IT ---
+                
+                // Pass the full staff object AND their currentJob to the calculator
+                Promise.all(staffWithJobs.map(staff => 
+                    calculateMonthlyStats(db, staff, payPeriod, companyConfig, staff.currentJob)
                         .then(stats => ({ staffId: staff.id, ...stats }))
                 ))
             ]);
 
-            // --- REFACTORED: Process Data ---
+            // ---
+            // --- PROCESS DATA *AFTER* IT'S FETCHED ---
+            // ---
             const advancesData = advancesSnapshot.docs.map(doc => doc.data());
             const loansData = loansSnapshot.docs.map(doc => doc.data());
-            const adjustmentsData = adjustmentsSnapshot.docs.map(doc => doc.data());
+            const adjustmentsData = adjustmentsSnapshot.docs.map(doc => doc.data()); // <-- This is now safe
             const statsMap = new Map(allStaffStats.map(res => [res.staffId, res]));
             const publicHolidays = companyConfig.publicHolidays.map(h => h.date);
 
-            // --- REFACTORED: Calculate Payroll ---
-            const data = staffToProcess.map(staff => {
-                const currentJob = getCurrentJob(staff);
+
+            // --- CALCULATE PAYROLL (using all our fixes) ---
+            const data = staffWithJobs.map(staff => {
+                const currentJob = staff.currentJob;
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
                 
                 const stats = statsMap.get(staff.id);
@@ -142,7 +164,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     const dailyRate = fullMonthSalary / daysInMonth;
 
                     if (isLastMonth) {
-                        // ... (Leave Payout logic is unchanged) ...
+                        // ... (Leave Payout logic) ...
                         const daysWorked = dateUtils.differenceInCalendarDays(dateUtils.formatISODate(staffEndDate), startDateStr);
                         basePay = dailyRate * daysWorked;
                         const hireDate = dateUtils.fromFirestore(staff.startDate);
@@ -160,7 +182,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                              return holidayDate && holidayDate <= staffEndDate && dateUtils.getYear(holidayDate) === payPeriod.year;
                         });
                         const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-                        const staffLeaveTaken = []; // This is still a weak point, but we'll leave it
+                        const staffLeaveTaken = [];
                         let usedAnnual = 0, usedPublicHoliday = 0;
                         staffLeaveTaken.forEach(l => {
                             const leaveStartDate = dateUtils.parseISODateString(l.startDate);
@@ -176,10 +198,15 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         basePay = fullMonthSalary; 
                     }
                     
-                    // --- UPDATED: Get the final deduction count from the calculator ---
                     autoDeductions = dailyRate * stats.daysToDeduct;
 
-                } // End Monthly Pay Logic
+                // --- FIX 2 (Bug 2): Calculate hourly pay ---
+                } else if (currentJob.payType === 'Hourly') {
+                    // (stats.totalActualMillis already had the break logic fixed)
+                    const totalHoursWorked = (stats.totalActualMillis / (1000 * 60 * 60));
+                    basePay = totalHoursWorked * (currentJob.rate || 0);
+                    autoDeductions = 0; // Hourly staff are not "deducted" for absences
+                } 
 
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
                 const otherEarningsList = staffAdjustments.filter(a => a.type === 'Earning');
@@ -187,17 +214,29 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const otherEarnings = otherEarningsList.reduce((sum, item) => sum + item.amount, 0);
                 const otherDeductions = otherDeductionsList.reduce((sum, item) => sum + item.amount, 0);
                 
-                // --- UPDATED: Get bonus info directly from calculator ---
                 const attendanceBonus = isLastMonth ? 0 : stats.bonusAmount;
                 const bonusInfo = { newStreak: isLastMonth ? staff.bonusStreak : stats.newStreak };
 
                 const leavePayoutTotal = leavePayout ? leavePayout.total : 0;
+                
+                // --- FIX 3 (Law): SSO Calculation ---
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
                 const ssoCap = companyConfig.ssoCap || 750;
-                const ssoBase = currentJob.payType === 'Monthly' ? (currentJob.rate || 0) : basePay;
+                
+                // 1. Get all earnings that are subject to SSO
+                const preSsoEarnings = basePay + attendanceBonus + otherEarnings + leavePayoutTotal;
+
+                // 2. Apply the 1,650 THB legal minimum "floor"
+                const ssoBase = Math.max(1650, preSsoEarnings); 
+                
+                // 3. Calculate SSO, applying the 15,000 THB "ceiling" (750 THB)
                 const ssoDeduction = Math.min(ssoBase * ssoRate, ssoCap);
-                const ssoAllowance = ssoDeduction;
-                const totalEarnings = basePay + attendanceBonus + otherEarnings + ssoAllowance + leavePayoutTotal;
+                
+                const ssoAllowance = ssoDeduction; // Your logic: company pays this for them
+                
+                // --- Final Calculation ---
+                const totalEarnings = preSsoEarnings + ssoAllowance;
+                
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
@@ -219,6 +258,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         } finally { setIsLoading(false); }
     };
     
+    // ... (rest of the hook is unchanged) ...
     useEffect(() => {
         if (payrollData.length > 0) {
             setSelectedForPayroll(new Set(payrollData.map(p => p.id)));

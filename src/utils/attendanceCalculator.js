@@ -14,9 +14,10 @@ const DEFAULT_CHECKOUT_TIME = '23:00:00';
  * @param {object} staff - The *full* staff profile object (must include 'id' and 'bonusStreak').
  * @param {object} payPeriod - An object with { month, year } (1-based month).
  * @param {object} companyConfig - The full company config object.
+ * @param {object} currentJob - [NEW] The staff's current job object (must include 'payType').
  * @returns {object} - An object with all calculated stats and bonus info.
  */
-export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig) => {
+export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig, currentJob) => {
     const { month, year } = payPeriod;
     const userId = staff.id;
     const now = DateTime.now().setZone(THAILAND_TIMEZONE);
@@ -25,6 +26,9 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
     const startOfMonth = DateTime.fromObject({ year, month, day: 1 }, { zone: THAILAND_TIMEZONE }).toISODate();
     const endOfMonth = DateTime.fromObject({ year, month }, { zone: THAILAND_TIMEZONE }).endOf('month').toISODate();
     const endOfLoop = DateTime.min(now, DateTime.fromISO(endOfMonth, { zone: THAILAND_TIMEZONE }));
+
+    // --- NEW: Determine payType from the new argument ---
+    const payType = currentJob?.payType || 'Monthly'; // Default to 'Monthly' if something is wrong
 
     // --- NEW: Define quotas from settings ---
     const SICK_LEAVE_QUOTA_DAYS = companyConfig.leaveEntitlements?.sickDays || 30;
@@ -35,9 +39,8 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
     } = companyConfig.attendanceBonus || {};
 
     // --- 1. Fetch all data ---
-    // --- UPDATED: Fetch all yearly sick leave ---
     const startOfYear = DateTime.fromObject({ year, day: 1 }).toISODate();
-    const endOfPayPeriod = endOfMonth; // We need all leave up to this month's end
+    const endOfPayPeriod = endOfMonth;
 
     const attendanceQuery = query(
         collection(db, 'attendance'),
@@ -51,14 +54,14 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
         where('date', '>=', startOfMonth),
         where('date', '<=', endOfMonth)
     );
-    // This query now fetches ALL approved leave, which we'll process
     const leaveQuery = query(
         collection(db, 'leave_requests'),
         where('staffId', '==', userId),
         where('status', '==', 'approved'),
-        where('endDate', '>=', startOfYear) // Get all leave from start of year
+        where('endDate', '>=', startOfYear)
     );
 
+    // --- THIS BLOCK MUST COME FIRST ---
     const [attendanceSnap, schedulesSnap, leaveSnap] = await Promise.all([
         getDocs(attendanceQuery),
         getDocs(schedulesQuery),
@@ -66,20 +69,21 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
     ]);
 
     // --- 2. Process into maps ---
+    // --- THIS BLOCK NOW CORRECTLY COMES *AFTER* THE AWAIT ---
     const attendanceMap = new Map();
     attendanceSnap.forEach(doc => attendanceMap.set(doc.data().date, doc.data()));
+    
     const schedulesMap = new Map();
     schedulesSnap.forEach(doc => schedulesMap.set(doc.data().date, doc.data()));
 
-    const leaveMap = new Map(); // For this month's leave days
-    const thisMonthSickLeaves = []; // For this month's sick leave *requests*
-    const yearlySickLeaveRequests = []; // For *all* sick leave requests this year
+    const leaveMap = new Map();
+    const thisMonthSickLeaves = [];
+    const yearlySickLeaveRequests = [];
 
     leaveSnap.forEach(doc => {
         const data = doc.data();
-        if (data.startDate > endOfPayPeriod) return; // Skip future leave
+        if (data.startDate > endOfPayPeriod) return;
         
-        // Add to yearly sick leave list if applicable
         if (data.leaveType === 'Sick Leave' && data.startDate <= endOfPayPeriod) {
             yearlySickLeaveRequests.push(data);
         }
@@ -89,10 +93,8 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
         
         while (current <= end) {
             const dateStr = current.toISODate();
-            // Check if this day is in the current pay period
             if (dateStr >= startOfMonth && dateStr <= endOfMonth) {
                 leaveMap.set(dateStr, data);
-                // Add to this month's sick list (if not already added)
                 if (data.leaveType === 'Sick Leave' && !thisMonthSickLeaves.find(l => l.id === doc.id)) {
                     thisMonthSickLeaves.push({ id: doc.id, ...data });
                 }
@@ -114,11 +116,10 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
     const loopUntil = (payPeriod.year === now.year && payPeriod.month === now.month) ? endOfLoop : DateTime.fromISO(endOfMonth, { zone: THAILAND_TIMEZONE });
 
     while (loopDay <= loopUntil) {
-        // ... (This entire loop for calculating hours, lates, and absences is unchanged) ...
         const dateStr = loopDay.toISODate();
         const dateJS = loopDay.toJSDate();
         const attendance = attendanceMap.get(dateStr);
-        const schedule = schedulesMap.get(dateStr);
+        const schedule = schedulesMap.get(dateStr); // This line is now safe
         const leave = leaveMap.get(dateStr);
         const { status, minutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS);
 
@@ -135,7 +136,14 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
             }
             if (checkOut) {
                 let durationMs = checkOut.getTime() - checkIn.getTime();
-                durationMs -= DEFAULT_BREAK_MS;
+                
+                // --- 🐞 THIS IS THE FIX ---
+                // Only subtract the 1-hour break if the staff is 'Monthly' (full-time)
+                if (payType === 'Monthly') {
+                    durationMs -= DEFAULT_BREAK_MS;
+                }
+                // --- END FIX ---
+                
                 if (durationMs > 0) totalActualMillis += durationMs;
                 if (schedule && schedule.endTime) {
                     try {
@@ -153,7 +161,13 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
                 const start = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: THAILAND_TIMEZONE });
                 const end = DateTime.fromISO(`${schedule.date}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
                 let scheduledDurationMs = end.diff(start).as('milliseconds');
-                scheduledDurationMs -= DEFAULT_BREAK_MS;
+                
+                // --- 🐞 APPLY SAME FIX TO SCHEDULED DURATION ---
+                if (payType === 'Monthly') {
+                    scheduledDurationMs -= DEFAULT_BREAK_MS;
+                }
+                // --- END FIX ---
+
                 if (scheduledDurationMs > 0) totalScheduledMillis += scheduledDurationMs;
             } catch (e) { /* ignore */ }
         }
@@ -176,10 +190,9 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
 
     let daysToDeduct = totalUnexcusedAbsenceCount;
 
-    // Calculate total sick days used *before* this month
     let yearlySickDaysUsedBeforeThisMonth = 0;
     yearlySickLeaveRequests.forEach(leave => {
-        if (leave.startDate < startOfMonth) { // Only count days from *before* this period
+        if (leave.startDate < startOfMonth) {
              let current = DateTime.fromISO(leave.startDate, { zone: THAILAND_TIMEZONE });
              const end = DateTime.min(DateTime.fromISO(leave.endDate, { zone: THAILAND_TIMEZONE }), DateTime.fromISO(startOfMonth, { zone: THAILAND_TIMEZONE }).minus({days: 1}));
              while (current <= end) {
@@ -189,22 +202,17 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
         }
     });
 
-    // Now check this month's sick leaves against the quota
     let runningYearlySickDayCount = yearlySickDaysUsedBeforeThisMonth;
-
-    // Sort this month's sick leaves to process them chronologically
     thisMonthSickLeaves.sort((a, b) => a.startDate.localeCompare(b.startDate));
 
     for (const leave of thisMonthSickLeaves) {
         const isJustified = leave.mcReceived === true;
         const isLongLeave = leave.totalDays >= 3;
 
-        // Loop through each day of the leave
         for (let i = 0; i < leave.totalDays; i++) {
-            runningYearlySickDayCount++; // This is the 1st, 2nd... 30th, 31st day of the year
+            runningYearlySickDayCount++;
             const isOverQuota = runningYearlySickDayCount > SICK_LEAVE_QUOTA_DAYS;
 
-            // Apply your rules
             if (isOverQuota) {
                 isBonusDisqualified = true;
                 daysToDeduct += 1;
@@ -213,11 +221,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig)
                 daysToDeduct += 1;
             } else if (!isJustified && !isLongLeave) {
                 isBonusDisqualified = true;
-                // No deduction
             }
-            // else (Justified and Within Quota)
-            // - No bonus disqualification
-            // - No deduction
         }
     }
     
