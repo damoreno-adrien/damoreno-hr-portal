@@ -31,7 +31,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
         if (companyConfig?.companyLogoUrl) {
             try {
-                const response = await fetch(companyConfig.companyLogoUrl);
+                // This 'fetch' will now work after you update CORS
+                const response = await fetch(companyConfig.companyLogoUrl); 
                 const blob = await response.blob();
                 const reader = new FileReader();
                 const base64Image = await new Promise((resolve, reject) => {
@@ -47,7 +48,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                 const pdfLogoWidth = 30; 
                 const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; 
                 
-                // --- MODIFIED: Moved logo to the top-right corner ---
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const rightMargin = 14;
                 doc.addImage(base64Image, 'PNG', pageWidth - pdfLogoWidth - rightMargin, 10, pdfLogoWidth, pdfLogoHeight);
@@ -64,8 +64,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
         autoTable(doc, {
             body: [
-                // --- THIS IS FIX #1 ---
-                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, details.staffName || 'Unknown Staff'],
+                // --- 🐞 THIS IS THE FIX for "Unknown Staff" ---
+                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, details.name || 'Unknown Staff'],
                 [{ content: 'Company:', styles: { fontStyle: 'bold' } }, companyConfig?.companyName || ''],
                 [{ content: 'Address:', styles: { fontStyle: 'bold' } }, companyConfig?.companyAddress || ''],
                 [{ content: 'Tax ID:', styles: { fontStyle: 'bold' } }, companyConfig?.companyTaxId || ''],
@@ -105,10 +105,11 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
         doc.text("Net Pay:", 14, doc.lastAutoTable.finalY + 10);
         doc.text(`${formatCurrency(details.netPay)} THB`, 196, doc.lastAutoTable.finalY + 10, { align: 'right' });
         
-        // --- THIS IS FIX #2 ---
-        doc.save(`payslip_${(details.staffName || 'Unknown_Staff').replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
+        // --- 🐞 THIS IS THE FIX for "Unknown_Staff" filename ---
+        doc.save(`payslip_${(details.name || 'Unknown_Staff').replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
     };
 
+    // ... (rest of the component is unchanged) ...
     return (
         <div className="text-white">
             <div className="grid grid-cols-2 gap-8 mb-6">
@@ -163,7 +164,6 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                             {showAbsenceTooltip && (
                                 <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
                                     <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
-                                    {/* --- MODIFIED: Updated tooltip to show daily hours and format date --- */}
                                     <ul className="list-disc list-inside text-xs text-gray-300">
                                         {details.deductions.unpaidAbsences.map(abs => 
                                             <li key={abs.date}>

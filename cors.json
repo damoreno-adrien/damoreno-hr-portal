@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["https://damoreno-hr-portal.vercel.app"],
+    "origin": ["https://damoreno-hr-portal.vercel.app","http://localhost:5173"],
     "method": ["GET", "PUT", "POST", "DELETE"],
     "responseHeader": ["Content-Type"],
     "maxAgeSeconds": 3600
