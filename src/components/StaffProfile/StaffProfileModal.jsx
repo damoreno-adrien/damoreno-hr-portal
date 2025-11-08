@@ -22,6 +22,7 @@ const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
 // Helper to get initial form data, FORMATTING DATES for input
 const getInitialFormData = (staff) => {
+    // ... (this function is unchanged) ...
     const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
     const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
 
@@ -52,15 +53,23 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [error, setError] = useState('');
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
 
+    // --- NEW: State for the bonus eligibility toggle ---
+    // Default to 'true' if the field doesn't exist (for all your existing staff)
+    const [isBonusEligible, setIsBonusEligible] = useState(staff.isAttendanceBonusEligible ?? true);
+
+
     useEffect(() => {
         setFormData(getInitialFormData(staff));
         setBonusStreak(staff.bonusStreak || 0);
-        setActiveTab('details');
+        // --- NEW: Reset toggle state when staff changes ---
+        setIsBonusEligible(staff.isAttendanceBonusEligible ?? true);
+        // setActiveTab('details');
         setIsEditing(false);
         setError('');
     }, [staff]);
 
     const currentJob = (staff.jobHistory || []).sort((a, b) => {
+        // ... (this function is unchanged) ...
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
         return dateA - dateB;
@@ -71,6 +80,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
     // --- Action Handlers (Fully Expanded) ---
     const handleSaveDetails = async () => {
+        // ... (this function is unchanged) ...
         setIsSaving(true);
         setError('');
         try {
@@ -98,6 +108,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleAddNewJob = async (newJobData) => {
+        // ... (this function is unchanged) ...
         if (!dateUtils.parseISODateString(newJobData.startDate)) {
             alert("Invalid start date provided for new job role.");
             return;
@@ -117,6 +128,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleDeleteJob = async (jobToDelete) => {
+        // ... (this function is unchanged) ...
         const displayStartDate = dateUtils.formatDisplayDate(jobToDelete.startDate);
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}" started on ${displayStartDate}?`)) {
             setIsSaving(true); // Indicate activity
@@ -135,6 +147,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleDeleteStaff = async () => {
+        // ... (this function is unchanged) ...
         if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This will erase all their data and cannot be undone.`) && window.confirm("Final confirmation: Delete this staff member?")) {
             setIsSaving(true);
             setError('');
@@ -152,6 +165,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleArchiveStaff = async (newStatus) => {
+        // ... (this function is unchanged) ...
         setIsSaving(true);
         setError('');
         try {
@@ -189,6 +203,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleUploadFile = async (fileToUpload) => {
+        // ... (this function is unchanged) ...
         setIsSaving(true); setError('');
         try {
             const storage = getStorage();
@@ -207,6 +222,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleDeleteFile = async (fileToDelete) => {
+        // ... (this function is unchanged) ...
         if (!window.confirm(`Are you sure you want to delete "${fileToDelete.name}"?`)) return;
         setIsSaving(true); setError('');
         try {
@@ -224,6 +240,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleResetPassword = async (staffId) => {
+        // ... (this function is unchanged) ...
         const newPassword = window.prompt(`Enter a new temporary password for ${displayName} (minimum 6 characters):`);
         if (!newPassword) return;
         if (newPassword.length < 6) { alert("Password must be at least 6 characters long."); return; }
@@ -239,6 +256,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleSetBonusStreak = async () => {
+        // ... (this function is unchanged) ...
          const staffDocRef = doc(db, 'staff_profiles', staff.id);
          const streakValue = Number(bonusStreak);
          if (isNaN(streakValue) || streakValue < 0) {
@@ -257,6 +275,25 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             setIsSaving(false);
          }
      };
+
+    // --- NEW: Handler for the eligibility toggle ---
+    const handleToggleBonusEligibility = async (e) => {
+        const newValue = e.target.checked;
+        setIsBonusEligible(newValue); // Optimistic UI update
+        setIsSaving(true);
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            await updateDoc(staffDocRef, { isAttendanceBonusEligible: newValue });
+        } catch (err) {
+            alert("Failed to update bonus eligibility.");
+            setError("Failed to update bonus eligibility.");
+            console.error("Bonus Eligibility Error:", err);
+            setIsBonusEligible(!newValue); // Revert on error
+        } finally {
+            setIsSaving(false);
+        }
+    };
     // --- End Action Handlers ---
 
     const getTabClasses = (tabName) => {
@@ -291,6 +328,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
             {/* Conditional Rendering based on Tab */}
             {activeTab === 'details' && (
+                // ... (details tab unchanged) ...
                 <div className="space-y-6">
                     {isEditing ? (
                         <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} />
@@ -301,6 +339,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             )}
 
             {activeTab === 'job' && (
+                // ... (job tab unchanged) ...
                 <div className="space-y-6">
                      <JobHistoryManager
                         jobHistory={staff.jobHistory}
@@ -312,6 +351,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             )}
 
             {activeTab === 'documents' && (
+                // ... (documents tab unchanged) ...
                 <DocumentManager
                     documents={staff.documents}
                     onUploadFile={handleUploadFile}
@@ -325,22 +365,47 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                      {/* Bonus Management */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                            <h4 className="text-base font-semibold text-white">Bonus Management</h4>
-                           <p className="text-sm text-gray-400 mt-1">Manually set the attendance bonus streak.</p>
-                           <div className="mt-4 flex items-center space-x-4">
-                                <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
-                                <input
-                                    type="number"
-                                    value={bonusStreak}
-                                    onChange={(e) => setBonusStreak(e.target.value)}
-                                    className="w-24 bg-gray-700 rounded-md p-1 text-white"
-                                    min="0"
-                                />
-                                <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
-                            </div>
+                           <div className="mt-4 space-y-4">
+                                {/* Existing Streak Setter */}
+                                <div>
+                                    <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
+                                    <div className="mt-2 flex items-center space-x-4">
+                                        <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
+                                        <input
+                                            type="number"
+                                            value={bonusStreak}
+                                            onChange={(e) => setBonusStreak(e.target.value)}
+                                            className="w-24 bg-gray-700 rounded-md p-1 text-white"
+                                            min="0"
+                                        />
+                                        <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
+                                    </div>
+                                </div>
+                                
+                                {/* --- NEW: Bonus Eligibility Toggle --- */}
+                                <div className="border-t border-gray-700 mt-4 pt-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h5 className="font-medium text-white">Attendance Bonus</h5>
+                                            <p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            id="bonus-eligible-toggle"
+                                            role="switch"
+                                            checked={isBonusEligible}
+                                            onChange={handleToggleBonusEligibility}
+                                            disabled={isSaving}
+                                            className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"
+                                        />
+                                    </div>
+                                </div>
+                           </div>
                         </div>
 
                      {/* Action Buttons moved here */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
+                         {/* ... (staff actions unchanged) ... */}
                          <h4 className="text-base font-semibold text-white">Staff Actions</h4>
                          <div>
                             {isActive ? (

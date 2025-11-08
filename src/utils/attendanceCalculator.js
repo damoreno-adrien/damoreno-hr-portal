@@ -11,10 +11,10 @@ const DEFAULT_CHECKOUT_TIME = '23:00:00';
  * This is the SINGLE SOURCE OF TRUTH for both dashboard and payroll.
  *
  * @param {object} db - The Firestore instance.
- * @param {object} staff - The *full* staff profile object (must include 'id' and 'bonusStreak').
+ * @param {object} staff - The *full* staff profile object (must include 'id', 'bonusStreak', 'isAttendanceBonusEligible').
  * @param {object} payPeriod - An object with { month, year } (1-based month).
  * @param {object} companyConfig - The full company config object.
- * @param {object} currentJob - [NEW] The staff's current job object (must include 'payType').
+ * @param {object} currentJob - The staff's current job object (must include 'payType').
  * @returns {object} - An object with all calculated stats and bonus info.
  */
 export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig, currentJob) => {
@@ -27,10 +27,8 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     const endOfMonth = DateTime.fromObject({ year, month }, { zone: THAILAND_TIMEZONE }).endOf('month').toISODate();
     const endOfLoop = DateTime.min(now, DateTime.fromISO(endOfMonth, { zone: THAILAND_TIMEZONE }));
 
-    // --- NEW: Determine payType from the new argument ---
-    const payType = currentJob?.payType || 'Monthly'; // Default to 'Monthly' if something is wrong
+    const payType = currentJob?.payType || 'Monthly'; 
 
-    // --- NEW: Define quotas from settings ---
     const SICK_LEAVE_QUOTA_DAYS = companyConfig.leaveEntitlements?.sickDays || 30;
     const { 
         allowedLates = 3, 
@@ -61,7 +59,6 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         where('endDate', '>=', startOfYear)
     );
 
-    // --- THIS BLOCK MUST COME FIRST ---
     const [attendanceSnap, schedulesSnap, leaveSnap] = await Promise.all([
         getDocs(attendanceQuery),
         getDocs(schedulesQuery),
@@ -69,7 +66,6 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     ]);
 
     // --- 2. Process into maps ---
-    // --- THIS BLOCK NOW CORRECTLY COMES *AFTER* THE AWAIT ---
     const attendanceMap = new Map();
     attendanceSnap.forEach(doc => attendanceMap.set(doc.data().date, doc.data()));
     
@@ -119,7 +115,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         const dateStr = loopDay.toISODate();
         const dateJS = loopDay.toJSDate();
         const attendance = attendanceMap.get(dateStr);
-        const schedule = schedulesMap.get(dateStr); // This line is now safe
+        const schedule = schedulesMap.get(dateStr); 
         const leave = leaveMap.get(dateStr);
         const { status, minutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS);
 
@@ -137,12 +133,9 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
             if (checkOut) {
                 let durationMs = checkOut.getTime() - checkIn.getTime();
                 
-                // --- 🐞 THIS IS THE FIX ---
-                // Only subtract the 1-hour break if the staff is 'Monthly' (full-time)
                 if (payType === 'Monthly') {
                     durationMs -= DEFAULT_BREAK_MS;
                 }
-                // --- END FIX ---
                 
                 if (durationMs > 0) totalActualMillis += durationMs;
                 if (schedule && schedule.endTime) {
@@ -162,11 +155,9 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
                 const end = DateTime.fromISO(`${schedule.date}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
                 let scheduledDurationMs = end.diff(start).as('milliseconds');
                 
-                // --- 🐞 APPLY SAME FIX TO SCHEDULED DURATION ---
                 if (payType === 'Monthly') {
                     scheduledDurationMs -= DEFAULT_BREAK_MS;
                 }
-                // --- END FIX ---
 
                 if (scheduledDurationMs > 0) totalScheduledMillis += scheduledDurationMs;
             } catch (e) { /* ignore */ }
@@ -183,7 +174,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         loopDay = loopDay.plus({ days: 1 });
     }
 
-    // --- 4. NEW: Full Bonus & Deduction Logic ---
+    // --- 4. Full Bonus & Deduction Logic ---
     let isBonusDisqualified = (totalLatesCount > allowedLates) ||
                               (totalLateMinutes > maxLateMinutesAllowed) ||
                               (totalUnexcusedAbsenceCount > allowedAbsences);
@@ -228,9 +219,14 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     // --- 5. Calculate Streak and Bonus Amount ---
     const currentStreak = staff.bonusStreak || 0;
     let bonusAmount = 0;
-    let newStreak = 0;
+    let newStreak = 0; // Default to 0
 
-    if (!isBonusDisqualified) {
+    // --- 🐞 THIS IS THE FIX ---
+    // Check eligibility. Default to TRUE if field is undefined (for existing staff).
+    const isEligible = staff.isAttendanceBonusEligible !== false;
+
+    if (isEligible && !isBonusDisqualified) {
+        // They are eligible and passed the checks
         newStreak = currentStreak + 1;
         if (newStreak === 1) {
             bonusAmount = companyConfig.attendanceBonus.month1 || 400;
@@ -239,7 +235,12 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         } else {
             bonusAmount = companyConfig.attendanceBonus.month3 || 1200;
         }
-    } else {
+    } else if (!isEligible) {
+        // They are not eligible for a bonus, but they DON'T lose their streak
+        newStreak = currentStreak; 
+        bonusAmount = 0;
+    } else { // This means (isBonusDisqualified)
+        // They were eligible but failed the checks, so their streak resets
         newStreak = 0; // Streak is lost
         bonusAmount = 0;
     }
@@ -253,8 +254,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         totalLatesCount,
         totalLateMinutes,
         totalEarlyDepartureMinutes,
-        // --- NEW: Return the final deduction count ---
-        daysToDeduct, // This includes unexcused + unpaid sick days
+        daysToDeduct, 
         // Bonus Info
         didQualifyForBonus: !isBonusDisqualified,
         bonusAmount,
