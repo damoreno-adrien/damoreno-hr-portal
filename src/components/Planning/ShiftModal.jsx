@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { doc, writeBatch, collection, query, where, getDocs } from 'firebase/firestore';
-import { Trash2, Briefcase, Sun } from 'lucide-react'; // Icons for Work vs Day Off
+import { doc, writeBatch } from 'firebase/firestore';
+import { Trash2, Briefcase, Sun, Clock } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
-export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, date, existingShift, existingAttendance, onSaveSuccess }) {
-    // Mode: 'work' or 'off'
+export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, date, existingShift, existingAttendance, onSaveSuccess, onEditAttendance }) {
     const [mode, setMode] = useState('work');
     const [startTime, setStartTime] = useState('');
     const [endTime, setEndTime] = useState('');
@@ -13,10 +12,8 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
     const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState('');
 
-    // --- 1. Initialize Data ---
     useEffect(() => {
         if (existingShift) {
-            // If it's a "Day Off" shift (we'll check the type or absence of times)
             if (existingShift.type === 'off') {
                 setMode('off');
                 setStartTime('');
@@ -28,7 +25,6 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
             }
             setNotes(existingShift.notes || '');
         } else {
-            // Default for new empty cell
             setMode('work');
             setStartTime('14:00');
             setEndTime('23:00');
@@ -41,14 +37,25 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
     const dateString = dateUtils.formatISODate(dateObject); 
     const displayDate = dateUtils.formatDisplayDate(dateObject);
 
-    // --- 2. Unified Save Handler ---
     const handleSave = async (e) => {
         e.preventDefault();
         setError('');
 
+        // 1. Validation for Work Shift
         if (mode === 'work') {
             if (!startTime || !endTime) { setError("Start and End times are required for a work shift."); return; }
             if (startTime >= endTime) { setError("End time must be after start time."); return; }
+        }
+
+        // 2. 🛡️ SAFETY CHECK: Switching to "Day Off" with existing Attendance
+        if (mode === 'off' && existingAttendance) {
+            const confirmed = window.confirm(
+                `WARNING: Attendance Data Exists!\n\nChanging this to a "Day Off" will PERMANENTLY DELETE the existing attendance record (Clock-in: ${dateUtils.formatCustom(existingAttendance.checkInTime?.toDate ? existingAttendance.checkInTime.toDate() : existingAttendance.checkInTime, 'HH:mm')}) for this day.\n\nAre you sure you want to proceed?`
+            );
+            
+            if (!confirmed) {
+                return; // Stop saving if user cancels
+            }
         }
 
         setIsSaving(true);
@@ -57,28 +64,23 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
             const shiftDocId = `${staffId}_${dateString}`;
             const shiftRef = doc(db, 'schedules', shiftDocId);
 
-            // A. Prepare Schedule Data
             const shiftData = {
                 staffId,
-                staffName, // Ensure name is updated
+                staffName, 
                 date: dateString,
-                type: mode, // 'work' or 'off'
+                type: mode, 
                 notes: notes || null,
-                // Only save times if it's a work shift
                 startTime: mode === 'work' ? startTime : null,
                 endTime: mode === 'work' ? endTime : null,
             };
 
-            // B. Set the Schedule (Overwrite/Merge)
+            // Create/Update schedule
             batch.set(shiftRef, shiftData, { merge: true });
 
-            // C. LOGIC RULE: If setting to "Day Off", DESTROY any existing attendance
+            // If setting to "Day Off", delete attendance
             if (mode === 'off') {
-                // Check if attendance exists for this day
                 const attendanceDocId = `${staffId}_${dateString}`;
                 const attendanceRef = doc(db, 'attendance', attendanceDocId);
-                
-                // We can blindly try to delete it in the batch; if it doesn't exist, it's a no-op
                 batch.delete(attendanceRef);
             }
 
@@ -93,8 +95,8 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
         }
     };
 
-    // --- 3. Cascade Delete Handler ---
     const handleDelete = async () => {
+        // This confirmation protects the "Delete" button
         if (!window.confirm(`Are you sure you want to delete this shift? \n\nWARNING: This will also delete any Attendance records for this day.`)) return;
 
         setIsDeleting(true);
@@ -103,11 +105,9 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
             const shiftDocId = `${staffId}_${dateString}`;
             const attendanceDocId = `${staffId}_${dateString}`;
 
-            // 1. Delete Schedule
             const shiftRef = doc(db, 'schedules', shiftDocId);
             batch.delete(shiftRef);
 
-            // 2. Delete Attendance (The Logic Rule)
             const attendanceRef = doc(db, 'attendance', attendanceDocId);
             batch.delete(attendanceRef);
 
@@ -138,27 +138,17 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                                 <span className="text-sm text-gray-400">{displayDate}</span>
                             </h3>
 
-                            {/* --- Mode Switcher --- */}
                             <div className="flex space-x-4 mb-6 bg-gray-800 p-1 rounded-lg">
-                                <button
-                                    type="button"
-                                    onClick={() => setMode('work')}
-                                    className={`flex-1 flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${mode === 'work' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}
-                                >
+                                <button type="button" onClick={() => setMode('work')} className={`flex-1 flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${mode === 'work' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>
                                     <Briefcase className="w-4 h-4 mr-2" /> Work Shift
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setMode('off')}
-                                    className={`flex-1 flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${mode === 'off' ? 'bg-green-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}
-                                >
+                                <button type="button" onClick={() => setMode('off')} className={`flex-1 flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${mode === 'off' ? 'bg-green-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>
                                     <Sun className="w-4 h-4 mr-2" /> Day Off
                                 </button>
                             </div>
 
                             {error && <p className="text-red-400 text-sm mb-4 text-center">{error}</p>}
 
-                            {/* --- Work Mode Inputs --- */}
                             {mode === 'work' && (
                                 <div className="grid grid-cols-2 gap-4 mb-4 animate-fadeIn">
                                     <div>
@@ -172,11 +162,14 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                                 </div>
                             )}
 
-                            {/* --- Day Off Mode Message --- */}
                             {mode === 'off' && (
                                 <div className="mb-4 p-3 bg-green-900/30 border border-green-700/50 rounded-md text-green-200 text-sm text-center animate-fadeIn">
                                     Setting this as a <strong>Day Off</strong>. <br/>
-                                    Any existing attendance for this day will be deleted.
+                                    {existingAttendance ? (
+                                        <span className="text-red-400 font-bold">Warning: Existing attendance will be deleted!</span>
+                                    ) : (
+                                        "Any existing attendance for this day will be deleted."
+                                    )}
                                 </div>
                             )}
 
@@ -186,15 +179,24 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                             </div>
                         </div>
 
-                        {/* --- Actions Footer --- */}
                         <div className="bg-gray-800 px-4 py-3 sm:px-6 flex justify-between items-center">
-                            {existingShift ? (
-                                <button type="button" onClick={handleDelete} disabled={isSaving || isDeleting} className="text-red-400 hover:text-red-300 text-sm flex items-center">
-                                    <Trash2 className="w-4 h-4 mr-1" /> Delete Shift
-                                </button>
-                            ) : (
-                                <div></div> // Spacer
-                            )}
+                            <div className="flex items-center space-x-2">
+                                {existingShift && (
+                                    <button type="button" onClick={handleDelete} disabled={isSaving || isDeleting} className="text-red-400 hover:text-red-300 text-sm flex items-center p-2 rounded hover:bg-red-900/20">
+                                        <Trash2 className="w-4 h-4 mr-1" /> Delete Shift
+                                    </button>
+                                )}
+                                {mode === 'work' && (
+                                    <button 
+                                        type="button" 
+                                        onClick={(e) => { e.preventDefault(); onEditAttendance(); }} 
+                                        disabled={isSaving || isDeleting} 
+                                        className="text-blue-400 hover:text-blue-300 text-sm flex items-center p-2 rounded hover:bg-blue-900/20"
+                                    >
+                                        <Clock className="w-4 h-4 mr-1" /> {existingAttendance ? 'Edit Times' : 'Add Clock-In'}
+                                    </button>
+                                )}
+                            </div>
                             
                             <div className="flex space-x-3">
                                 <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-500">Cancel</button>
