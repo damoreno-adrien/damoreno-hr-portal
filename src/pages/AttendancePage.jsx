@@ -4,8 +4,8 @@ import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
 import { ChevronUp, ChevronDown } from 'lucide-react';
-// --- NEW: Import ManagerAlerts and the EditAttendanceModal ---
 import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
+import OvertimeRequests from '../components/Dashboard/OvertimeRequests';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -17,27 +17,16 @@ const getDisplayName = (staff) => {
 const UpcomingBirthdaysCard = ({ staffList }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
-        
-        const today = new Date(); // Use a fresh date object
-        today.setHours(0, 0, 0, 0); // Set to start of today
-        
+        const today = new Date(); 
+        today.setHours(0, 0, 0, 0); 
         const birthDate = dateUtils.fromFirestore(staff.birthdate);
         if (!birthDate) return null;
-        
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
-        if (nextBirthday < today) {
-            nextBirthday.setFullYear(today.getFullYear() + 1);
-        }
-
+        if (nextBirthday < today) { nextBirthday.setFullYear(today.getFullYear() + 1); }
         const diffTime = nextBirthday - today;
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
         if (diffDays <= 30) {
-            return {
-                ...staff,
-                nextBirthday,
-                daysUntil: diffDays,
-            };
+            return { ...staff, nextBirthday, daysUntil: diffDays };
         }
         return null;
     }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil);
@@ -66,14 +55,14 @@ export default function AttendancePage({ db, staffList }) {
     const [checkIns, setCheckIns] = useState({});
     const [todaysLeave, setTodaysLeave] = useState([]);
     const [editingRecord, setEditingRecord] = useState(null);
-    const [showArchived, setShowArchived] = useState(false); // NEW state
+    const [showArchived, setShowArchived] = useState(false);
 
-    // --- NEW: State for the manual fix modal ---
-    const [alertToFix, setAlertToFix] = useState(null); // Will hold the alert data
+    // State for the manual fix modal (Manager Alerts)
+    const [alertToFix, setAlertToFix] = useState(null); 
 
     useEffect(() => {
         if (!db) return;
-        const todayStr = dateUtils.formatISODate(new Date()); // Use dateUtils
+        const todayStr = dateUtils.formatISODate(new Date()); 
         
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
@@ -98,7 +87,7 @@ export default function AttendancePage({ db, staffList }) {
     }, [db]);
 
     const handleCardClick = (staff) => {
-        const todayStr = dateUtils.formatISODate(new Date()); // Use dateUtils
+        const todayStr = dateUtils.formatISODate(new Date()); 
         const attendanceRecord = checkIns[staff.id];
         
         const recordForModal = {
@@ -111,10 +100,11 @@ export default function AttendancePage({ db, staffList }) {
         setEditingRecord(recordForModal);
     };
 
-    // --- NEW: Handlers for the manual fix modal ---
+    // --- Handler for ManagerAlerts Manual Fix ---
     const handleOpenManualFix = (alert) => {
         const recordForModal = {
             id: alert.attendanceDocId,
+            staffId: alert.staffId,
             staffName: alert.staffName,
             date: alert.date,
             fullRecord: { 
@@ -128,15 +118,12 @@ export default function AttendancePage({ db, staffList }) {
     const handleCloseManualFix = () => {
         setAlertToFix(null);
     };
-    // --- END NEW HANDLERS ---
 
-    // NEW: Memoized list of staff to display
     const staffToDisplay = useMemo(() => {
         if (showArchived) return staffList;
         return staffList.filter(staff => staff.status !== 'inactive');
     }, [staffList, showArchived]);
 
-    // UPDATED: Use the filtered list
     const staffWithStatus = staffToDisplay.map(staff => {
         const checkIn = checkIns[staff.id];
         const shift = todaysShifts.find(s => s.staffId === staff.id);
@@ -156,8 +143,8 @@ export default function AttendancePage({ db, staffList }) {
     const notPresent = staffWithStatus.filter(s => s.category === 'not-present');
 
     const StaffCard = ({ staff, checkInData, onClick }) => {
-        let statusColor, statusText;
-        switch (staff.category) {
+         let statusColor, statusText;
+         switch (staff.category) {
             case 'on-shift': statusColor = 'bg-green-500'; statusText = `Checked In: ${dateUtils.formatCustom(checkInData?.checkInTime, 'HH:mm')}`; break;
             case 'on-break': statusColor = 'bg-yellow-500'; statusText = `Break Started: ${dateUtils.formatCustom(checkInData?.breakStart, 'HH:mm')}`; break;
             case 'completed': statusColor = 'bg-gray-500'; statusText = `Checked Out: ${dateUtils.formatCustom(checkInData?.checkOutTime, 'HH:mm')}`; break;
@@ -169,7 +156,7 @@ export default function AttendancePage({ db, staffList }) {
                 break;
             default: statusColor = 'bg-gray-900'; statusText = 'Unknown';
         }
-
+        // ... (Render Card logic unchanged) ...
         const isClickable = staff.reason !== 'Off Today';
         const CardContent = () => (
             <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
@@ -203,13 +190,14 @@ export default function AttendancePage({ db, staffList }) {
 
     return (
         <div>
+            {/* Normal Edit Modal */}
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord ? "Edit Attendance Record" : "Create Attendance Record"}>
                     <EditAttendanceModal db={db} record={editingRecord} onClose={() => setEditingRecord(null)} />
                 </Modal>
             )}
 
-            {/* --- NEW: Manual Fix Modal for Alerts --- */}
+            {/* Manager Alerts Manual Fix Modal */}
             {alertToFix && (
                 <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
                     <EditAttendanceModal
@@ -231,10 +219,17 @@ export default function AttendancePage({ db, staffList }) {
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
 
-            {/* --- NEW: Manager Alerts Section --- */}
-            <div className="mb-8">
+            {/* --- OPERATIONAL ALERTS SECTION --- */}
+            {/* 1. Missing Check-outs (Alerts) */}
+            <div className="mb-4">
                 <ManagerAlerts onManualFix={handleOpenManualFix} />
             </div>
+
+            {/* 2. Overtime Approvals (Money) */}
+            <div className="mb-8">
+                <OvertimeRequests db={db} />
+            </div>
+            {/* ---------------------------------- */}
 
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />

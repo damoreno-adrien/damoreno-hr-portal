@@ -8,6 +8,7 @@ import {
   parse,
   eachDayOfInterval as dfnsEachDayOfInterval,
   addDays as dfnsAddDays,
+  subDays as dfnsSubDays,
   startOfWeek as dfnsStartOfWeek,
   startOfToday as dfnsStartOfToday,
   getMonth as dfnsGetMonth,
@@ -148,6 +149,15 @@ export const addDays = (date, amount) => {
   const dateObj = fromFirestore(date);
   if (!dateObj) return null;
   return dfnsAddDays(dateObj, amount);
+};
+
+/**
+ * Subtracts a specified number of days from a date.
+ */
+export const subDays = (date, amount) => {
+  const dateObj = fromFirestore(date);
+  if (!dateObj) return null;
+  return dfnsSubDays(dateObj, amount);
 };
 
 /**

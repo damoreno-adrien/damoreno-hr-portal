@@ -5,17 +5,9 @@ import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
-// import * as dateUtils from '../utils/dateUtils';
-import { 
-    formatCustom, 
-    formatISODate, 
-    addDays, 
-    fromFirestore, 
-    startOfWeek 
-} from '../utils/dateUtils';
+import { formatCustom,formatISODate, addDays, fromFirestore, startOfWeek } from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
-// --- REMOVED ManagerAlerts and its related Modals ---
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -23,20 +15,14 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [locationError, setLocationError] = useState('');
     const [isWithinGeofence, setIsWithinGeofence] = useState(false);
     const [todaysAttendance, setTodaysAttendance] = useState(null);
-
     const [todaysSchedule, setTodaysSchedule] = useState(null);
     const [tomorrowsSchedule, setTomorrowsSchedule] = useState(null);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [upcomingLeave, setUpcomingLeave] = useState(null);
-    
-    // --- REMOVED alertToFix state ---
-
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
-
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
     const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
 
-    // --- REMOVED userRole variable (no longer needed here) ---
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
@@ -46,7 +32,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
 
-    // --- REMOVED handleOpenManualFix and handleCloseManualFix functions ---
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -73,7 +58,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return () => unsubscribe();
     }, [db, user]);
     
-    // (The rest of the useEffect hooks are unchanged)
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = formatISODate(new Date());
@@ -251,13 +235,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
     return (
         <div>
-            {/* --- REMOVED Manual Fix Modal --- */}
-
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday to you! We wish you all the best! 🎂</div>}
             {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p><p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(getDisplayName).join(', ')}!</p></div>}
-
-            {/* --- REMOVED Manager Alerts Section --- */}
-
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
