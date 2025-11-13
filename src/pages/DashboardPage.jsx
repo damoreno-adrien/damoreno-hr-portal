@@ -297,7 +297,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                            <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
                            <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
                            <StatItem icon={AlertTriangle} label="Total Time Late" value={monthlyStats.totalTimeLate} colorClass="yellow" />
-                           <StatItem icon={LogOut} label="Total Early Departures" value={monthlyStats.totalEarlyDepartures} colorClass="purple" />
+                           {/* <StatItem icon={LogOut} label="Total Early Departures" value={monthlyStats.totalEarlyDepartures} colorClass="purple" /> */}
                         </div>
                     </DashboardCard>
                     <DashboardCard title="Leave Balance">

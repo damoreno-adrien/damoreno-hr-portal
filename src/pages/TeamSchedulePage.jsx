@@ -67,10 +67,14 @@ export default function TeamSchedulePage({ db, user }) {
         if (!db || !user || !myDepartment || staffList.length === 0) return;
         setIsLoading(true);
 
+        // --- 🐞 THIS IS THE FIX ---
         const departmentStaff = staffList.filter(staff => {
             const currentJob = getStaffCurrentJob(staff);
-            return currentJob?.department === myDepartment;
+            // Check if staff is active (status is 'active', null, or undefined)
+            const isActive = staff.status === undefined || staff.status === null || staff.status === 'active';
+            return currentJob?.department === myDepartment && isActive;
         });
+        // --- END FIX ---
 
         const endOfWeek = dateUtils.addDays(startOfWeek, 6);
         const startStr = dateUtils.formatISODate(startOfWeek);
@@ -78,7 +82,6 @@ export default function TeamSchedulePage({ db, user }) {
 
         const shiftsQuery = query(collection(db, "schedules"), where("date", ">=", startStr), where("date", "<=", endStr));
         const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("endDate", ">=", startStr));
-        // --- NEW: Attendance Query ---
         const attendanceQuery = query(collection(db, "attendance"), where("date", ">=", startStr), where("date", "<=", endStr));
 
         const unsubShifts = onSnapshot(shiftsQuery, (shiftsSnapshot) => {
@@ -91,7 +94,6 @@ export default function TeamSchedulePage({ db, user }) {
 
             // --- NESTED SNAPSHOTS ---
             const unsubLeaves = onSnapshot(leaveQuery, (leavesSnapshot) => {
-                // --- NEW: Process leaves into a map for fast lookup ---
                 const leaveMap = new Map();
                 const reportEndDt = DateTime.fromISO(endStr, { zone: THAILAND_TIMEZONE });
                 leavesSnapshot.forEach(doc => {
@@ -132,10 +134,8 @@ export default function TeamSchedulePage({ db, user }) {
                             const attendance = attendanceMap.get(key);
                             const leave = leaveMap.get(key);
 
-                            // --- NEW: Use status logic ---
                             const { status } = calculateAttendanceStatus(shift, attendance, leave, date);
 
-                            // --- NEW: Return based on status ---
                             if (status === 'Leave') {
                                 return { name: getDisplayName(staff), statusText: 'On Leave', statusClass: 'text-blue-400' };
                             }
@@ -145,7 +145,7 @@ export default function TeamSchedulePage({ db, user }) {
                             if (shift) {
                                 return { name: getDisplayName(staff), statusText: `${shift.startTime} - ${shift.endTime}`, statusClass: 'text-white' };
                             }
-                            return null; // Don't show staff if they are just 'Off'
+                            return null;
                         }).filter(Boolean);
 
                         return { date, entries: dailyEntries };
@@ -161,6 +161,7 @@ export default function TeamSchedulePage({ db, user }) {
         return () => unsubShifts(); // Return outer unsub
     }, [db, user, startOfWeek, staffList, myDepartment]);
 
+    // ... (rest of the component is unchanged) ...
     const changeWeek = (offset) => setStartOfWeek(prev => dateUtils.addDays(prev, 7 * offset));
     
     const endOfWeek = dateUtils.addDays(startOfWeek, 6);
@@ -183,7 +184,6 @@ export default function TeamSchedulePage({ db, user }) {
                             <p className="font-bold text-amber-400 border-b border-gray-700 pb-2 mb-2">{dateUtils.formatCustom(date, 'EEEE')}, {dateUtils.formatCustom(date, 'dd MMMM')}</p>
                             {entries.length > 0 ? (
                                 <ul className="space-y-2">
-                                    {/* --- UPDATED: Use new entry properties --- */}
                                     {entries.map(entry => (
                                         <li key={entry.name} className="flex justify-between items-center text-sm">
                                             <span className="text-gray-300">{entry.name}</span>

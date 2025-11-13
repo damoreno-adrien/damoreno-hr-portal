@@ -1,93 +1,60 @@
-import { DateTime } from 'luxon';
+import * as dateUtils from './dateUtils';
 
-const THAILAND_TIMEZONE = 'Asia/Bangkok';
-
-/**
- * Calculates the final attendance status by comparing schedule, attendance, and leave data.
- * @param {object} schedule - The schedule object (or null).
- * @param {object} attendance - The attendance object (or null).
- * @param {object} leave - The leave object (or null).
- * @param {Date} date - The JS Date object for the day being checked.
- * @returns {object} - An object like { status: 'Present', minutes: 0 }
- */
 export const calculateAttendanceStatus = (schedule, attendance, leave, date) => {
-    // 1. Get today's date in Bangkok time.
-    const today = DateTime.now().setZone(THAILAND_TIMEZONE).startOf('day');
-    // 2. Get the date of the shift we are checking.
-    const shiftDate = DateTime.fromJSDate(date).setZone(THAILAND_TIMEZONE).startOf('day');
-
-    // 3. If the shift date is in the future, it's 'Upcoming'.
-    if (shiftDate > today) {
-        return { status: 'Upcoming', minutes: 0 };
-    }
-
-    // 4. Check for approved leave.
+    // 1. Check for Leave FIRST
     if (leave) {
         return { status: 'Leave', minutes: 0 };
     }
 
-    // 5. Check work schedule vs. attendance.
-    const isWorkSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'work';
-
-    if (isWorkSchedule) {
-        // There is a work shift scheduled for this day.
-        if (attendance && attendance.checkInTime) {
-            // Staff checked in.
-            try {
-                // Check for lateness.
-                const scheduledStart = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: THAILAND_TIMEZONE });
-                const actualCheckIn = DateTime.fromJSDate(attendance.checkInTime.toDate()).setZone(THAILAND_TIMEZONE);
-
-                if (actualCheckIn.isValid && scheduledStart.isValid && actualCheckIn > scheduledStart) {
-                    const lateMinutes = Math.ceil(actualCheckIn.diff(scheduledStart, 'minutes').minutes);
-                    return { status: 'Late', minutes: lateMinutes };
-                }
-                // Not late, so they are Present.
-                return { status: 'Present', minutes: 0 };
-            } catch (e) {
-                console.error("Error calculating lateness:", e);
-                return { status: 'Present', minutes: 0 }; // Fallback to 'Present' if time parsing fails
-            }
-        } else {
-            // Scheduled to work, but did NOT check in.
-            return { status: 'Absent', minutes: 0 };
-        }
-    }
-
-    // 6. If not scheduled, not on leave, and date is not in future, they are 'Off'.
-    // We also land here if they are 'Off' and didn't check in.
-    if (!attendance) {
+    // 2. Check for "Day Off" Schedule
+    // This is the new logic to prevent "Day Off" appearing as "Absent"
+    if (schedule && schedule.type === 'off') {
         return { status: 'Off', minutes: 0 };
     }
 
-    // 7. Handle 'Worked on Day Off' (optional, but good to have)
-    if (!isWorkSchedule && attendance && attendance.checkInTime) {
-        // You can decide what to do here. For now, we'll just treat it as 'Present'.
-        // You could also create a 'Worked Off Day' status.
+    // 3. Check for Attendance (Present/Late)
+    if (attendance && attendance.checkInTime) {
+        // If there is a schedule with a start time, check for lateness
+        if (schedule && schedule.startTime) {
+            const checkIn = attendance.checkInTime.toDate ? attendance.checkInTime.toDate() : new Date(attendance.checkInTime);
+            
+            // Construct scheduled start time for that specific date
+            const scheduledStart = dateUtils.parseISODateString(`${schedule.date}T${schedule.startTime}`);
+            
+            // Add grace period (e.g., 5 minutes, or 0 if strict)
+            // You can adjust this logic based on your preferences
+            if (checkIn > scheduledStart) {
+                const diffMs = checkIn - scheduledStart;
+                const diffMins = Math.floor(diffMs / 60000);
+                return { status: 'Late', minutes: diffMins };
+            }
+        }
         return { status: 'Present', minutes: 0 };
     }
 
-    // Default fallback
+    // 4. Check for Absence
+    // If there is a "work" schedule, the date is in the past, and no attendance...
+    const now = new Date();
+    const targetDate = new Date(date);
+    // Reset hours to compare dates only
+    now.setHours(0,0,0,0);
+    targetDate.setHours(0,0,0,0);
+
+    if (schedule && schedule.type === 'work' && !attendance && targetDate < now) {
+        return { status: 'Absent', minutes: 0 };
+    }
+
+    // 5. Default (Future shift or Empty)
     return { status: 'Off', minutes: 0 };
 };
 
-/**
- * Returns the correct Tailwind CSS class based on the calculated status.
- * @param {string} status - The status string (e.g., 'Present', 'Late').
- * @returns {string} - The Tailwind CSS class string.
- */
 export const getStatusClass = (status) => {
     switch (status) {
-        case 'Present':
-            return 'bg-green-700 text-white'; // Darker green for contrast
-        case 'Late':
-            return 'bg-amber-700 text-white'; // deep, rich yellow. Clearly a "warning" color
-        case 'Absent':
-            return 'bg-red-700 text-white'; // Darker red
-        case 'Leave':
-            return 'bg-blue-600 text-white';
-        // 'Upcoming' and 'Off' will not have a class and will use the default bg-gray-800
-        default:
-            return ''; 
+        case 'Present': return 'bg-green-900/50 text-green-200 border-l-4 border-green-500';
+        case 'Late': return 'bg-yellow-900/50 text-yellow-200 border-l-4 border-yellow-500';
+        case 'Absent': return 'bg-red-900/50 text-red-200 border-l-4 border-red-500';
+        case 'Leave': return 'bg-blue-900/50 text-blue-200 border-l-4 border-blue-500';
+        case 'Off': return ''; // Clean look for empty/off cells
+        default: return '';
     }
 };
