@@ -3,25 +3,30 @@ import { collection, query, where, orderBy, getDocs, updateDoc, doc } from 'fire
 import { Clock, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { formatCustom, formatISODate } from '../../utils/dateUtils';
 
-export default function OvertimeRequests({ db }) {
+export default function OvertimeRequests({ db, companyConfig }) {
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [processingId, setProcessingId] = useState(null);
 
+    // --- READ CONFIGURATION ---
+    // CORRECTED: Using 'overtimeThreshold' to match FinancialRulesSettings.jsx
+    const OT_THRESHOLD_MINUTES = parseInt(companyConfig?.overtimeThreshold || 30);
+    
+    // Note: 'standardShiftHours' is not in FinancialRulesSettings, so it defaults to 9.
+    const STANDARD_SHIFT_HOURS = parseFloat(companyConfig?.standardShiftHours || 9);
+
     useEffect(() => {
         fetchPotentialOvertime();
-    }, [db]);
+    }, [db, OT_THRESHOLD_MINUTES]);
 
     const fetchPotentialOvertime = async () => {
         if (!db) return;
         setLoading(true);
         
         const today = new Date();
-        // --- LOGIC CHANGE: Start from the 1st of the current month ---
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         const dateStr = formatISODate(startOfMonth); 
 
-        // Query: Attendance from start of this month with a checkout time
         const q = query(
             collection(db, 'attendance'),
             where('date', '>=', dateStr),
@@ -35,25 +40,18 @@ export default function OvertimeRequests({ db }) {
             snapshot.forEach(docSnap => {
                 const data = docSnap.data();
                 
-                // 1. Must be checked out
-                // 2. OT must not be handled yet (otStatus should be undefined or 'pending')
                 if (data.checkOutTime && (!data.otStatus || data.otStatus === 'pending')) {
                     
                     const checkIn = data.checkInTime.toDate();
                     const checkOut = data.checkOutTime.toDate();
                     const durationMs = checkOut - checkIn;
                     const hoursWorked = durationMs / (1000 * 60 * 60);
-
-                    // --- THRESHOLD CONFIGURATION ---
-                    // Currently set to 9 hours. 
-                    // (Standard 9h shift. If they work 9.5h, it flags as OT).
-                    const STANDARD_SHIFT_HOURS = 9; 
                     
                     if (hoursWorked > STANDARD_SHIFT_HOURS) {
                         const otMinutes = Math.round((hoursWorked - STANDARD_SHIFT_HOURS) * 60);
                         
-                        // Only show if meaningful OT (e.g., > 15 mins) to avoid flagging 2 minutes late checkout
-                        if (otMinutes >= 15) {
+                        // Comparing against the config value from FinancialRulesSettings
+                        if (otMinutes >= OT_THRESHOLD_MINUTES) {
                             otCandidates.push({
                                 id: docSnap.id,
                                 ...data,
@@ -90,7 +88,6 @@ export default function OvertimeRequests({ db }) {
                 });
             }
 
-            // Remove from local list immediately after action
             setRequests(prev => prev.filter(r => r.id !== item.id));
         } catch (error) {
             console.error("Error updating OT:", error);
@@ -102,7 +99,7 @@ export default function OvertimeRequests({ db }) {
 
     if (loading) return <div className="p-4 bg-gray-800 rounded-lg border border-gray-700 text-gray-400 text-sm animate-pulse">Scanning for overtime...</div>;
     
-    if (requests.length === 0) return null; // Hide component completely if no requests
+    if (requests.length === 0) return null;
 
     return (
         <div className="bg-gray-800 rounded-lg shadow-lg border border-indigo-500/30 mb-6 overflow-hidden">
@@ -113,7 +110,7 @@ export default function OvertimeRequests({ db }) {
                         Overtime Approvals (This Month)
                     </h3>
                     <p className="text-sm text-gray-400 mt-1">
-                        Staff who worked over 9 hours.
+                        Flagging shifts exceeding {OT_THRESHOLD_MINUTES} mins over scheduled time.
                     </p>
                 </div>
                 <span className="bg-indigo-500 text-white text-xs font-bold px-2 py-1 rounded-full">
