@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+// 1. ADD 'doc' to imports
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
@@ -17,16 +18,27 @@ const getDisplayName = (staff) => {
 const UpcomingBirthdaysCard = ({ staffList }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
+        
         const today = new Date(); 
         today.setHours(0, 0, 0, 0); 
+        
         const birthDate = dateUtils.fromFirestore(staff.birthdate);
         if (!birthDate) return null;
+        
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
-        if (nextBirthday < today) { nextBirthday.setFullYear(today.getFullYear() + 1); }
+        if (nextBirthday < today) {
+            nextBirthday.setFullYear(today.getFullYear() + 1);
+        }
+
         const diffTime = nextBirthday - today;
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
         if (diffDays <= 30) {
-            return { ...staff, nextBirthday, daysUntil: diffDays };
+            return {
+                ...staff,
+                nextBirthday,
+                daysUntil: diffDays,
+            };
         }
         return null;
     }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil);
@@ -56,9 +68,10 @@ export default function AttendancePage({ db, staffList }) {
     const [todaysLeave, setTodaysLeave] = useState([]);
     const [editingRecord, setEditingRecord] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
-
-    // State for the manual fix modal (Manager Alerts)
     const [alertToFix, setAlertToFix] = useState(null); 
+
+    // 2. NEW: State for Company Config
+    const [companyConfig, setCompanyConfig] = useState(null);
 
     useEffect(() => {
         if (!db) return;
@@ -83,7 +96,20 @@ export default function AttendancePage({ db, staffList }) {
             setTodaysLeave(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
-        return () => { unsubscribeShifts(); unsubscribeCheckIns(); unsubscribeLeave(); };
+        // 3. NEW: Fetch Company Config directly here
+        const configRef = doc(db, 'settings', 'company_config');
+        const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setCompanyConfig(docSnap.data());
+            }
+        });
+
+        return () => { 
+            unsubscribeShifts(); 
+            unsubscribeCheckIns(); 
+            unsubscribeLeave(); 
+            unsubscribeConfig(); // Cleanup config listener
+        };
     }, [db]);
 
     const handleCardClick = (staff) => {
@@ -100,7 +126,6 @@ export default function AttendancePage({ db, staffList }) {
         setEditingRecord(recordForModal);
     };
 
-    // --- Handler for ManagerAlerts Manual Fix ---
     const handleOpenManualFix = (alert) => {
         const recordForModal = {
             id: alert.attendanceDocId,
@@ -143,8 +168,8 @@ export default function AttendancePage({ db, staffList }) {
     const notPresent = staffWithStatus.filter(s => s.category === 'not-present');
 
     const StaffCard = ({ staff, checkInData, onClick }) => {
-         let statusColor, statusText;
-         switch (staff.category) {
+        let statusColor, statusText;
+        switch (staff.category) {
             case 'on-shift': statusColor = 'bg-green-500'; statusText = `Checked In: ${dateUtils.formatCustom(checkInData?.checkInTime, 'HH:mm')}`; break;
             case 'on-break': statusColor = 'bg-yellow-500'; statusText = `Break Started: ${dateUtils.formatCustom(checkInData?.breakStart, 'HH:mm')}`; break;
             case 'completed': statusColor = 'bg-gray-500'; statusText = `Checked Out: ${dateUtils.formatCustom(checkInData?.checkOutTime, 'HH:mm')}`; break;
@@ -156,7 +181,7 @@ export default function AttendancePage({ db, staffList }) {
                 break;
             default: statusColor = 'bg-gray-900'; statusText = 'Unknown';
         }
-        // ... (Render Card logic unchanged) ...
+
         const isClickable = staff.reason !== 'Off Today';
         const CardContent = () => (
             <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
@@ -219,7 +244,6 @@ export default function AttendancePage({ db, staffList }) {
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
 
-            {/* --- OPERATIONAL ALERTS SECTION --- */}
             {/* 1. Missing Check-outs (Alerts) */}
             <div className="mb-4">
                 <ManagerAlerts onManualFix={handleOpenManualFix} />
@@ -227,9 +251,8 @@ export default function AttendancePage({ db, staffList }) {
 
             {/* 2. Overtime Approvals (Money) */}
             <div className="mb-8">
-                <OvertimeRequests db={db} />
+                <OvertimeRequests db={db} companyConfig={companyConfig} />
             </div>
-            {/* ---------------------------------- */}
 
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />
