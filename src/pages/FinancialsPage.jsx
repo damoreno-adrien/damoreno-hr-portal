@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
+// 1. Import 'doc'
 import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { Plus, Pencil, Trash2, CheckCircle, XCircle, Download } from 'lucide-react'; // 1. Added Download icon
+import { Plus, Pencil, Trash2, CheckCircle, XCircle, Download, ArrowUp, ArrowDown } from 'lucide-react';
 import LoanModal from '../components/Financials/LoanModal';
 import AdvanceModal from '../components/SalaryAdvance/AdvanceModal';
 import AdjustmentModal from '../components/Payroll/AdjustmentModal';
-// 2. Add imports for PDF generation
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -12,6 +12,7 @@ const months = ["January", "February", "March", "April", "May", "June", "July", 
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1];
 
 const StatusBadge = ({ status }) => {
+    // ... (No change)
     const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
     const statusMap = {
         pending: "bg-yellow-500/20 text-yellow-300",
@@ -30,16 +31,20 @@ export default function FinancialsPage({ staffList, db }) {
     const [pendingAdvances, setPendingAdvances] = useState([]);
     const [isLoadingPending, setIsLoadingPending] = useState(true);
 
+    const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'asc' });
+
+    // 2. Add state for Company Config
+    const [companyConfig, setCompanyConfig] = useState(null);
+
+    // ... (Rest of state definitions are unchanged)
     const [loans, setLoans] = useState([]);
     const [isLoadingLoans, setIsLoadingLoans] = useState(false);
     const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
     const [editingLoan, setEditingLoan] = useState(null);
-
     const [advances, setAdvances] = useState([]);
     const [isLoadingAdvances, setIsLoadingAdvances] = useState(false);
     const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
     const [editingAdvance, setEditingAdvance] = useState(null);
-
     const [adjustments, setAdjustments] = useState([]);
     const [isLoadingAdjustments, setIsLoadingAdjustments] = useState(false);
     const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
@@ -47,68 +52,136 @@ export default function FinancialsPage({ staffList, db }) {
 
     const getDisplayName = (staff) => staff?.nickname || staff?.firstName || staff?.fullName || 'Unknown';
 
+    // 3. Fetch Company Config
     useEffect(() => {
         if (!db) return;
+        const configRef = doc(db, 'settings', 'company_config');
+        const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setCompanyConfig(docSnap.data());
+            } else {
+                console.error("Company config not found!");
+            }
+        });
+        return () => unsubscribeConfig();
+    }, [db]);
+
+    // 4. Update Pending Advances listener to include eligibility calculation
+    useEffect(() => {
+        if (!db || !companyConfig) {
+             // Don't run until config is loaded
+            return;
+        }
+        
         setIsLoadingPending(true);
         const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
+        
         const unsubscribe = onSnapshot(q, (snap) => {
+            const eligibilityPercent = companyConfig.advanceEligibilityPercentage || 50; // Default 50%
+
             const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
             const hydratedList = pendingList
                 .map(req => {
                     const staffMember = staffList.find(s => s.id === req.staffId);
-                    return { ...req, staff: staffMember };
+                    if (!staffMember) return null; // Staff not found
+
+                    // --- NEW CALCULATION ---
+                    // Assumes salary is stored in jobHistory[0].rate
+                    const salary = staffMember.jobHistory?.[0]?.rate || 0;
+                    const maxEligible = (salary * eligibilityPercent) / 100;
+                    // -----------------------
+
+                    return { 
+                        ...req, 
+                        staff: staffMember,
+                        staffName: getDisplayName(staffMember),
+                        maxEligible: maxEligible
+                    };
                 })
-                .filter(req => req.staff && req.staff.status !== 'inactive')
-                .map(req => ({ ...req, staffName: getDisplayName(req.staff) }));
+                .filter(req => req && req.staff.status !== 'inactive'); // Filter out nulls/inactive
 
             setPendingAdvances(hydratedList);
             setIsLoadingPending(false);
         }, (err) => { console.error(err); setIsLoadingPending(false); });
+        
+        // This listener now depends on db, staffList, AND companyConfig
         return () => unsubscribe();
-    }, [db, staffList]);
+    }, [db, staffList, companyConfig]);
 
     useEffect(() => {
         if (selectedStaffId && db) {
             setIsLoadingLoans(true);
             setIsLoadingAdvances(true);
             setIsLoadingAdjustments(true);
-
             const loansQuery = query(collection(db, 'loans'), where('staffId', '==', selectedStaffId));
             const unsubLoans = onSnapshot(loansQuery, (snap) => { setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingLoans(false); }, (err) => { console.error(err); setIsLoadingLoans(false); });
-
             const commonQueries = [where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year)];
             const advancesQuery = query(collection(db, 'salary_advances'), ...commonQueries);
             const unsubAdvances = onSnapshot(advancesQuery, (snap) => { setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingAdvances(false); }, (err) => { console.error(err); setIsLoadingAdvances(false); });
-
             const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), ...commonQueries);
             const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => { setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingAdjustments(false); }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
-
             return () => { unsubLoans(); unsubAdvances(); unsubAdjustments(); };
         } else {
             setLoans([]); setAdvances([]); setAdjustments([]);
         }
     }, [selectedStaffId, db, payPeriod]);
 
+    // 5. Update sort hook to handle 'maxEligible'
+    const sortedPendingAdvances = useMemo(() => {
+        let sortableItems = [...pendingAdvances];
+        if (sortConfig.key) {
+            sortableItems.sort((a, b) => {
+                let aValue = a[sortConfig.key];
+                let bValue = b[sortConfig.key];
+
+                // Handle different data types
+                if (sortConfig.key === 'amount' || sortConfig.key === 'maxEligible') { // <-- Added maxEligible
+                    aValue = a[sortConfig.key] || 0;
+                    bValue = b[sortConfig.key] || 0;
+                } else if (sortConfig.key === 'date') {
+                    aValue = new Date(a.date);
+                    bValue = new Date(b.date);
+                } else {
+                    aValue = ('' + aValue).toLowerCase();
+                    bValue = ('' + bValue).toLowerCase();
+                }
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'asc' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [pendingAdvances, sortConfig]);
+
+    const handleSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
     const handlePeriodChange = (e) => setPayPeriod(p => ({ ...p, [e.target.name]: Number(e.target.value) }));
     const handleStaffChange = (e) => setSelectedStaffId(e.target.value);
-
     const handleOpenAddLoanModal = () => { setEditingLoan(null); setIsLoanModalOpen(true); };
     const handleOpenEditLoanModal = (loan) => { setEditingLoan(loan); setIsLoanModalOpen(true); };
     const handleDeleteLoan = async (id) => { if (window.confirm("Delete this loan record?")) await deleteDoc(doc(db, 'loans', id)); };
-
     const handleOpenAddAdvanceModal = () => { setEditingAdvance(null); setIsAdvanceModalOpen(true); };
     const handleOpenEditAdvanceModal = (adv) => { setEditingAdvance(adv); setIsAdvanceModalOpen(true); };
     const handleDeleteAdvance = async (id) => { if (window.confirm("Delete this advance record?")) await deleteDoc(doc(db, 'salary_advances', id)); };
-
     const handleApproveAdvance = async (id) => { await updateDoc(doc(db, 'salary_advances', id), { status: 'approved', isReadByStaff: false }); };
     const handleRejectAdvance = async (id) => { const reason = window.prompt("Reason for rejecting?"); if (reason) { await updateDoc(doc(db, 'salary_advances', id), { status: 'rejected', rejectionReason: reason, isReadByStaff: false }); } };
-
     const handleOpenAddAdjustmentModal = () => { setEditingAdjustment(null); setIsAdjustmentModalOpen(true); };
     const handleOpenEditAdjustmentModal = (adj) => { setEditingAdjustment(adj); setIsAdjustmentModalOpen(true); };
     const handleDeleteAdjustment = async (id) => { if (window.confirm("Delete this adjustment record?")) await deleteDoc(doc(db, 'monthly_adjustments', id)); };
 
-    // 3. Add the PDF Export Function
+    // 6. Update PDF Export Function
     const handleExportPendingAdvances = () => {
         if (pendingAdvances.length === 0) {
             alert("No pending advances to export.");
@@ -119,7 +192,6 @@ export default function FinancialsPage({ staffList, db }) {
         const today = new Date().toLocaleDateString('en-GB');
         const totalAmount = pendingAdvances.reduce((sum, req) => sum + req.amount, 0);
         
-        // --- PDF Header ---
         doc.setFontSize(18);
         doc.text("Da Moreno At Town", 14, 22);
         doc.setFontSize(12);
@@ -127,25 +199,32 @@ export default function FinancialsPage({ staffList, db }) {
         doc.setFontSize(10);
         doc.text(`As of: ${today}`, 14, 36);
 
-        // --- PDF Table ---
-        const head = [['Staff Name', 'Request Date', 'Amount (THB)']];
-        const body = pendingAdvances.map(req => [
+        const sortedForPDF = [...pendingAdvances].sort((a, b) =>
+            a.staffName.localeCompare(b.staffName)
+        );
+
+        // --- PDF Table Header ---
+        const head = [['Staff Name', 'Request Date', 'Amount (THB)', 'Max Eligible (THB)']];
+        
+        // --- PDF Table Body ---
+        const body = sortedForPDF.map(req => [
             req.staffName,
             req.date, 
-            req.amount.toLocaleString('en-US')
+            req.amount.toLocaleString('en-US'),
+            req.maxEligible.toLocaleString('en-US')
         ]);
-
-        autoTable(doc, { // <-- Call autoTable as a function, passing 'doc' in
+        
+        autoTable(doc, {
             startY: 45,
             head: head,
             body: body,
-            foot: [['Total Pending', '', totalAmount.toLocaleString('en-US')]],
-            headStyles: { fillColor: [30, 41, 59] }, // Tailwind gray-800
+            // --- PDF Table Footer Update ---
+            foot: [['Total Pending', '', totalAmount.toLocaleString('en-US'), '']],
+            headStyles: { fillColor: [30, 41, 59] }, 
             footStyles: { fontWeight: 'bold', fillColor: [241, 245, 249], textColor: 0 },
             theme: 'striped',
         });
 
-        // --- Save File ---
         doc.save(`pending_advances_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
@@ -161,6 +240,21 @@ export default function FinancialsPage({ staffList, db }) {
         return sortedList.filter(s => s.status !== 'inactive');
     }, [staffList, showArchived]);
 
+    const SortableHeader = ({ children, sortKey }) => {
+        const isSorted = sortConfig.key === sortKey;
+        const Icon = isSorted ? (sortConfig.direction === 'asc' ? ArrowUp : ArrowDown) : null;
+        return (
+            <th 
+                className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase cursor-pointer hover:bg-gray-600"
+                onClick={() => handleSort(sortKey)}
+            >
+                <div className="flex items-center">
+                    <span>{children}</span>
+                    {Icon && <Icon className="w-4 h-4 ml-1" />}
+                </div>
+            </th>
+        );
+    };
 
     return (
         <div>
@@ -187,7 +281,6 @@ export default function FinancialsPage({ staffList, db }) {
             </div>
 
             <section className="mb-10">
-                {/* 4. Add the button to the UI */}
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-xl font-semibold text-white">Pending Salary Advance Requests</h3>
                     <button
@@ -202,9 +295,19 @@ export default function FinancialsPage({ staffList, db }) {
                 
                 <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                     <table className="min-w-full">
-                        <thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead>
+                        <thead className="bg-gray-700">
+                            <tr>
+                                {/* 7. Update table headers */}
+                                <SortableHeader sortKey="staffName">Staff Name</SortableHeader>
+                                <SortableHeader sortKey="date">Date</SortableHeader>
+                                <SortableHeader sortKey="amount">Amount</SortableHeader>
+                                <SortableHeader sortKey="maxEligible">Max Eligible</SortableHeader>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th>
+                            </tr>
+                        </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {isLoadingPending ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">Loading...</td></tr>) : pendingAdvances.length === 0 ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">No pending requests.</td></tr>) : (pendingAdvances.map(req => (<tr key={req.id}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{req.staffName}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td><td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-right space-x-2"><button onClick={() => handleApproveAdvance(req.id)} className="p-2 bg-green-600 rounded-full hover:bg-green-500" title="Approve"><CheckCircle className="h-5 w-5"/></button><button onClick={() => handleRejectAdvance(req.id)} className="p-2 bg-red-600 rounded-full hover:bg-red-500" title="Reject"><XCircle className="h-5 w-5"/></button></td></tr>)))}
+                            {/* 8. Update table body */}
+                            {isLoadingPending ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">Loading...</td></tr>) : sortedPendingAdvances.length === 0 ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">No pending requests.</td></tr>) : (sortedPendingAdvances.map(req => (<tr key={req.id}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{req.staffName}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td><td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{req.maxEligible.toLocaleString()} THB</td><td className="px-6 py-4 whitespace-nowrap text-sm text-right space-x-2"><button onClick={() => handleApproveAdvance(req.id)} className="p-2 bg-green-600 rounded-full hover:bg-green-500" title="Approve"><CheckCircle className="h-5 w-5"/></button><button onClick={() => handleRejectAdvance(req.id)} className="p-2 bg-red-600 rounded-full hover:bg-red-500" title="Reject"><XCircle className="h-5 w-5"/></button></td></tr>)))}
                         </tbody>
                     </table>
                 </div>
