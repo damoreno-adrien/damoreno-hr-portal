@@ -8,16 +8,26 @@ export default function OvertimeRequests({ db, companyConfig }) {
     const [loading, setLoading] = useState(true);
     const [processingId, setProcessingId] = useState(null);
 
-    // --- READ CONFIGURATION ---
-    // CORRECTED: Using 'overtimeThreshold' to match FinancialRulesSettings.jsx
+    // Configuration
     const OT_THRESHOLD_MINUTES = parseInt(companyConfig?.overtimeThreshold || 30);
-    
-    // Note: 'standardShiftHours' is not in FinancialRulesSettings, so it defaults to 9.
     const STANDARD_SHIFT_HOURS = parseFloat(companyConfig?.standardShiftHours || 9);
 
     useEffect(() => {
         fetchPotentialOvertime();
     }, [db, OT_THRESHOLD_MINUTES]);
+
+    const calculateScheduleDurationMinutes = (startTime, endTime) => {
+        if (!startTime || !endTime) return 0;
+        try {
+            const [startH, startM] = startTime.split(':').map(Number);
+            const [endH, endM] = endTime.split(':').map(Number);
+            let minutes = (endH * 60 + endM) - (startH * 60 + startM);
+            if (minutes < 0) minutes += 24 * 60; // Handle crossing midnight
+            return minutes;
+        } catch (e) {
+            return 0;
+        }
+    };
 
     const fetchPotentialOvertime = async () => {
         if (!db) return;
@@ -27,37 +37,74 @@ export default function OvertimeRequests({ db, companyConfig }) {
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         const dateStr = formatISODate(startOfMonth); 
 
-        const q = query(
-            collection(db, 'attendance'),
-            where('date', '>=', dateStr),
-            orderBy('date', 'desc')
-        );
-
         try {
-            const snapshot = await getDocs(q);
+            // 1. Fetch Attendance
+            const attQuery = query(
+                collection(db, 'attendance'),
+                where('date', '>=', dateStr),
+                orderBy('date', 'desc')
+            );
+            const attSnapshot = await getDocs(attQuery);
+
+            // 2. Fetch Schedules (for the same period) to compare
+            const schedQuery = query(
+                collection(db, 'schedules'),
+                where('date', '>=', dateStr)
+            );
+            const schedSnapshot = await getDocs(schedQuery);
+            
+            // Create a quick lookup map for schedules: "staffId_date" -> scheduleData
+            const scheduleMap = {};
+            schedSnapshot.forEach(doc => {
+                const d = doc.data();
+                scheduleMap[`${d.staffId}_${d.date}`] = d;
+            });
+
             const otCandidates = [];
 
-            snapshot.forEach(docSnap => {
+            attSnapshot.forEach(docSnap => {
                 const data = docSnap.data();
                 
+                // Only process completed shifts with no OT decision yet
                 if (data.checkOutTime && (!data.otStatus || data.otStatus === 'pending')) {
                     
+                    // A. Calculate Actual Worked Minutes
                     const checkIn = data.checkInTime.toDate();
                     const checkOut = data.checkOutTime.toDate();
-                    const durationMs = checkOut - checkIn;
-                    const hoursWorked = durationMs / (1000 * 60 * 60);
                     
-                    if (hoursWorked > STANDARD_SHIFT_HOURS) {
-                        const otMinutes = Math.round((hoursWorked - STANDARD_SHIFT_HOURS) * 60);
-                        
-                        // Comparing against the config value from FinancialRulesSettings
-                        if (otMinutes >= OT_THRESHOLD_MINUTES) {
-                            otCandidates.push({
-                                id: docSnap.id,
-                                ...data,
-                                otMinutes
-                            });
-                        }
+                    // Deduct Break Time if it exists
+                    let breakDurationMs = 0;
+                    if (data.breakStart && data.breakEnd) {
+                        breakDurationMs = data.breakEnd.toDate() - data.breakStart.toDate();
+                    }
+
+                    const totalDurationMs = (checkOut - checkIn) - breakDurationMs;
+                    const workedMinutes = Math.floor(totalDurationMs / (1000 * 60));
+
+                    // B. Calculate Scheduled Minutes
+                    const schedule = scheduleMap[`${data.staffId}_${data.date}`];
+                    let scheduledMinutes;
+
+                    if (schedule && schedule.startTime && schedule.endTime) {
+                        // Case 1: Has a specific schedule -> Compare against that
+                        scheduledMinutes = calculateScheduleDurationMinutes(schedule.startTime, schedule.endTime);
+                    } else {
+                        // Case 2: No schedule (e.g. worked on day off) -> Compare against Standard Shift
+                        scheduledMinutes = STANDARD_SHIFT_HOURS * 60;
+                    }
+
+                    // C. Calculate Overtime
+                    const otMinutes = workedMinutes - scheduledMinutes;
+                    
+                    // D. Check Threshold
+                    if (otMinutes >= OT_THRESHOLD_MINUTES) {
+                        otCandidates.push({
+                            id: docSnap.id,
+                            ...data,
+                            otMinutes,
+                            scheduledMinutes, // Store for display if needed
+                            workedMinutes     // Store for display if needed
+                        });
                     }
                 }
             });
@@ -110,7 +157,7 @@ export default function OvertimeRequests({ db, companyConfig }) {
                         Overtime Approvals (This Month)
                     </h3>
                     <p className="text-sm text-gray-400 mt-1">
-                        Flagging shifts exceeding {OT_THRESHOLD_MINUTES} mins over scheduled time.
+                        Flagging shifts exceeding scheduled time by {OT_THRESHOLD_MINUTES} mins.
                     </p>
                 </div>
                 <span className="bg-indigo-500 text-white text-xs font-bold px-2 py-1 rounded-full">
@@ -135,6 +182,8 @@ export default function OvertimeRequests({ db, companyConfig }) {
                                     +{Math.floor(req.otMinutes / 60)}h {req.otMinutes % 60}m
                                 </span>
                             </div>
+                            {/* Debug info: Show why it was flagged */}
+                            {/* <p className="text-xs text-gray-600 mt-1">Scheduled: {Math.floor(req.scheduledMinutes/60)}h, Worked: {Math.floor(req.workedMinutes/60)}h</p> */}
                         </div>
                         <div className="flex items-center gap-3">
                             <button
