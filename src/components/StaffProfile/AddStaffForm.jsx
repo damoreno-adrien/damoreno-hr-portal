@@ -1,4 +1,14 @@
 import React, { useState } from 'react';
+// 1. Import Firebase functions
+import { getFunctions, httpsCallable } from 'firebase/functions';
+// 2. Import your Firebase app config (adjust path if needed)
+import { app } from '../../../firebase'; 
+
+// 3. Get functions instance
+const functions = getFunctions(app, 'asia-southeast1');
+
+// 4. Get a reference to the callable function BY NAME
+const createUser = httpsCallable(functions, 'createUser');
 
 export default function AddStaffForm({ auth, onClose, departments }) {
     const [firstName, setFirstName] = useState('');
@@ -17,6 +27,7 @@ export default function AddStaffForm({ auth, onClose, departments }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        // ... (validation logic is unchanged) ...
         if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password || !rate) {
             setError('Please fill out all fields.');
             return;
@@ -30,36 +41,34 @@ export default function AddStaffForm({ auth, onClose, departments }) {
         setSuccess('');
 
         try {
-            const functionUrl = "https://createuser-3hzcubx72q-uc.a.run.app";
-            const token = await auth.currentUser.getIdToken();
+            // --- 5. REWRITTEN LOGIC ---
+            // The data is now sent as a single object.
+            // The { data: ... } wrapper is removed, as the backend
+            // expects the properties directly.
+            const userData = {
+                email, 
+                password, 
+                firstName, 
+                lastName, 
+                nickname, 
+                position, 
+                department, 
+                startDate, 
+                payType, 
+                rate: Number(rate), // Send rate as a number
+                // bonusStreak is set by the backend, no need to send
+            };
 
-            const response = await fetch(functionUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({
-                    data: {
-                        email, 
-                        password, 
-                        firstName, 
-                        lastName, 
-                        nickname, 
-                        position, 
-                        department, 
-                        startDate, 
-                        payType, 
-                        rate,
-                        bonusStreak: 0
-                    }
-                }),
-            });
+            // Call the function. Auth is handled automatically.
+            const result = await createUser(userData);
             
-            const responseData = await response.json();
-            if (!response.ok) throw new Error(responseData.error || 'Something went wrong');
-            
-            setSuccess(`Successfully created user for ${email}!`);
+            // The result object has a 'data' property
+            setSuccess(result.data.result || `Successfully created user for ${email}!`);
             setTimeout(() => onClose(), 2000);
 
         } catch (err) {
+            // Handle Firebase HttpsError
+            console.error(err);
             setError(err.message);
         } finally {
             setIsSaving(false);
