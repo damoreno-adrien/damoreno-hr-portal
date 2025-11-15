@@ -4,8 +4,8 @@ const { getFirestore } = require('firebase-admin/firestore');
 
 const db = getFirestore();
 
-exports.deleteStaffHandler = https.onCall({ region: "asia-southeast1" }, async (request) => { // Updated region
-    // 1. Authentication & Authorization
+exports.deleteStaffHandler = https.onCall({ region: "us-central1" }, async (request) => { // Updated region
+    // 1. Authentication & Authorizationy
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "The function must be called while authenticated.");
     }

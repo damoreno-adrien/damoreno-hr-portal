@@ -1,22 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from '../../../firebase.js'; // Correct path
+import { app } from '../../../firebase.js'; 
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './ProfileDetailsView.jsx';
 import { ProfileDetailsEdit } from './ProfileDetailsEdit';
 import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
-import { Archive, UserCheck, Trash, Key } from 'lucide-react'; // Import needed icons
+import { Archive, UserCheck, Trash, Key } from 'lucide-react'; 
 import * as dateUtils from '../../utils/dateUtils.js';
 
 // Initialize Functions
-const functionsDefault = getFunctions(app); // For us-central1
+const functionsDefault = getFunctions(app); // For us-central1 (Auth, Delete)
 const functionsAsia = getFunctions(app, "asia-southeast1"); // For asia-southeast1
 
 // Prepare Callable References
-const deleteStaffFunc = httpsCallable(functionsAsia, 'deleteStaff');
+// --- FIX: deleteStaff must be 'functionsDefault' to handle Auth delete ---
+const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff'); 
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
@@ -25,7 +26,6 @@ const getInitialFormData = (staff) => {
     // ... (this function is unchanged) ...
     const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
     const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
-
     let initialData = {
         email: staff.email || '',
         phoneNumber: staff.phoneNumber || '',
@@ -52,24 +52,18 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
-
-    // --- NEW: State for the bonus eligibility toggle ---
-    // Default to 'true' if the field doesn't exist (for all your existing staff)
     const [isBonusEligible, setIsBonusEligible] = useState(staff.isAttendanceBonusEligible ?? true);
 
 
     useEffect(() => {
         setFormData(getInitialFormData(staff));
         setBonusStreak(staff.bonusStreak || 0);
-        // --- NEW: Reset toggle state when staff changes ---
         setIsBonusEligible(staff.isAttendanceBonusEligible ?? true);
-        // setActiveTab('details');
         setIsEditing(false);
         setError('');
     }, [staff]);
 
     const currentJob = (staff.jobHistory || []).sort((a, b) => {
-        // ... (this function is unchanged) ...
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
         return dateA - dateB;
@@ -113,7 +107,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             alert("Invalid start date provided for new job role.");
             return;
         }
-        setIsSaving(true); // Indicate activity
+        setIsSaving(true); 
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
@@ -131,7 +125,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         // ... (this function is unchanged) ...
         const displayStartDate = dateUtils.formatDisplayDate(jobToDelete.startDate);
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}" started on ${displayStartDate}?`)) {
-            setIsSaving(true); // Indicate activity
+            setIsSaving(true); 
             setError('');
             try {
                 const staffDocRef = doc(db, 'staff_profiles', staff.id);
@@ -152,8 +146,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             setIsSaving(true);
             setError('');
             try {
+                // This will call the powerful backend function (see part 2)
                 await deleteStaffFunc({ staffId: staff.id });
-                onClose();
+                onClose(); // Close modal on success
             } catch (err) {
                 alert(`Error deleting staff: ${err.message}`);
                 setError(`Error deleting staff: ${err.message}`);
@@ -185,7 +180,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                  if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
                     setIsSaving(false); return;
                  }
-                 updateData = { status: null, endDate: null };
+                 updateData = { status: 'active', endDate: null }; // Use 'active'
                  authDisabled = false;
             }
             await Promise.all([
@@ -276,10 +271,10 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
          }
      };
 
-    // --- NEW: Handler for the eligibility toggle ---
     const handleToggleBonusEligibility = async (e) => {
+        // ... (this function is unchanged) ...
         const newValue = e.target.checked;
-        setIsBonusEligible(newValue); // Optimistic UI update
+        setIsBonusEligible(newValue); 
         setIsSaving(true);
         setError('');
         try {
@@ -289,7 +284,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             alert("Failed to update bonus eligibility.");
             setError("Failed to update bonus eligibility.");
             console.error("Bonus Eligibility Error:", err);
-            setIsBonusEligible(!newValue); // Revert on error
+            setIsBonusEligible(!newValue); 
         } finally {
             setIsSaving(false);
         }
@@ -303,7 +298,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
     return (
         <div className="space-y-6">
-            {/* Tabs */}
+            {/* ... (Tabs are unchanged) ... */}
             <div className="border-b border-gray-700">
                 <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>
@@ -323,12 +318,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 </nav>
             </div>
 
-            {/* General Error Display */}
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
 
-            {/* Conditional Rendering based on Tab */}
             {activeTab === 'details' && (
-                // ... (details tab unchanged) ...
                 <div className="space-y-6">
                     {isEditing ? (
                         <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} />
@@ -339,7 +331,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             )}
 
             {activeTab === 'job' && (
-                // ... (job tab unchanged) ...
                 <div className="space-y-6">
                      <JobHistoryManager
                         jobHistory={staff.jobHistory}
@@ -351,7 +342,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
             )}
 
             {activeTab === 'documents' && (
-                // ... (documents tab unchanged) ...
                 <DocumentManager
                     documents={staff.documents}
                     onUploadFile={handleUploadFile}
@@ -362,11 +352,10 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
              {activeTab === 'settings' && userRole === 'manager' && (
                 <div className="space-y-6">
-                     {/* Bonus Management */}
+                     {/* --- Bonus Management (unchanged) --- */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                            <h4 className="text-base font-semibold text-white">Bonus Management</h4>
                            <div className="mt-4 space-y-4">
-                                {/* Existing Streak Setter */}
                                 <div>
                                     <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
                                     <div className="mt-2 flex items-center space-x-4">
@@ -381,8 +370,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                                         <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
                                     </div>
                                 </div>
-                                
-                                {/* --- NEW: Bonus Eligibility Toggle --- */}
                                 <div className="border-t border-gray-700 mt-4 pt-4">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -403,9 +390,24 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                            </div>
                         </div>
 
-                     {/* Action Buttons moved here */}
+                     {/* --- NEW: Staff UID --- */}
+                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                        <h4 className="text-base font-semibold text-white">Staff Information</h4>
+                        <div className="mt-4">
+                            <label htmlFor="staffUid" className="block text-sm font-medium text-gray-400 mb-1">Staff User ID (UID)</label>
+                            <input 
+                                type="text" 
+                                id="staffUid"
+                                readOnly 
+                                value={staff.id} 
+                                className="w-full mt-1 px-3 py-2 bg-gray-900 text-gray-400 rounded-md border border-gray-700 select-all"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">For database lookups.</p>
+                        </div>
+                     </div>
+                     
+                     {/* --- Staff Actions (unchanged) --- */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
-                         {/* ... (staff actions unchanged) ... */}
                          <h4 className="text-base font-semibold text-white">Staff Actions</h4>
                          <div>
                             {isActive ? (
@@ -420,14 +422,14 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                          {!isActive && (
                             <div className="pt-4 border-t border-gray-700">
                                  <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Delete staff permanently"> <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently </button>
-                                <p className="text-xs text-red-400 mt-2">Warning: Deletion is permanent.</p>
+                                <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
                              </div>
                          )}
                      </div>
                 </div>
              )}
 
-            {/* Action Buttons Bar at Bottom */}
+            {/* --- Action Buttons (unchanged) --- */}
             <ProfileActionButtons
                 isEditing={isEditing}
                 isSaving={isSaving}
