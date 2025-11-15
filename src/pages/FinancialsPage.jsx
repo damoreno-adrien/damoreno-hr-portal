@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { Plus, Pencil, Trash2, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, CheckCircle, XCircle, Download } from 'lucide-react'; // 1. Added Download icon
 import LoanModal from '../components/Financials/LoanModal';
 import AdvanceModal from '../components/SalaryAdvance/AdvanceModal';
 import AdjustmentModal from '../components/Payroll/AdjustmentModal';
+// 2. Add imports for PDF generation
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1];
@@ -22,7 +25,7 @@ const StatusBadge = ({ status }) => {
 export default function FinancialsPage({ staffList, db }) {
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
-    const [showArchived, setShowArchived] = useState(false); // NEW state
+    const [showArchived, setShowArchived] = useState(false); 
 
     const [pendingAdvances, setPendingAdvances] = useState([]);
     const [isLoadingPending, setIsLoadingPending] = useState(true);
@@ -51,7 +54,6 @@ export default function FinancialsPage({ staffList, db }) {
         const unsubscribe = onSnapshot(q, (snap) => {
             const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
-            // UPDATED: Filter out requests from inactive staff
             const hydratedList = pendingList
                 .map(req => {
                     const staffMember = staffList.find(s => s.id === req.staffId);
@@ -106,9 +108,49 @@ export default function FinancialsPage({ staffList, db }) {
     const handleOpenEditAdjustmentModal = (adj) => { setEditingAdjustment(adj); setIsAdjustmentModalOpen(true); };
     const handleDeleteAdjustment = async (id) => { if (window.confirm("Delete this adjustment record?")) await deleteDoc(doc(db, 'monthly_adjustments', id)); };
 
+    // 3. Add the PDF Export Function
+    const handleExportPendingAdvances = () => {
+        if (pendingAdvances.length === 0) {
+            alert("No pending advances to export.");
+            return;
+        }
+
+        const doc = new jsPDF();
+        const today = new Date().toLocaleDateString('en-GB');
+        const totalAmount = pendingAdvances.reduce((sum, req) => sum + req.amount, 0);
+        
+        // --- PDF Header ---
+        doc.setFontSize(18);
+        doc.text("Da Moreno At Town", 14, 22);
+        doc.setFontSize(12);
+        doc.text("Pending Salary Advances", 14, 30);
+        doc.setFontSize(10);
+        doc.text(`As of: ${today}`, 14, 36);
+
+        // --- PDF Table ---
+        const head = [['Staff Name', 'Request Date', 'Amount (THB)']];
+        const body = pendingAdvances.map(req => [
+            req.staffName,
+            req.date, 
+            req.amount.toLocaleString('en-US')
+        ]);
+
+        autoTable(doc, { // <-- Call autoTable as a function, passing 'doc' in
+            startY: 45,
+            head: head,
+            body: body,
+            foot: [['Total Pending', '', totalAmount.toLocaleString('en-US')]],
+            headStyles: { fillColor: [30, 41, 59] }, // Tailwind gray-800
+            footStyles: { fontWeight: 'bold', fillColor: [241, 245, 249], textColor: 0 },
+            theme: 'striped',
+        });
+
+        // --- Save File ---
+        doc.save(`pending_advances_${new Date().toISOString().split('T')[0]}.pdf`);
+    };
+
     const selectedStaffName = getDisplayName(staffList.find(s => s.id === selectedStaffId));
 
-    // NEW: Memoized list for the dropdown
     const staffForDropdown = useMemo(() => {
         const sortedList = [...staffList].sort((a, b) => {
             const nameA = getDisplayName(a);
@@ -134,11 +176,9 @@ export default function FinancialsPage({ staffList, db }) {
                     <div className="flex-grow">
                         <select value={selectedStaffId} onChange={handleStaffChange} className="w-full p-2 bg-gray-700 rounded-md text-white">
                             <option value="">-- Select Staff --</option>
-                            {/* UPDATED: Use the filtered list */}
                             {staffForDropdown.map(s => (<option key={s.id} value={s.id}>{getDisplayName(s)}</option>))}
                         </select>
                     </div>
-                    {/* NEW: Toggle to show archived staff in dropdown */}
                     <div className="flex items-center flex-shrink-0 pl-2">
                         <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
@@ -147,7 +187,19 @@ export default function FinancialsPage({ staffList, db }) {
             </div>
 
             <section className="mb-10">
-                <h3 className="text-xl font-semibold text-white mb-4">Pending Salary Advance Requests</h3>
+                {/* 4. Add the button to the UI */}
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-semibold text-white">Pending Salary Advance Requests</h3>
+                    <button
+                        onClick={handleExportPendingAdvances}
+                        disabled={isLoadingPending || pendingAdvances.length === 0}
+                        className="flex items-center bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg text-sm disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed"
+                    >
+                        <Download className="h-4 w-4 mr-2" />
+                        Download PDF
+                    </button>
+                </div>
+                
                 <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                     <table className="min-w-full">
                         <thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead>
