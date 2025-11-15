@@ -5,7 +5,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const db = getFirestore();
 
 // *** CORRECT EXPORT NAME TO MATCH FRONTEND ***
-exports.createUser = onCall({ region: "asia-southeast1" }, async (request) => {
+exports.createUserHandler = onCall({ region: "asia-southeast1" }, async (request) => {
 
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to create a user.");
@@ -65,7 +65,7 @@ exports.createUser = onCall({ region: "asia-southeast1" }, async (request) => {
             department,
             startDate,
             payType,
-            rate: Number(rate)
+            rate: parseInt(rate, 10)
         };
 
         // Create staff profile document

@@ -55,7 +55,7 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                 department, 
                 startDate, 
                 payType, 
-                rate: Number(rate), // Send rate as a number
+                rate: parseInt(rate, 10), // Send rate as a number
                 // bonusStreak is set by the backend, no need to send
             };
 
