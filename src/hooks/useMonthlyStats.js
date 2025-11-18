@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore'; // Changed imports
+import { doc, onSnapshot } from 'firebase/firestore';
 import { DateTime } from 'luxon';
-// --- NEW IMPORT ---
 import { calculateMonthlyStats } from '../utils/attendanceCalculator'; 
 
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
-// ... (formatMillisToHours and formatMinutesToHours helpers remain the same) ...
 const formatMillisToHours = (ms) => {
     if (ms <= 0) return '0h 0m';
     const totalMinutes = Math.floor(ms / 60000);
@@ -44,7 +42,7 @@ export const useMonthlyStats = (db, user, companyConfig) => {
             const now = DateTime.now().setZone(THAILAND_TIMEZONE);
             const currentPayPeriod = { month: now.month, year: now.year };
 
-            // --- 1. Call the new shared calculator ---
+            // --- 1. Call the calculator ---
             calculateMonthlyStats(db, staffProfile, currentPayPeriod, companyConfig)
                 .then(stats => {
                     // --- 2. Set Final Stats for the dashboard ---
@@ -57,11 +55,20 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                         totalEarlyDepartures: formatMinutesToHours(stats.totalEarlyDepartureMinutes),
                     });
 
-                    // --- 3. Calculate Bonus Status ---
-                    setBonusStatus({
-                        onTrack: stats.didQualifyForBonus,
-                        text: stats.didQualifyForBonus ? 'On Track' : 'Bonus Lost for this month'
-                    });
+                    // --- 3. Calculate Bonus Status (UPDATED) ---
+                    // Check eligibility flag explicitly
+                    if (staffProfile.isAttendanceBonusEligible === false) {
+                        setBonusStatus({ 
+                            onTrack: false, 
+                            text: 'Not Eligible',
+                            notEligible: true // New flag for UI styling
+                        });
+                    } else {
+                        setBonusStatus({
+                            onTrack: stats.didQualifyForBonus,
+                            text: stats.didQualifyForBonus ? 'On Track' : 'Bonus Lost for this month'
+                        });
+                    }
                 })
                 .catch(console.error);
         });

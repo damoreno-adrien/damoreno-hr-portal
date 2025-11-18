@@ -1,15 +1,17 @@
+// src/pages/DashboardPage.jsx
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore'; 
-import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, LogOut, Calendar } from 'lucide-react';
+import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, Calendar, Slash } from 'lucide-react'; // Added Slash icon
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
-import { formatCustom,formatISODate, addDays, fromFirestore, startOfWeek } from '../utils/dateUtils';
+import { formatCustom, formatISODate, addDays, fromFirestore } from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
+    // ... (All existing state and useEffects are unchanged) ...
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
@@ -22,7 +24,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
     const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
-
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
@@ -233,6 +234,37 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         }
     };
 
+    // --- FIX: Updated Bonus Display Logic ---
+    let bonusContent;
+    let bonusBgClass;
+
+    if (bonusStatus.notEligible) {
+        bonusContent = (
+            <>
+                <span className="font-bold text-gray-400">Not Eligible</span>
+                <Slash className="w-5 h-5 text-gray-500" />
+            </>
+        );
+        bonusBgClass = "bg-gray-700/40 border border-gray-600";
+    } else if (bonusStatus.onTrack) {
+        bonusContent = (
+            <>
+                <span className="font-bold text-green-400">{bonusStatus.text}</span>
+                <CheckCircle className="w-5 h-5 text-green-400" />
+            </>
+        );
+        bonusBgClass = "bg-green-500/20";
+    } else {
+        bonusContent = (
+            <>
+                <span className="font-bold text-red-400">{bonusStatus.text}</span>
+                <Award className="w-5 h-5 text-red-400" />
+            </>
+        );
+        bonusBgClass = "bg-red-500/20";
+    }
+    // ----------------------------------------
+
     return (
         <div>
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday to you! We wish you all the best! 🎂</div>}
@@ -256,9 +288,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 </div>
                 <div className="space-y-8">
                     <DashboardCard title="Bonus Status">
-                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusStatus.onTrack ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
-                            <span className={`font-bold ${bonusStatus.onTrack ? 'text-green-400' : 'text-red-400'}`}>{bonusStatus.text}</span>
-                            {bonusStatus.onTrack ? <CheckCircle className="w-5 h-5 text-green-400"/> : <Award className="w-5 h-5 text-red-400"/>}
+                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>
+                            {bonusContent}
                         </div>
                         <p className="text-xs text-gray-500 mt-2">Based on monthly attendance.</p>
                     </DashboardCard>
@@ -276,7 +307,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                            <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
                            <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
                            <StatItem icon={AlertTriangle} label="Total Time Late" value={monthlyStats.totalTimeLate} colorClass="yellow" />
-                           {/* <StatItem icon={LogOut} label="Total Early Departures" value={monthlyStats.totalEarlyDepartures} colorClass="purple" /> */}
                         </div>
                     </DashboardCard>
                     <DashboardCard title="Leave Balance">
