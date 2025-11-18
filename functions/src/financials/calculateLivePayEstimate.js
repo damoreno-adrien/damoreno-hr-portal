@@ -1,5 +1,4 @@
-const { HttpsError, https } = require("firebase-functions/v2");
-const { onCall } = require("firebase-functions/v2/https");
+const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore } = require('firebase-admin/firestore');
@@ -11,17 +10,11 @@ try {
     Interval = luxon.Interval;
 } catch(e) {
     console.error("FAILED to require luxon:", e);
-    // Throwing error during initialization might prevent deployment or detailed logging
 }
 
-let getYear, getMonth, getDate, getDaysInMonth, startOfMonth, parseISO, isValid;
+let parseISO, isValid;
 try {
     const dfns = require('date-fns');
-    getYear = dfns.getYear;
-    getMonth = dfns.getMonth;
-    getDate = dfns.getDate;
-    getDaysInMonth = dfns.getDaysInMonth;
-    startOfMonth = dfns.startOfMonth;
     parseISO = dfns.parseISO;
     isValid = dfns.isValid;
 } catch (e) {
@@ -31,198 +24,223 @@ try {
 const db = getFirestore();
 const timeZone = "Asia/Bangkok";
 
+// Helper to normalize job data (same as frontend)
+const getCurrentJob = (staffProfile) => {
+    const jobHistory = staffProfile.jobHistory || [];
+    if (jobHistory.length === 0) return null;
+    
+    const latestJob = [...jobHistory].sort((a, b) => {
+        const dateA = a.startDate ? (parseISO ? parseISO(a.startDate) : new Date(a.startDate)) : new Date(0);
+        const dateB = b.startDate ? (parseISO ? parseISO(b.startDate) : new Date(b.startDate)) : new Date(0);
+        return dateB - dateA;
+    })[0];
+
+    let type = latestJob.payType;
+    if (type === 'Monthly') type = 'Salary';
+
+    return {
+        ...latestJob,
+        payType: type || 'Salary',
+        baseSalary: latestJob.baseSalary ?? (type === 'Salary' ? latestJob.rate : 0),
+        hourlyRate: latestJob.hourlyRate ?? (type === 'Hourly' ? latestJob.rate : 0),
+        standardDayHours: latestJob.standardDayHours || 8
+    };
+};
+
+// Safe Date conversion
 const safeToDate = (value) => {
     if (!value) return null;
-    if (typeof value === 'object' && value !== null && typeof value.toDate === 'function' && typeof value.nanoseconds === 'number') {
-        try { return value.toDate(); }
-        catch (e) { console.error("safeToDate - Error calling .toDate() on potential Timestamp:", value, e); return null; }
+    if (typeof value === 'object' && value.toDate) return value.toDate();
+    if (typeof value === 'string' && parseISO && isValid) {
+        const parsed = parseISO(value);
+        return isValid(parsed) ? parsed : null;
     }
-    try {
-        if (value instanceof Date && !isNaN(value)) {
-            return value;
-        }
-    } catch(e) { console.error("safeToDate - Error during 'instanceof Date' check:", e); }
-    if (typeof value === 'string') {
-        if (parseISO && isValid) {
-            const parsed = parseISO(value);
-            if (isValid(parsed)) {
-                return parsed;
-            }
-        } else {
-             console.error("safeToDate - date-fns functions not loaded, cannot parse string.");
-        }
-    }
-    console.warn("safeToDate - Could not convert value to Date:", value);
     return null;
 };
 
 exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, async (request) => {
-    console.log("calculateLivePayEstimateHandler: Function execution started.");
-    console.log("calculateLivePayEstimateHandler: Auth context:", JSON.stringify(request.auth || null));
-
-    if (!DateTime || !Interval) {
-        console.error("CRITICAL: Luxon library not loaded!");
-        throw new OnCallHttpsError("internal", "Date/Time library failed to load (luxon).");
-    }
-     if (!getYear || !getMonth || !getDate || !getDaysInMonth || !startOfMonth || !parseISO || !isValid) {
-         console.error("CRITICAL: date-fns functions not loaded!");
-         throw new OnCallHttpsError("internal", "Core Date library failed to load.");
-     }
-
-    if (!request.auth) {
-         console.error("calculateLivePayEstimateHandler: Unauthenticated access attempt.");
-         throw new OnCallHttpsError("unauthenticated", "You must be logged in to perform this action.");
-     }
+    if (!DateTime) throw new OnCallHttpsError("internal", "Luxon library not loaded.");
+    if (!request.auth) throw new OnCallHttpsError("unauthenticated", "You must be logged in.");
+    
     const staffId = request.auth.uid;
-    console.log(`calculateLivePayEstimateHandler: Processing request for staffId: ${staffId}`);
+    console.log(`calculateLivePayEstimateHandler: Processing for ${staffId}`);
 
     try {
-        console.log("calculateLivePayEstimateHandler: Inside try block, fetching data...");
-
         const nowZoned = DateTime.now().setZone(timeZone);
         const year = nowZoned.year;
         const month = nowZoned.month;
-        const daysInMonth = nowZoned.daysInMonth;
-        const daysPassed = nowZoned.day;
         const startOfMonthDt = nowZoned.startOf('month');
         const startDateOfMonthStr = startOfMonthDt.toISODate();
         const todayStr = nowZoned.toISODate();
 
-        console.log(`calculateLivePayEstimateHandler: Fetching data for ${staffId} between ${startDateOfMonthStr} and ${todayStr}`);
-        const staffProfileRef = db.collection("staff_profiles").doc(staffId).get();
-        const configRef = db.collection("settings").doc("company_config").get();
-        const advancesQuery = db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month).where("status", "in", ["approved", "pending"]).get();
-        const loansQuery = db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get();
-        const schedulesQuery = db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
-        const attendanceQuery = db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get();
-        const leaveQuery = db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("endDate", ">=", startDateOfMonthStr).get();
-        const latestPayslipQuery = db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get();
-
-        const results = await Promise.allSettled([
-            staffProfileRef, configRef, advancesQuery, loansQuery, schedulesQuery, attendanceQuery, leaveQuery, latestPayslipQuery
+        // 1. Fetch All Data
+        const [
+            staffProfileRes, 
+            configRes, 
+            advancesRes, 
+            loansRes, 
+            attendanceRes, // Used for OT calculation
+            schedulesRes, // Used for absences/lates
+            leaveRes, 
+            latestPayslipRes
+        ] = await Promise.all([
+            db.collection("staff_profiles").doc(staffId).get(),
+            db.collection("settings").doc("company_config").get(),
+            db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month).where("status", "in", ["approved", "pending"]).get(),
+            db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get(),
+            // Fetch ALL attendance this month to calc OT
+            db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get(),
+            db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get(),
+            db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("endDate", ">=", startDateOfMonthStr).get(),
+            db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get()
         ]);
 
-        const [staffProfileRes, configRes, advancesRes, loansRes, schedulesRes, attendanceRes, leaveRes, latestPayslipRes] = results;
+        if (!staffProfileRes.exists) throw new OnCallHttpsError("not-found", "Staff profile not found.");
+        if (!configRes.exists) throw new OnCallHttpsError("not-found", "Company config not found.");
 
-        console.log("Promise.allSettled Results:", JSON.stringify(results.map(r => r.status)));
+        const staffProfile = staffProfileRes.data();
+        const config = configRes.data();
+        const job = getCurrentJob(staffProfile);
 
-        if (staffProfileRes.status === 'rejected') {
-            console.error("Failed to fetch staff profile:", staffProfileRes.reason);
-            throw new OnCallHttpsError("internal", "Failed to fetch staff profile.", staffProfileRes.reason?.message);
+        if (!job) throw new OnCallHttpsError("failed-precondition", "No job history found.");
+
+        // --- 2. CALCULATE BASE PAY & RATES ---
+        let earnedPay = 0;
+        let deductionRate = 0;
+        let hourlyRateForOT = 0;
+
+        if (job.payType === 'Salary') {
+            // Salary (Type A & B)
+            const monthlySalary = job.baseSalary || 0;
+            // Pro-rate base salary for days passed
+            const daysInMonth = nowZoned.daysInMonth;
+            const daysPassed = nowZoned.day;
+            earnedPay = (monthlySalary / daysInMonth) * daysPassed;
+            
+            // Rates
+            deductionRate = monthlySalary / 30; // Rule of 30 for deductions
+            hourlyRateForOT = (monthlySalary / 30) / (job.standardDayHours || 8);
+
+        } else {
+            // Hourly (Type C)
+            const hourlyRate = job.hourlyRate || 0;
+            // We must calculate actual hours worked to know earned pay
+            // This is complex for a "live" estimate, so we might estimate 
+            // based on scheduled hours passed? 
+            // For simplicity/accuracy, let's sum up actual attendance duration.
+            let totalMinutesWorked = 0;
+            attendanceRes.docs.forEach(doc => {
+                const d = doc.data();
+                if (d.checkInTime && d.checkOutTime) {
+                    const start = d.checkInTime.toDate();
+                    const end = d.checkOutTime.toDate();
+                    const duration = (end - start) / (1000 * 60);
+                    // Subtract break? (Assuming 60m if > 5 hours is a common rule, 
+                    // or check breakStart/End if available)
+                    let breakMins = 0;
+                    if (d.breakStart && d.breakEnd) {
+                        breakMins = (d.breakEnd.toDate() - d.breakStart.toDate()) / (1000 * 60);
+                    }
+                    totalMinutesWorked += Math.max(0, duration - breakMins);
+                }
+            });
+            earnedPay = (totalMinutesWorked / 60) * hourlyRate;
+            
+            deductionRate = 0; // No deductions for hourly
+            hourlyRateForOT = 0; // No OT for hourly
         }
-        if (configRes.status === 'rejected') {
-            console.error("Failed to fetch company config:", configRes.reason);
-            throw new OnCallHttpsError("internal", "Failed to fetch company config.", configRes.reason?.message);
+
+        // --- 3. CALCULATE OT PAY ---
+        let overtimePay = 0;
+        if (job.payType === 'Salary') {
+            const otMultiplier = config.overtimeRate || 1.0;
+            let totalOtMinutes = 0;
+            attendanceRes.docs.forEach(doc => {
+                const d = doc.data();
+                if (d.otStatus === 'approved') {
+                    totalOtMinutes += (d.otApprovedMinutes || 0);
+                }
+            });
+            overtimePay = (totalOtMinutes / 60) * hourlyRateForOT * otMultiplier;
         }
-        if (advancesRes.status === 'rejected') { console.error("Failed to fetch advances:", advancesRes.reason); }
-        if (loansRes.status === 'rejected') { console.error("Failed to fetch loans:", loansRes.reason); }
-        if (schedulesRes.status === 'rejected') { console.error("Failed to fetch schedules:", schedulesRes.reason); throw new OnCallHttpsError("internal", "Failed to fetch schedules.", schedulesRes.reason?.message); }
-        if (attendanceRes.status === 'rejected') { console.error("Failed to fetch attendance:", attendanceRes.reason); throw new OnCallHttpsError("internal", "Failed to fetch attendance.", attendanceRes.reason?.message); }
-        if (leaveRes.status === 'rejected') { console.error("Failed to fetch leave requests:", leaveRes.reason); }
-        if (latestPayslipRes.status === 'rejected') { console.error("Failed to fetch latest payslip:", latestPayslipRes.reason); }
 
-        const staffProfileSnap = staffProfileRes.value;
-        const configSnap = configRes.value;
-        const advancesSnap = advancesRes.status === 'fulfilled' ? advancesRes.value : { docs: [] };
-        const loansSnap = loansRes.status === 'fulfilled' ? loansRes.value : { docs: [] };
-        const schedulesSnap = schedulesRes.value;
-        const attendanceSnap = attendanceRes.value;
-        const leaveSnap = leaveRes.status === 'fulfilled' ? leaveRes.value : { docs: [] };
-        const latestPayslipSnap = latestPayslipRes.status === 'fulfilled' ? latestPayslipRes.value : { docs: [] };
-
-        console.log("calculateLivePayEstimateHandler: Firestore fetches processed.");
-
-        if (!staffProfileSnap.exists) { throw new OnCallHttpsError("not-found", "Staff profile not found."); }
-        if (!configSnap.exists) { throw new OnCallHttpsError("not-found", "Company config not found."); }
-
-        const staffProfile = staffProfileSnap.data();
-        const companyConfig = configSnap.data();
-        console.log("calculateLivePayEstimateHandler: Profile and config loaded.");
-
-        const jobHistory = staffProfile.jobHistory || [];
-        const latestJob = [...jobHistory].sort((a, b) => {
-            const dateA = a.startDate ? parseISO(a.startDate) : new Date(0);
-            const dateB = b.startDate ? parseISO(b.startDate) : new Date(0);
-            const timeA = !isNaN(dateA) ? dateA.getTime() : 0;
-            const timeB = !isNaN(dateB) ? dateB.getTime() : 0;
-            return timeB - timeA;
-         })[0];
-
-        if (!latestJob || latestJob.payType !== 'Monthly' || !latestJob.rate) { throw new OnCallHttpsError("failed-precondition", "Pay estimation is only available for monthly salary staff."); }
-        console.log("calculateLivePayEstimateHandler: Latest job identified:", latestJob);
-
-        const baseSalary = latestJob.rate || 0;
-        const dailyRate = daysInMonth > 0 ? baseSalary / daysInMonth : 0;
-        const advancesAlreadyTaken = advancesSnap.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
-        const currentAdvance = advancesSnap.docs.length > 0 ? advancesSnap.docs.sort((a, b) => (b.data().createdAt?.toMillis() || 0) - (a.data().createdAt?.toMillis() || 0))[0].data() : null;
-        const activeLoans = loansSnap.docs.map(doc => doc.data());
-        const loanRepayment = activeLoans.reduce((sum, loan) => sum + (loan.monthlyRepayment || loan.recurringPayment || 0), 0);
-        const baseSalaryEarned = dailyRate * daysPassed;
-        const bonusRules = companyConfig.attendanceBonus || {};
-        const schedules = schedulesSnap.docs.map(doc => doc.data());
-        const attendanceRecords = new Map(attendanceSnap.docs.map(doc => [doc.data().date, doc.data()]));
-        const approvedLeave = leaveSnap.docs.map(doc => doc.data()).filter(l => l.startDate <= todayStr);
-        let lateCount = 0;
+        // --- 4. CALCULATE ABSENCES (For Bonus & Deductions) ---
         let absenceCount = 0;
-        let unpaidAbsencesCount = 0;
-        const publicHolidays = companyConfig.publicHolidays ? companyConfig.publicHolidays.map(h => h.date) : [];
+        let lateCount = 0;
+        const schedules = schedulesRes.docs.map(d => d.data());
+        const attendanceMap = new Map(attendanceRes.docs.map(d => [d.data().date, d.data()]));
+        const approvedLeaves = leaveRes.docs.map(d => d.data());
+        const publicHolidays = config.publicHolidays?.map(h => h.date) || [];
 
         schedules.forEach(schedule => {
-             if (schedule.date > todayStr) return;
-             const attendance = attendanceRecords.get(schedule.date);
-             const isOnLeave = approvedLeave.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
-             const isPublicHoliday = publicHolidays.includes(schedule.date);
-             if (!attendance) {
-                  if (!isOnLeave && !isPublicHoliday) { absenceCount++; unpaidAbsencesCount++; }
-             } else {
-                 const actualCheckInJS = safeToDate(attendance.checkInTime);
-                 if (actualCheckInJS && schedule.startTime) {
+            if (schedule.date > todayStr) return; // Future schedule
+            const att = attendanceMap.get(schedule.date);
+            const isOnLeave = approvedLeaves.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
+            const isHoliday = publicHolidays.includes(schedule.date);
+
+            if (!att && !isOnLeave && !isHoliday) {
+                absenceCount++;
+            } else if (att && att.checkInTime && schedule.startTime) {
+                // Check Lateness
+                 const actualCheckInJS = safeToDate(att.checkInTime);
+                 if (actualCheckInJS) {
                      try {
-                         const actualCheckInLuxon = DateTime.fromJSDate(actualCheckInJS).setZone(timeZone);
-                         const scheduledStartLuxon = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: timeZone });
-                         if (actualCheckInLuxon > scheduledStartLuxon) {
+                         const checkIn = DateTime.fromJSDate(actualCheckInJS).setZone(timeZone);
+                         const scheduled = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: timeZone });
+                         if (checkIn > scheduled.plus({ minutes: 5 })) { // 5 min grace
                              lateCount++;
                          }
-                     } catch (parseError) { console.error(`Error parsing schedule start time for late check with Luxon: ${schedule.date} ${schedule.startTime}`, parseError); }
+                     } catch (e) { console.error(e); }
                  }
-             }
-         });
+            }
+        });
 
+        // --- 5. BONUS ---
         let potentialBonus = 0;
-        const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences ?? 0) && lateCount <= (bonusRules.allowedLates ?? 0);
-        if (bonusOnTrack) {
-            const currentStreak = staffProfile.bonusStreak || 0;
-            const projectedStreak = currentStreak + 1;
-            if (projectedStreak === 1) potentialBonus = bonusRules.month1 || 0;
-            else if (projectedStreak === 2) potentialBonus = bonusRules.month2 || 0;
+        const bonusRules = config.attendanceBonus || {};
+        const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences || 0) && lateCount <= (bonusRules.allowedLates || 0);
+        
+        // Hourly staff generally don't get attendance bonus? 
+        // Assuming only 'Salary' get it, or check a flag on the user profile.
+        if (bonusOnTrack && staffProfile.isAttendanceBonusEligible !== false) {
+            const streak = (staffProfile.bonusStreak || 0) + 1;
+            if (streak === 1) potentialBonus = bonusRules.month1 || 0;
+            else if (streak === 2) potentialBonus = bonusRules.month2 || 0;
             else potentialBonus = bonusRules.month3 || 0;
         }
 
-        const absenceDeductions = unpaidAbsencesCount * dailyRate;
-        const ssoRatePercent = companyConfig.ssoRate || 0;
-        const ssoCapAmount = companyConfig.ssoCap || 0;
-        const ssoDeduction = Math.min(baseSalary * (ssoRatePercent / 100), ssoCapAmount);
-        const totalEstimatedEarnings = baseSalaryEarned + potentialBonus;
-        const totalEstimatedDeductions = absenceDeductions + ssoDeduction + advancesAlreadyTaken + loanRepayment;
-        const estimatedNetPay = totalEstimatedEarnings - totalEstimatedDeductions;
-        const latestPayslipDoc = latestPayslipSnap.docs.length > 0 ? latestPayslipSnap.docs[0] : null;
-        const latestPayslip = latestPayslipDoc ? { id: latestPayslipDoc.id, ...latestPayslipDoc.data() } : null;
+        // --- 6. DEDUCTIONS ---
+        const absenceDeductionAmount = absenceCount * deductionRate;
+        const advances = advancesRes.docs.reduce((sum, d) => sum + d.data().amount, 0);
+        const loans = loansRes.docs.reduce((sum, d) => sum + (d.data().monthlyRepayment || 0), 0);
+        
+        // SSO (Estimated on current earnings + OT)
+        const ssoRate = (config.ssoRate || 5) / 100;
+        const ssoCap = config.ssoCap || 750;
+        const estimatedTotalEarnings = earnedPay + overtimePay + potentialBonus;
+        const ssoDeduction = Math.min(Math.max(1650, estimatedTotalEarnings) * ssoRate, ssoCap);
 
-        console.log(`calculateLivePayEstimateHandler: Calculation complete for ${staffId}. Est Net: ${estimatedNetPay}`);
+        // --- 7. FINAL NET ---
+        const totalDeductions = absenceDeductionAmount + advances + loans + ssoDeduction;
+        const estimatedNet = (earnedPay + overtimePay + potentialBonus) - totalDeductions;
 
         return {
-            baseSalaryEarned: baseSalaryEarned,
+            baseSalaryEarned: earnedPay,
+            overtimePay: overtimePay, // <-- NEW FIELD
             potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
-            deductions: { absences: absenceDeductions, socialSecurity: ssoDeduction, salaryAdvances: advancesAlreadyTaken, loanRepayment: loanRepayment },
-            activeLoans: activeLoans,
-            estimatedNetPay: estimatedNetPay,
-            currentAdvance: currentAdvance,
-            latestPayslip: latestPayslip,
+            deductions: { 
+                absences: absenceDeductionAmount, 
+                socialSecurity: ssoDeduction, 
+                salaryAdvances: advances, 
+                loanRepayment: loans 
+            },
+            estimatedNetPay: Math.max(0, estimatedNet),
+            // ... (other fields for UI)
+            latestPayslip: latestPayslipRes.docs[0]?.data() || null
         };
 
     } catch (error) {
-        console.error(`Error in calculateLivePayEstimate for ${staffId}:`, error);
-        if (error instanceof OnCallHttpsError) throw error;
-        throw new OnCallHttpsError("internal", "An unexpected error occurred while calculating your pay estimate.", error.message);
+        console.error("Error in calculateLivePayEstimate:", error);
+        throw new OnCallHttpsError("internal", error.message);
     }
 });

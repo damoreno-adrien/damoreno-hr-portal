@@ -1,13 +1,8 @@
 import React, { useState } from 'react';
-// 1. Import Firebase functions
 import { getFunctions, httpsCallable } from 'firebase/functions';
-// 2. Import your Firebase app config (adjust path if needed)
 import { app } from '../../../firebase'; 
 
-// 3. Get functions instance
 const functions = getFunctions(app, 'asia-southeast1');
-
-// 4. Get a reference to the callable function BY NAME
 const createUser = httpsCallable(functions, 'createUser');
 
 export default function AddStaffForm({ auth, onClose, departments }) {
@@ -19,32 +14,37 @@ export default function AddStaffForm({ auth, onClose, departments }) {
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [payType, setPayType] = useState('Monthly');
-    const [rate, setRate] = useState('');
+    
+    // NEW STATE for Pay Rules
+    const [payType, setPayType] = useState('Salary');
+    const [baseSalary, setBaseSalary] = useState('');
+    const [hourlyRate, setHourlyRate] = useState('');
+    const [standardDayHours, setStandardDayHours] = useState('8');
+
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        // ... (validation logic is unchanged) ...
-        if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password || !rate) {
-            setError('Please fill out all fields.');
+        if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password) {
+            setError('Please fill out all required fields.');
             return;
         }
+        if (payType === 'Salary' && !baseSalary) { setError('Base Salary is required.'); return; }
+        if (payType === 'Hourly' && !hourlyRate) { setError('Hourly Rate is required.'); return; }
+
         if (password.length < 6) {
             setError('Password must be at least 6 characters long.');
             return;
         }
+
         setIsSaving(true);
         setError('');
         setSuccess('');
 
         try {
-            // --- 5. REWRITTEN LOGIC ---
-            // The data is now sent as a single object.
-            // The { data: ... } wrapper is removed, as the backend
-            // expects the properties directly.
+            // Prepare payload matching new structure
             const userData = {
                 email, 
                 password, 
@@ -54,20 +54,22 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                 position, 
                 department, 
                 startDate, 
-                payType, 
-                rate: parseInt(rate, 10), // Send rate as a number
-                // bonusStreak is set by the backend, no need to send
+                payType,
+                // Send null for fields that don't apply
+                baseSalary: payType === 'Salary' ? parseInt(baseSalary, 10) : null,
+                standardDayHours: payType === 'Salary' ? parseInt(standardDayHours, 10) : null,
+                hourlyRate: payType === 'Hourly' ? parseInt(hourlyRate, 10) : null,
+                
+                // Legacy 'rate' field for safety/backwards compatibility if needed by backend logic immediately
+                rate: payType === 'Salary' ? parseInt(baseSalary, 10) : parseInt(hourlyRate, 10) 
             };
 
-            // Call the function. Auth is handled automatically.
             const result = await createUser(userData);
             
-            // The result object has a 'data' property
             setSuccess(result.data.result || `Successfully created user for ${email}!`);
             setTimeout(() => onClose(), 2000);
 
         } catch (err) {
-            // Handle Firebase HttpsError
             console.error(err);
             setError(err.message);
         } finally {
@@ -109,6 +111,9 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                     <input type="text" value={position} onChange={(e) => setPosition(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" required />
                 </div>
             </div>
+            
+            <hr className="border-gray-700" />
+
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
@@ -117,17 +122,34 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Pay Type</label>
                     <select value={payType} onChange={(e) => setPayType(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" required>
-                        <option>Monthly</option>
-                        <option>Hourly</option>
+                        <option value="Salary">Salary (Fixed Monthly)</option>
+                        <option value="Hourly">Hourly (Per Hour)</option>
                     </select>
                 </div>
             </div>
-            <div className="grid grid-cols-1">
-                 <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">{payType === 'Monthly' ? 'Base Salary (THB)' : 'Hourly Rate (THB)'}</label>
-                    <input type="number" value={rate} onChange={(e) => setRate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" required />
-                </div>
+
+            {/* CONDITIONAL PAY INPUTS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                 {payType === 'Salary' ? (
+                    <>
+                        <div>
+                            <label className="block text-sm font-medium text-amber-400 mb-1">Base Salary (THB/Month)</label>
+                            <input type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" placeholder="e.g. 40000" required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-amber-400 mb-1">Standard Daily Hours</label>
+                            <input type="number" value={standardDayHours} onChange={(e) => setStandardDayHours(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" placeholder="e.g. 8" required />
+                            <p className="text-xs text-gray-500 mt-1">Used for OT calculation (Full-time=8, Part-time=4)</p>
+                        </div>
+                    </>
+                 ) : (
+                    <div>
+                        <label className="block text-sm font-medium text-blue-400 mb-1">Hourly Rate (THB/Hour)</label>
+                        <input type="number" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" placeholder="e.g. 150" required />
+                    </div>
+                 )}
             </div>
+
             <div className="border-t border-gray-700 pt-6">
                  <p className="text-sm text-gray-400 mb-4">Create Login Credentials:</p>
                   <div className="grid grid-cols-1">

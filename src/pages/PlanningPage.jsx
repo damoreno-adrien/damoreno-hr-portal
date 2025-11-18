@@ -5,7 +5,11 @@ import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/fir
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
-import { ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react';
+// 1. IMPORT NEW ICONS
+import { 
+    ChevronLeft, ChevronRight, Download, Upload, 
+    CheckCircle, Clock, Coffee, Check, Flame // Added Flame for OT
+} from 'lucide-react';
 import ShiftModal from '../components/Planning/ShiftModal.jsx'; 
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
 import ExportOptionsModal from '../components/common/ExportOptionsModal.jsx'; 
@@ -256,7 +260,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                 />
             )}
 
-            {/* --- RESTORED: Attendance Editor Modal --- */}
             {isEditAttendanceModalOpen && (
                 <Modal
                     isOpen={isEditAttendanceModalOpen}
@@ -374,37 +377,91 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                             {weekDates.map(dateObj => {
                                                 const shiftData = weekData[staff.id]?.[dateObj.dateString];
                                                 const shift = shiftData?.schedule;
-                                                const displayTime = shift ? `${shift.startTime} - ${shift.endTime}` : '';
                 
-                                                const { status } = calculateAttendanceStatus(
+                                                // Get all info from our upgraded util function
+                                                const { 
+                                                    status, 
+                                                    isLate, 
+                                                    otMinutes,
+                                                    checkInTime, // Actual attendance check-in
+                                                    checkOutTime // Actual attendance check-out
+                                                } = calculateAttendanceStatus(
                                                     shift, 
                                                     shiftData?.attendance, 
                                                     shiftData?.leave, 
                                                     dateObj.dateObject
                                                 );
+                                                
                                                 const statusClass = getStatusClass(status);
 
-                                                // Render Cell Content with smart fallbacks
+                                                // --- REWRITTEN CELL CONTENT LOGIC ---
                                                 let cellContent = null;
-                                                if (shift && shift.type === 'work') {
-                                                    cellContent = displayTime;
-                                                } else if (shift && shift.type === 'off') {
-                                                    cellContent = <span className="text-gray-500 italic">Day Off</span>;
-                                                } else if (status === 'Leave') {
-                                                    cellContent = <span className="text-blue-400 italic">LEAVE</span>;
-                                                } else if (status === 'Absent') {
-                                                    // Only show Absent if there WAS a work shift
-                                                    cellContent = <span className="text-red-400 font-bold">Absent</span>;
+                                                const baseTextClass = "flex items-center justify-center gap-1.5 text-xs";
+                                                
+                                                // Determine what time to show. Prioritize attendance time.
+                                                let timeToShow = '';
+                                                if (status === 'Present' || status === 'Late' || status === 'On Break' || status === 'Completed') {
+                                                    // Use ATTENDANCE time
+                                                    const start = checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '...';
+                                                    const end = checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '...';
+                                                    timeToShow = `${start} - ${end}`;
+                                                } else if (shift && shift.type === 'work') {
+                                                    // Use SCHEDULE time
+                                                    timeToShow = `${shift.startTime} - ${shift.endTime}`;
+                                                }
+                                                // ------------------------------------
+
+                                                switch (status) {
+                                                    case 'Present':
+                                                        cellContent = (<div className={`${baseTextClass} text-green-300`}><CheckCircle className="w-3 h-3" /><span>{timeToShow}</span></div>);
+                                                        break;
+                                                    case 'Late':
+                                                        cellContent = (<div className={`${baseTextClass} text-yellow-300`}><Clock className="w-3 h-3" /><span className="font-semibold">(Late)</span><span>{timeToShow}</span></div>);
+                                                        break;
+                                                    case 'On Break':
+                                                         cellContent = (<div className={`${baseTextClass} text-orange-300`}><Coffee className="w-3 h-3" /><span className="font-semibold">(Break)</span><span>{timeToShow}</span></div>);
+                                                        break;
+                                                    case 'Completed':
+                                                        cellContent = (<div className={`${baseTextClass} text-gray-400`}><Check className="w-3 h-3" /><span className="italic">(Done)</span><span>{timeToShow}</span></div>);
+                                                        break;
+                                                    case 'Absent':
+                                                        cellContent = (
+                                                            <>
+                                                                <span className="text-red-400 font-bold">Absent</span>
+                                                                {timeToShow && <span className="text-xs text-gray-500 block">{timeToShow}</span>}
+                                                            </>
+                                                        );
+                                                        break;
+                                                    case 'Leave':
+                                                        cellContent = <span className="text-blue-400 italic">LEAVE</span>;
+                                                        break;
+                                                    case 'Off':
+                                                        cellContent = <span className="text-gray-500 italic">Day Off</span>;
+                                                        break;
+                                                    default: // 'Empty'
+                                                        if (shift && shift.type === 'work') {
+                                                            // Future scheduled shift
+                                                            cellContent = <span className="text-white">{timeToShow}</span>;
+                                                        }
+                                                        break;
                                                 }
 
                                                 return (
                                                     <td
                                                         key={dateObj.dateString}
                                                         onClick={() => handleCellClick(staff, dateObj, shiftData)}
-                                                        className={`px-3 py-3 text-center text-sm transition-colors cursor-pointer w-32 min-w-[8rem] ${statusClass || 'text-white hover:bg-gray-700'}`}
+                                                        className={`px-3 py-3 text-center text-sm transition-colors cursor-pointer w-32 min-w-[8rem] ${statusClass}`}
                                                         title={shift ? `Click to view/edit` : `Click to add shift`}
                                                     >
                                                         {cellContent}
+                                                        
+                                                        {/* NEW: OT BADGE */}
+                                                        {otMinutes > 0 && (
+                                                            <div className="text-xs font-bold text-orange-400 flex items-center justify-center gap-1 mt-1" title="Overtime">
+                                                                <Flame className="w-3 h-3" />
+                                                                <span>+{Math.floor(otMinutes / 60)}h {otMinutes % 60}m</span>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 );
                                             })}

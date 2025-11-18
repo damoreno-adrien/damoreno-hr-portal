@@ -25,6 +25,7 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
             }
             setNotes(existingShift.notes || '');
         } else {
+            // No existing shift, default to 'work' but allow adding attendance to a "day off"
             setMode('work');
             setStartTime('14:00');
             setEndTime('23:00');
@@ -186,16 +187,17 @@ export default function ShiftModal({ isOpen, onClose, db, staffId, staffName, da
                                         <Trash2 className="w-4 h-4 mr-1" /> Delete Shift
                                     </button>
                                 )}
-                                {mode === 'work' && (
-                                    <button 
-                                        type="button" 
-                                        onClick={(e) => { e.preventDefault(); onEditAttendance(); }} 
-                                        disabled={isSaving || isDeleting} 
-                                        className="text-blue-400 hover:text-blue-300 text-sm flex items-center p-2 rounded hover:bg-blue-900/20"
-                                    >
-                                        <Clock className="w-4 h-4 mr-1" /> {existingAttendance ? 'Edit Times' : 'Add Clock-In'}
-                                    </button>
-                                )}
+                                
+                                {/* --- FIX: This button is now ALWAYS visible --- */}
+                                <button 
+                                    type="button" 
+                                    onClick={(e) => { e.preventDefault(); onEditAttendance(); }} 
+                                    disabled={isSaving || isDeleting} 
+                                    className="text-blue-400 hover:text-blue-300 text-sm flex items-center p-2 rounded hover:bg-blue-900/20"
+                                >
+                                    <Clock className="w-4 h-4 mr-1" /> {existingAttendance ? 'Edit Times' : 'Add Clock-In'}
+                                </button>
+                                {/* --------------------------------------------- */}
                             </div>
                             
                             <div className="flex space-x-3">

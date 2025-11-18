@@ -10,7 +10,7 @@ export default function OvertimeRequests({ db, companyConfig }) {
 
     // Configuration
     const OT_THRESHOLD_MINUTES = parseInt(companyConfig?.overtimeThreshold || 30);
-    const STANDARD_SHIFT_HOURS = parseFloat(companyConfig?.standardShiftHours || 9);
+    // REMOVED standard shift hours, we'll compare to schedule or 0
 
     useEffect(() => {
         fetchPotentialOvertime();
@@ -46,14 +46,13 @@ export default function OvertimeRequests({ db, companyConfig }) {
             );
             const attSnapshot = await getDocs(attQuery);
 
-            // 2. Fetch Schedules (for the same period) to compare
+            // 2. Fetch Schedules
             const schedQuery = query(
                 collection(db, 'schedules'),
                 where('date', '>=', dateStr)
             );
             const schedSnapshot = await getDocs(schedQuery);
             
-            // Create a quick lookup map for schedules: "staffId_date" -> scheduleData
             const scheduleMap = {};
             schedSnapshot.forEach(doc => {
                 const d = doc.data();
@@ -65,14 +64,12 @@ export default function OvertimeRequests({ db, companyConfig }) {
             attSnapshot.forEach(docSnap => {
                 const data = docSnap.data();
                 
-                // Only process completed shifts with no OT decision yet
                 if (data.checkOutTime && (!data.otStatus || data.otStatus === 'pending')) {
                     
                     // A. Calculate Actual Worked Minutes
                     const checkIn = data.checkInTime.toDate();
                     const checkOut = data.checkOutTime.toDate();
                     
-                    // Deduct Break Time if it exists
                     let breakDurationMs = 0;
                     if (data.breakStart && data.breakEnd) {
                         breakDurationMs = data.breakEnd.toDate() - data.breakStart.toDate();
@@ -86,24 +83,28 @@ export default function OvertimeRequests({ db, companyConfig }) {
                     let scheduledMinutes;
 
                     if (schedule && schedule.startTime && schedule.endTime) {
-                        // Case 1: Has a specific schedule -> Compare against that
+                        // Case 1: Has a specific work schedule
                         scheduledMinutes = calculateScheduleDurationMinutes(schedule.startTime, schedule.endTime);
                     } else {
-                        // Case 2: No schedule (e.g. worked on day off) -> Compare against Standard Shift
-                        scheduledMinutes = STANDARD_SHIFT_HOURS * 60;
+                        // --- THIS IS THE FIX ---
+                        // Case 2: No schedule found (Day Off, or just not scheduled)
+                        // All time worked is potential overtime.
+                        scheduledMinutes = 0; 
                     }
 
                     // C. Calculate Overtime
                     const otMinutes = workedMinutes - scheduledMinutes;
                     
                     // D. Check Threshold
+                    // If they worked on a day off, OT_THRESHOLD_MINUTES acts as the minimum
+                    // (e.g., must work at least 30 mins to be flagged)
                     if (otMinutes >= OT_THRESHOLD_MINUTES) {
                         otCandidates.push({
                             id: docSnap.id,
                             ...data,
                             otMinutes,
-                            scheduledMinutes, // Store for display if needed
-                            workedMinutes     // Store for display if needed
+                            scheduledMinutes, 
+                            workedMinutes     
                         });
                     }
                 }
@@ -117,10 +118,10 @@ export default function OvertimeRequests({ db, companyConfig }) {
     };
 
     const handleDecision = async (item, decision) => {
+        // ... (no change in this function)
         setProcessingId(item.id);
         try {
             const docRef = doc(db, 'attendance', item.id);
-            
             if (decision === 'approve') {
                 await updateDoc(docRef, {
                     otStatus: 'approved',
@@ -134,7 +135,6 @@ export default function OvertimeRequests({ db, companyConfig }) {
                     otApprovedAt: new Date()
                 });
             }
-
             setRequests(prev => prev.filter(r => r.id !== item.id));
         } catch (error) {
             console.error("Error updating OT:", error);
@@ -157,7 +157,7 @@ export default function OvertimeRequests({ db, companyConfig }) {
                         Overtime Approvals (This Month)
                     </h3>
                     <p className="text-sm text-gray-400 mt-1">
-                        Flagging shifts exceeding scheduled time by {OT_THRESHOLD_MINUTES} mins.
+                        Flagging shifts exceeding scheduled time by {OT_THRESHOLD_MINUTES} mins (or any work on a day off).
                     </p>
                 </div>
                 <span className="bg-indigo-500 text-white text-xs font-bold px-2 py-1 rounded-full">
@@ -179,11 +179,9 @@ export default function OvertimeRequests({ db, companyConfig }) {
                                 <span>•</span>
                                 <span className="text-indigo-300 font-semibold flex items-center gap-1">
                                     <AlertCircle className="w-3 h-3" />
-                                    +{Math.floor(req.otMinutes / 60)}h {req.otMinutes % 60}m
+                                    {req.scheduledMinutes === 0 ? "Work on Day Off" : "Overtime"} (+{Math.floor(req.otMinutes / 60)}h {req.otMinutes % 60}m)
                                 </span>
                             </div>
-                            {/* Debug info: Show why it was flagged */}
-                            {/* <p className="text-xs text-gray-600 mt-1">Scheduled: {Math.floor(req.scheduledMinutes/60)}h, Worked: {Math.floor(req.workedMinutes/60)}h</p> */}
                         </div>
                         <div className="flex items-center gap-3">
                             <button
