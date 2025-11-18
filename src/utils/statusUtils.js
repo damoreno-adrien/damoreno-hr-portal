@@ -40,14 +40,9 @@ const getWorkedMinutes = (attendance) => {
 };
 
 /**
- * Main Calculation Logic
- * @param {Object} schedule - The schedule object for the day
- * @param {Object} attendance - The attendance object
- * @param {Object} leave - Approved leave object
- * @param {Date} date - The date being processed
- * @param {Object} config - Company config (contains gracePeriodMinutes)
+ * Main Calculation Logic (STRICT - No Grace Period)
  */
-export const calculateAttendanceStatus = (schedule, attendance, leave, date, config = {}) => {
+export const calculateAttendanceStatus = (schedule, attendance, leave, date) => {
     // 1. Check for Leave FIRST
     if (leave) {
         return { status: 'Leave', isLate: false, otMinutes: 0, lateMinutes: 0 };
@@ -59,28 +54,25 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, con
         scheduledMinutes = calculateDurationMinutes(schedule.startTime, schedule.endTime);
     }
     
-    // 3. Check for Attendance (Present/Late/On Break/Completed)
+    // 3. Check for Attendance
     if (attendance && attendance.checkInTime) {
         let isLate = false;
         let lateMinutes = 0;
         const checkInTime = dateUtils.fromFirestore(attendance.checkInTime);
         const checkOutTime = dateUtils.fromFirestore(attendance.checkOutTime);
 
-        // Check for lateness
+        // Check for lateness (Strict)
         if (schedule && schedule.type === 'work' && schedule.startTime) {
             const dateString = dateUtils.formatISODate(date);
+            // Parsing fix stays: ensure we compare correct timestamps
             const scheduledStart = dateUtils.fromFirestore(`${dateString}T${schedule.startTime}`);
-            
-            // Dynamic Grace Period (Default to 5 if not set)
-            const gracePeriod = config.gracePeriodMinutes !== undefined ? Number(config.gracePeriodMinutes) : 5;
 
             if (checkInTime && scheduledStart) {
-                const diffMs = checkInTime - scheduledStart;
-                const diffMins = Math.floor(diffMs / 60000);
-
-                if (diffMins > gracePeriod) {
+                // STRICT COMPARISON
+                if (checkInTime > scheduledStart) {
                     isLate = true;
-                    lateMinutes = diffMins;
+                    const diffMs = checkInTime - scheduledStart;
+                    lateMinutes = Math.floor(diffMs / 60000);
                 }
             }
         }
@@ -98,7 +90,7 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, con
         return { 
             status, 
             isLate,
-            lateMinutes, // Exact minutes late for reporting
+            lateMinutes, 
             otMinutes, 
             checkInTime, 
             checkOutTime 
@@ -115,7 +107,7 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, con
         return { status: 'Absent', isLate: false, otMinutes: 0, lateMinutes: 0 };
     }
 
-    // 5. Default (Day Off, Future shift, or Empty)
+    // 5. Default
     if (schedule && schedule.type === 'off') {
         return { status: 'Off', isLate: false, otMinutes: 0, lateMinutes: 0 };
     }
@@ -125,21 +117,14 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, con
 
 export const getStatusClass = (status) => {
     switch (status) {
-        case 'Present':
-            return 'bg-green-800/60 border-l-4 border-green-500';
-        case 'Late':
-            return 'bg-yellow-800/60 border-l-4 border-yellow-500';
-        case 'On Break':
-            return 'bg-orange-800/60 border-l-4 border-orange-500';
-        case 'Completed':
-            return 'bg-gray-700/60 border-l-4 border-gray-500';
-        case 'Absent':
-            return 'bg-red-800/60 border-l-4 border-red-500';
-        case 'Leave':
-            return 'bg-blue-800/60 border-l-4 border-blue-500';
+        case 'Present': return 'bg-green-800/60 border-l-4 border-green-500';
+        case 'Late': return 'bg-yellow-800/60 border-l-4 border-yellow-500';
+        case 'On Break': return 'bg-orange-800/60 border-l-4 border-orange-500';
+        case 'Completed': return 'bg-gray-700/60 border-l-4 border-gray-500';
+        case 'Absent': return 'bg-red-800/60 border-l-4 border-red-500';
+        case 'Leave': return 'bg-blue-800/60 border-l-4 border-blue-500';
         case 'Off':
         case 'Empty':
-        default:
-            return 'hover:bg-gray-700';
+        default: return 'hover:bg-gray-700';
     }
 };

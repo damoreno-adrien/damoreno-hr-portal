@@ -3,7 +3,6 @@ const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore } = require('firebase-admin/firestore');
 
-// Initialize Admin if not already initialized (standard safety check)
 if (admin.apps.length === 0) {
     admin.initializeApp();
 }
@@ -13,36 +12,28 @@ try {
     const luxon = require('luxon');
     DateTime = luxon.DateTime;
     Interval = luxon.Interval;
-} catch(e) {
-    console.error("FAILED to require luxon:", e);
-}
+} catch(e) { console.error("FAILED to require luxon:", e); }
 
 let parseISO, isValid;
 try {
     const dfns = require('date-fns');
     parseISO = dfns.parseISO;
     isValid = dfns.isValid;
-} catch (e) {
-    console.error("FAILED to require date-fns:", e);
-}
+} catch (e) { console.error("FAILED to require date-fns:", e); }
 
 const db = getFirestore();
 const timeZone = "Asia/Bangkok";
 
-// Helper to normalize job data
 const getCurrentJob = (staffProfile) => {
     const jobHistory = staffProfile.jobHistory || [];
     if (jobHistory.length === 0) return null;
-    
     const latestJob = [...jobHistory].sort((a, b) => {
         const dateA = a.startDate ? (parseISO ? parseISO(a.startDate) : new Date(a.startDate)) : new Date(0);
         const dateB = b.startDate ? (parseISO ? parseISO(b.startDate) : new Date(b.startDate)) : new Date(0);
         return dateB - dateA;
     })[0];
-
     let type = latestJob.payType;
     if (type === 'Monthly') type = 'Salary';
-
     return {
         ...latestJob,
         payType: type || 'Salary',
@@ -52,7 +43,6 @@ const getCurrentJob = (staffProfile) => {
     };
 };
 
-// Safe Date conversion
 const safeToDate = (value) => {
     if (!value) return null;
     if (typeof value === 'object' && value.toDate) return value.toDate();
@@ -77,20 +67,11 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const startDateOfMonthStr = startOfMonthDt.toISODate();
         const todayStr = nowZoned.toISODate();
 
-        // 1. Fetch All Data
         const [
-            staffProfileRes, 
-            configRes, 
-            advancesRes, 
-            loansRes, 
-            attendanceRes, 
-            schedulesRes, 
-            leaveRes, 
-            latestPayslipRes
+            staffProfileRes, configRes, advancesRes, loansRes, attendanceRes, schedulesRes, leaveRes, latestPayslipRes
         ] = await Promise.all([
             db.collection("staff_profiles").doc(staffId).get(),
             db.collection("settings").doc("company_config").get(),
-            // FIX: Fetch ALL advances for the month
             db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month).get(),
             db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get(),
             db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get(),
@@ -105,10 +86,9 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const staffProfile = staffProfileRes.data();
         const config = configRes.data();
         const job = getCurrentJob(staffProfile);
-
         if (!job) throw new OnCallHttpsError("failed-precondition", "No job history found.");
 
-        // --- 2. CALCULATE BASE PAY & RATES ---
+        // Base Pay
         let earnedPay = 0;
         let deductionRate = 0;
         let hourlyRateForOT = 0;
@@ -118,10 +98,8 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             const daysInMonth = nowZoned.daysInMonth;
             const daysPassed = nowZoned.day;
             earnedPay = (monthlySalary / daysInMonth) * daysPassed;
-            
             deductionRate = monthlySalary / 30; 
             hourlyRateForOT = (monthlySalary / 30) / (job.standardDayHours || 8);
-
         } else {
             const hourlyRate = job.hourlyRate || 0;
             let totalMinutesWorked = 0;
@@ -141,7 +119,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             earnedPay = (totalMinutesWorked / 60) * hourlyRate;
         }
 
-        // --- 3. CALCULATE OT PAY ---
+        // OT Pay
         let overtimePay = 0;
         if (job.payType === 'Salary') {
             const otMultiplier = config.overtimeRate || 1.0;
@@ -155,7 +133,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             overtimePay = (totalOtMinutes / 60) * hourlyRateForOT * otMultiplier;
         }
 
-        // --- 4. CALCULATE ABSENCES ---
+        // Absences
         let absenceCount = 0;
         let lateCount = 0;
         const schedules = schedulesRes.docs.map(d => d.data());
@@ -164,7 +142,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const publicHolidays = config.publicHolidays?.map(h => h.date) || [];
 
         schedules.forEach(schedule => {
-            if (schedule.date > todayStr) return; 
+            if (schedule.date > todayStr) return;
             const att = attendanceMap.get(schedule.date);
             const isOnLeave = approvedLeaves.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
             const isHoliday = publicHolidays.includes(schedule.date);
@@ -177,7 +155,9 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
                      try {
                          const checkIn = DateTime.fromJSDate(actualCheckInJS).setZone(timeZone);
                          const scheduled = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: timeZone });
-                         if (checkIn > scheduled.plus({ minutes: 5 })) { 
+                         
+                         // STRICT CHECK: No Grace Period
+                         if (checkIn > scheduled) { 
                              lateCount++;
                          }
                      } catch (e) { console.error(e); }
@@ -185,7 +165,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             }
         });
 
-        // --- 5. BONUS ---
+        // Bonus
         let potentialBonus = 0;
         const bonusRules = config.attendanceBonus || {};
         const bonusOnTrack = absenceCount <= (bonusRules.allowedAbsences || 0) && lateCount <= (bonusRules.allowedLates || 0);
@@ -197,28 +177,22 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             else potentialBonus = bonusRules.month3 || 0;
         }
 
-        // --- 6. DEDUCTIONS ---
+        // Deductions
         const absenceDeductionAmount = absenceCount * deductionRate;
-        
-        // Process Advances: Sort new to old
         const allAdvances = advancesRes.docs.map(d => d.data()).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-        // Only deduct APPROVED advances
         const approvedAdvancesTotal = allAdvances
             .filter(a => a.status === 'approved')
             .reduce((sum, a) => sum + a.amount, 0);
-
         const loans = loansRes.docs.reduce((sum, d) => sum + (d.data().monthlyRepayment || 0), 0);
         
         const ssoRate = (config.ssoRate || 5) / 100;
         const ssoCap = config.ssoCap || 750;
         const estimatedTotalEarnings = earnedPay + overtimePay + potentialBonus;
         const ssoDeduction = Math.min(Math.max(1650, estimatedTotalEarnings) * ssoRate, ssoCap);
-
         const totalDeductions = absenceDeductionAmount + approvedAdvancesTotal + loans + ssoDeduction;
         const estimatedNet = (earnedPay + overtimePay + potentialBonus) - totalDeductions;
 
         return {
-            // Return contract info for display
             contractDetails: {
                 payType: job.payType,
                 baseSalary: job.baseSalary,
@@ -235,9 +209,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
                 loanRepayment: loans 
             },
             estimatedNetPay: Math.max(0, estimatedNet),
-            // Return full list of advances for SideCard
-            monthAdvances: allAdvances, 
-            // Return full list of loans for SideCard
+            monthAdvances: allAdvances,
             activeLoans: loansRes.docs.map(d => d.data()), 
             latestPayslip: latestPayslipRes.docs[0]?.data() || null
         };

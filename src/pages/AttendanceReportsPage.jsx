@@ -33,9 +33,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const [editingRecord, setEditingRecord] = useState(null);
     const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'ascending' });
 
-    // New: Company Config for Grace Period
-    const [companyConfig, setCompanyConfig] = useState({});
-
     const [isExporting, setIsExporting] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [isConfirmingImport, setIsConfirmingImport] = useState(false);
@@ -126,7 +123,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         attendance, 
                         approvedLeave, 
                         day,
-                        companyConfig
                     );
 
                     // 6. Format Status Text
