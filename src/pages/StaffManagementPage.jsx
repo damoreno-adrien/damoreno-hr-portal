@@ -5,8 +5,7 @@ import Modal from '../components/common/Modal';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal';
-import { Plus, Download, Upload } from 'lucide-react'; // Replaced custom icons
-// import * as dateUtils from '../utils/dateUtils';
+import { Plus, Download, Upload } from 'lucide-react'; 
 import { 
     fromFirestore, 
     differenceInCalendarMonths, 
@@ -15,7 +14,7 @@ import {
 } from '../utils/dateUtils';
 import { app } from "../../firebase.js";
 
-// --- NEW: Currency Formatter ---
+// --- Helper: Currency Formatter ---
 const formatCurrency = (num) => {
     if (typeof num !== 'number') {
         num = 0;
@@ -26,13 +25,12 @@ const formatCurrency = (num) => {
     }).format(num);
 };
 
-// --- NEW: Seniority Calculator ---
+// --- Helper: Seniority Calculator ---
 const getSeniority = (startDateInput) => {
     const startDate = fromFirestore(startDateInput);
     if (!startDate) return 'Invalid date';
 
     const today = new Date();
-    // Use differenceInCalendarMonths for a more intuitive "X years, Y months"
     const totalMonths = differenceInCalendarMonths(today, startDate);
 
     if (totalMonths < 0) return 'Starts in future';
@@ -48,7 +46,7 @@ const getSeniority = (startDateInput) => {
     return parts.length > 0 ? parts.join(', ') : 'Less than a month';
 };
 
-// StatusBadge component
+// --- Helper: Status Badge ---
 const StatusBadge = ({ status }) => {
     let statusText = 'Active';
     let statusClasses = "bg-green-500/20 text-green-300";
@@ -96,17 +94,33 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return staff.fullName || 'Unknown';
     };
 
+    // --- FIX: Robust Job Retrieval ---
+    // This logic now correctly sorts mixed Date formats (Timestamps vs Strings)
+    // and handles the new salary structure (baseSalary vs hourlyRate).
     const getCurrentJob = (staff) => {
         if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-            return { position: 'N/A', department: 'Unassigned', rate: 0 }; // --- Added rate
+            return { position: 'N/A', department: 'Unassigned', displayRate: 0, payType: 'Salary' };
         }
-        return [...staff.jobHistory].sort((a, b) => {
-             const timeA = a.startDate?.seconds ? a.startDate.toMillis() : 0;
-             const timeB = b.startDate?.seconds ? b.startDate.toMillis() : 0;
-             return timeB - timeA;
-        })[0] || { position: 'N/A', department: 'Unassigned', rate: 0 }; // --- Added rate
-    };
+        
+        const latestJob = [...staff.jobHistory].sort((a, b) => {
+             // Use fromFirestore to handle both Timestamps and ISO strings safely
+             const dateA = fromFirestore(b.startDate) || new Date(0);
+             const dateB = fromFirestore(a.startDate) || new Date(0);
+             return dateA - dateB;
+        })[0];
 
+        // Determine correct rate to display
+        let rate = 0;
+        if (latestJob.payType === 'Hourly') {
+            rate = latestJob.hourlyRate || latestJob.rate || 0;
+        } else {
+            // Salary (or legacy Monthly)
+            rate = latestJob.baseSalary || latestJob.rate || 0;
+        }
+
+        return { ...latestJob, displayRate: rate };
+    };
+    // ---------------------------------
 
     const groupedStaff = useMemo(() => {
         const normalizedQuery = searchQuery.toLowerCase().trim();
@@ -383,7 +397,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Display Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Position</th>
-                            {/* --- NEW: Salary Column --- */}
+                            {/* NEW: Salary Column */}
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">Salary (THB)</th>
                             <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">Bonus Streak</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Start Date</th>
@@ -393,7 +407,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     {sortedDepartments.length === 0 && (
                          <tbody>
                             <tr>
-                                {/* --- UPDATED: colSpan to 6 --- */}
                                 <td colSpan="6" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td>
                             </tr>
                          </tbody>
@@ -402,14 +415,14 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         <React.Fragment key={department}>
                             <tbody className="divide-y divide-gray-700">
                                 <tr className="bg-gray-900 sticky top-0 z-10">
-                                    {/* --- UPDATED: colSpan to 6 --- */}
                                     <th colSpan="6" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
                                         {department} ({groupedStaff[department].length})
                                     </th>
                                 </tr>
                                 {groupedStaff[department].map(staff => {
                                     const currentJob = getCurrentJob(staff);
-                                    const startDate = staff.startDate?.seconds ? staff.startDate.toDate() : staff.startDate;
+                                    // Safely handle Firestore timestamp vs Date string vs Date object
+                                    const startDate = fromFirestore(staff.startDate);
 
                                     return (
                                         <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
@@ -417,13 +430,18 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{currentJob.position}</td>
                                             
                                             {/* --- NEW: Salary Cell --- */}
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(currentJob.rate)}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">
+                                                {formatCurrency(currentJob.displayRate)}
+                                                <span className="text-xs text-gray-500 ml-1">
+                                                    {currentJob.payType === 'Hourly' ? '/hr' : '/mo'}
+                                                </span>
+                                            </td>
+                                            {/* ---------------------- */}
                                             
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">
                                                 {staff.bonusStreak || 0}
                                             </td>
 
-                                            {/* --- UPDATED: Start Date Cell with Tooltip --- */}
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                                 <span className="cursor-help" title={getSeniority(startDate)}>
                                                     {formatDisplayDate(startDate)}

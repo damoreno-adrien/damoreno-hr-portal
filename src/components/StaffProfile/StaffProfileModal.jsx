@@ -12,18 +12,16 @@ import { Archive, UserCheck, Trash, Key } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils.js';
 
 // Initialize Functions
-const functionsDefault = getFunctions(app); // For us-central1 (Auth, Delete)
-const functionsAsia = getFunctions(app, "asia-southeast1"); // For asia-southeast1
+const functionsDefault = getFunctions(app); 
+const functionsAsia = getFunctions(app, "asia-southeast1");
 
 // Prepare Callable References
-// --- FIX: deleteStaff must be 'functionsDefault' to handle Auth delete ---
 const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff'); 
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
-// Helper to get initial form data, FORMATTING DATES for input
+// Helper to get initial form data
 const getInitialFormData = (staff) => {
-    // ... (this function is unchanged) ...
     const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
     const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
     let initialData = {
@@ -72,9 +70,8 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
     const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
 
-    // --- Action Handlers (Fully Expanded) ---
+    // --- Action Handlers ---
     const handleSaveDetails = async () => {
-        // ... (this function is unchanged) ...
         setIsSaving(true);
         setError('');
         try {
@@ -102,7 +99,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleAddNewJob = async (newJobData) => {
-        // ... (this function is unchanged) ...
         if (!dateUtils.parseISODateString(newJobData.startDate)) {
             alert("Invalid start date provided for new job role.");
             return;
@@ -121,8 +117,30 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         }
     };
 
+    // --- NEW: Handle Edit Job ---
+    const handleEditJob = async (oldJob, updatedJob) => {
+        if (!dateUtils.parseISODateString(updatedJob.startDate)) {
+            alert("Invalid start date provided.");
+            return;
+        }
+        setIsSaving(true); 
+        setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            // To update an item in an array, we must remove the old one and add the new one
+            // We do this sequentially to ensure the removal happens before addition (though batching is also possible, this is safer for array fields)
+            await updateDoc(staffDocRef, { jobHistory: arrayRemove(oldJob) });
+            await updateDoc(staffDocRef, { jobHistory: arrayUnion(updatedJob) });
+        } catch (err) {
+            alert("Failed to update job role.");
+            setError("Failed to update job role.");
+            console.error("Edit Job Error:", err);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const handleDeleteJob = async (jobToDelete) => {
-        // ... (this function is unchanged) ...
         const displayStartDate = dateUtils.formatDisplayDate(jobToDelete.startDate);
         if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}" started on ${displayStartDate}?`)) {
             setIsSaving(true); 
@@ -141,14 +159,12 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleDeleteStaff = async () => {
-        // ... (this function is unchanged) ...
         if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This will erase all their data and cannot be undone.`) && window.confirm("Final confirmation: Delete this staff member?")) {
             setIsSaving(true);
             setError('');
             try {
-                // This will call the powerful backend function (see part 2)
                 await deleteStaffFunc({ staffId: staff.id });
-                onClose(); // Close modal on success
+                onClose();
             } catch (err) {
                 alert(`Error deleting staff: ${err.message}`);
                 setError(`Error deleting staff: ${err.message}`);
@@ -160,7 +176,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleArchiveStaff = async (newStatus) => {
-        // ... (this function is unchanged) ...
         setIsSaving(true);
         setError('');
         try {
@@ -180,7 +195,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                  if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
                     setIsSaving(false); return;
                  }
-                 updateData = { status: 'active', endDate: null }; // Use 'active'
+                 updateData = { status: 'active', endDate: null };
                  authDisabled = false;
             }
             await Promise.all([
@@ -198,7 +213,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleUploadFile = async (fileToUpload) => {
-        // ... (this function is unchanged) ...
         setIsSaving(true); setError('');
         try {
             const storage = getStorage();
@@ -217,7 +231,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleDeleteFile = async (fileToDelete) => {
-        // ... (this function is unchanged) ...
         if (!window.confirm(`Are you sure you want to delete "${fileToDelete.name}"?`)) return;
         setIsSaving(true); setError('');
         try {
@@ -235,7 +248,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleResetPassword = async (staffId) => {
-        // ... (this function is unchanged) ...
         const newPassword = window.prompt(`Enter a new temporary password for ${displayName} (minimum 6 characters):`);
         if (!newPassword) return;
         if (newPassword.length < 6) { alert("Password must be at least 6 characters long."); return; }
@@ -251,7 +263,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     };
 
     const handleSetBonusStreak = async () => {
-        // ... (this function is unchanged) ...
          const staffDocRef = doc(db, 'staff_profiles', staff.id);
          const streakValue = Number(bonusStreak);
          if (isNaN(streakValue) || streakValue < 0) {
@@ -272,7 +283,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
      };
 
     const handleToggleBonusEligibility = async (e) => {
-        // ... (this function is unchanged) ...
         const newValue = e.target.checked;
         setIsBonusEligible(newValue); 
         setIsSaving(true);
@@ -298,7 +308,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
     return (
         <div className="space-y-6">
-            {/* ... (Tabs are unchanged) ... */}
             <div className="border-b border-gray-700">
                 <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>
@@ -336,6 +345,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                         jobHistory={staff.jobHistory}
                         departments={departments}
                         onAddNewJob={handleAddNewJob}
+                        onEditJob={handleEditJob} // <--- Passed here
                         onDeleteJob={handleDeleteJob}
                     />
                 </div>
@@ -352,7 +362,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
 
              {activeTab === 'settings' && userRole === 'manager' && (
                 <div className="space-y-6">
-                     {/* --- Bonus Management (unchanged) --- */}
+                     {/* Bonus Management */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                            <h4 className="text-base font-semibold text-white">Bonus Management</h4>
                            <div className="mt-4 space-y-4">
@@ -390,7 +400,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                            </div>
                         </div>
 
-                     {/* --- NEW: Staff UID --- */}
+                     {/* Staff UID */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                         <h4 className="text-base font-semibold text-white">Staff Information</h4>
                         <div className="mt-4">
@@ -406,7 +416,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                         </div>
                      </div>
                      
-                     {/* --- Staff Actions (unchanged) --- */}
+                     {/* Staff Actions */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
                          <h4 className="text-base font-semibold text-white">Staff Actions</h4>
                          <div>
@@ -429,7 +439,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 </div>
              )}
 
-            {/* --- Action Buttons (unchanged) --- */}
             <ProfileActionButtons
                 isEditing={isEditing}
                 isSaving={isSaving}
