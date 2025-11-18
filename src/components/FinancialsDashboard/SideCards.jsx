@@ -1,141 +1,132 @@
-import React, { useState } from 'react'; // *** Corrected: useState added ***
-import { FinancialCard } from './FinancialCard';
-import * as dateUtils from '../../utils/dateUtils'; // Import date utils
+import React, { useState } from 'react';
+import { Eye, EyeOff, Calendar } from 'lucide-react'; // Import EyeOff
+import * as dateUtils from '../../utils/dateUtils';
 
-const formatCurrency = (num) => num != null ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
-const censor = '*,***.**';
-
-// Use date-fns for formatting month/year
-const formatMonthYear = (payslip) => {
-    if (!payslip || !payslip.payPeriodYear || !payslip.payPeriodMonth) return "Invalid Date";
-    // Create a date assuming year and month (month is 1-based)
-    const date = dateUtils.parseISODateString(`${payslip.payPeriodYear}-${String(payslip.payPeriodMonth).padStart(2, '0')}-01`);
-    if (!date) return "Invalid Date";
-    return dateUtils.formatCustom(date, 'MMMM yyyy'); // Format as "October 2025"
-};
+const formatCurrency = (num) => num != null ? num.toLocaleString('en-US') : '0';
+const censor = '*,***';
 
 const StatusBadge = ({ status }) => {
-    // ... (StatusBadge component remains the same) ...
-    const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full capitalize";
-    const statusMap = {
+    const styles = {
         pending: "bg-yellow-500/20 text-yellow-300",
         approved: "bg-green-500/20 text-green-300",
         rejected: "bg-red-500/20 text-red-300",
+        paid: "bg-blue-500/20 text-blue-300",
     };
-    return <span className={`${baseClasses} ${statusMap[status] || 'bg-gray-500/20 text-gray-300'}`}>{status}</span>;
+    return (
+        <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded-full ${styles[status] || 'bg-gray-700 text-gray-400'}`}>
+            {status}
+        </span>
+    );
 };
 
+export const SideCards = ({ payEstimate, isLoading, onViewLatestPayslip }) => {
+    // --- NEW: Independent Visibility State (Default False) ---
+    const [showAdvances, setShowAdvances] = useState(false);
+    const [showLoans, setShowLoans] = useState(false);
+    // --------------------------------------------------------
 
-// Manage visibility state internally or receive as props if controlled externally
-export const SideCards = ({ payEstimate, isLoading, onViewLatestPayslip }) => { // Renamed onSelectPayslip to onViewLatestPayslip to match prop name used in parent
-
-    // Internal state for visibility toggles
-    const [visibility, setVisibility] = useState({
-        latestPayslip: false,
-        salaryAdvance: false,
-        activeLoans: false,
-    });
-
-    const handleToggleVisibility = (card) => {
-        setVisibility(prev => ({ ...prev, [card]: !prev[card] }));
-    };
-
-    // Handle loading state
-    if (isLoading) {
-        return (
-            <div className="space-y-8">
-                <FinancialCard title="Latest Payslip"><p className="text-gray-400 text-center py-4">Loading...</p></FinancialCard>
-                <FinancialCard title="Current Salary Advance"><p className="text-gray-400 text-center py-4">Loading...</p></FinancialCard>
-                <FinancialCard title="Active Loans"><p className="text-gray-400 text-center py-4">Loading...</p></FinancialCard>
-            </div>
-        );
-    }
-
-    // Handle state after loading finishes but data might be missing/null
-    if (!payEstimate) {
-         return (
-             <div className="space-y-8">
-                <FinancialCard title="Latest Payslip"><p className="text-gray-400 text-center py-4">Data unavailable.</p></FinancialCard>
-                <FinancialCard title="Current Salary Advance"><p className="text-gray-400 text-center py-4">Data unavailable.</p></FinancialCard>
-                <FinancialCard title="Active Loans"><p className="text-gray-400 text-center py-4">Data unavailable.</p></FinancialCard>
-            </div>
-         );
-    }
+    const latestPayslip = payEstimate?.latestPayslip;
+    const advances = payEstimate?.monthAdvances || [];
+    const legacyAdvance = payEstimate?.currentAdvance; 
+    const finalAdvancesList = advances.length > 0 ? advances : (legacyAdvance ? [legacyAdvance] : []);
+    const activeLoans = payEstimate?.activeLoans || [];
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6">
             {/* Latest Payslip Card */}
-            {/* Check if latestPayslip exists before rendering */}
-            {payEstimate?.latestPayslip ? (
-                <FinancialCard
-                    title="Latest Payslip"
-                    isVisible={visibility.latestPayslip}
-                    onToggle={() => handleToggleVisibility('latestPayslip')}
-                    // Ensure onViewLatestPayslip is only called if it's a function
-                    onClick={typeof onViewLatestPayslip === 'function' ? onViewLatestPayslip : undefined}
-                >
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <p className="text-gray-400 text-sm">{formatMonthYear(payEstimate.latestPayslip)}</p>
-                            {/* Use optional chaining */}
-                            <p className="text-xl font-bold text-amber-400">{visibility.latestPayslip ? `฿${formatCurrency(payEstimate.latestPayslip?.netPay)}` : `฿${censor}`}</p>
+            <div className="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <h3 className="text-white font-semibold mb-3 text-sm">Latest Payslip</h3>
+                {latestPayslip ? (
+                    <div onClick={onViewLatestPayslip} className="bg-gray-700/50 p-3 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors group">
+                        <div className="flex justify-between items-center mb-1">
+                            <p className="text-gray-300 text-xs font-medium uppercase tracking-wide">
+                                {dateUtils.formatCustom(new Date(latestPayslip.payPeriodYear, latestPayslip.payPeriodMonth - 1), 'MMMM yyyy')}
+                            </p>
+                            <Eye className="h-4 w-4 text-gray-500 group-hover:text-white transition-colors" />
                         </div>
-                        {/* Only show View Details if handler exists */}
-                        {typeof onViewLatestPayslip === 'function' && (
-                             <div className="text-blue-400 text-xs font-semibold cursor-pointer">VIEW DETAILS</div>
-                        )}
-                    </div>
-                </FinancialCard>
-            ) : (
-                 <FinancialCard title="Latest Payslip">
-                      <p className="text-gray-400 text-center py-4">No payslip history found.</p>
-                 </FinancialCard>
-            )}
-
-
-            {/* Current Salary Advance Card */}
-            <FinancialCard
-                title="Current Salary Advance"
-                isVisible={visibility.salaryAdvance}
-                onToggle={() => handleToggleVisibility('salaryAdvance')}
-            >
-                {/* Check if currentAdvance exists */}
-                {payEstimate?.currentAdvance ? (
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <p className="text-gray-400 text-sm">Amount</p>
-                            {/* Use optional chaining */}
-                            <p className="text-xl font-bold text-amber-400">{visibility.salaryAdvance ? `฿${formatCurrency(payEstimate.currentAdvance?.amount)}` : `฿${censor}`}</p>
-                        </div>
-                        {/* Use optional chaining */}
-                        <StatusBadge status={payEstimate.currentAdvance?.status} />
+                        {/* Payslip amount is typically hidden unless clicked, or you can add a specific toggle here too */}
+                        <p className="text-xl font-bold text-green-400">฿{formatCurrency(latestPayslip.netPay)}</p>
                     </div>
                 ) : (
-                    <p className="text-gray-400 text-center py-4">No active advance this month.</p>
+                    <p className="text-gray-500 text-xs text-center py-4">No payslip history found.</p>
                 )}
-            </FinancialCard>
+            </div>
 
-            {/* Active Loans Card */}
-            <FinancialCard
-                title="Active Loans"
-                isVisible={visibility.activeLoans}
-                onToggle={() => handleToggleVisibility('activeLoans')}
-            >
-                {/* Check if activeLoans exists and has items */}
-                {payEstimate?.activeLoans && payEstimate.activeLoans.length > 0 ? (
-                    <div className="space-y-4">
-                        {payEstimate.activeLoans.map((loan, index) => (
-                            <div key={loan.id || index} className="bg-gray-700/50 p-3 rounded-md">
-                                {/* Use optional chaining */}
-                                <p className="font-bold text-white">{visibility.activeLoans ? `Loan of ฿${formatCurrency(loan?.totalAmount)}` : `Loan of ฿${censor}`}</p>
-                                <p className="text-sm text-gray-400">Next payment: <span className="text-amber-400">{visibility.activeLoans ? `฿${formatCurrency(loan?.monthlyRepayment || loan?.recurringPayment)}` : `฿${censor}`}</span></p>
+            {/* Salary Advance Card */}
+            <div className="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-white font-semibold text-sm">Current Salary Advances</h3>
+                    
+                    {/* --- NEW: Toggle Button --- */}
+                    <button onClick={() => setShowAdvances(!showAdvances)} className="text-gray-400 hover:text-white">
+                        {showAdvances ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    {/* -------------------------- */}
+                </div>
+                
+                {finalAdvancesList.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                        {finalAdvancesList.map((adv, index) => (
+                            <div key={index} className="bg-gray-700/50 p-3 rounded-lg flex justify-between items-center">
+                                <div>
+                                    {/* --- NEW: Apply Censor --- */}
+                                    <p className="text-sm font-bold text-white">
+                                        ฿{showAdvances ? formatCurrency(adv.amount) : censor}
+                                    </p>
+                                    {/* ------------------------- */}
+                                    <p className="text-xs text-gray-400 mt-0.5">{adv.date}</p>
+                                </div>
+                                <StatusBadge status={adv.status} />
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <p className="text-gray-400 text-center py-4">You have no active loans.</p>
+                    <p className="text-gray-500 text-xs text-center py-4">No active advances this month.</p>
                 )}
-            </FinancialCard>
+            </div>
+
+            {/* Active Loans Card */}
+            <div className="bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-700">
+                <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-white font-semibold text-sm">Active Loans</h3>
+                    
+                    {/* --- NEW: Toggle Button --- */}
+                    <button onClick={() => setShowLoans(!showLoans)} className="text-gray-400 hover:text-white">
+                        {showLoans ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    {/* -------------------------- */}
+                </div>
+
+                {activeLoans.length > 0 ? (
+                    <div className="space-y-2">
+                        {activeLoans.map((loan, index) => (
+                            <div key={index} className="bg-gray-700/50 p-3 rounded-lg">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-xs text-gray-300 font-medium">{loan.loanName}</span>
+                                    {/* --- NEW: Apply Censor --- */}
+                                    <span className="text-xs font-bold text-white">
+                                        ฿{showLoans ? formatCurrency(loan.remainingBalance) : censor}
+                                    </span>
+                                    {/* ------------------------- */}
+                                </div>
+                                <div className="w-full bg-gray-600 rounded-full h-1.5 mt-2">
+                                    <div 
+                                        className="bg-blue-500 h-1.5 rounded-full" 
+                                        style={{ width: `${Math.min(100, ((loan.totalAmount - loan.remainingBalance) / loan.totalAmount) * 100)}%` }}
+                                    ></div>
+                                </div>
+                                {/* --- NEW: Apply Censor to Repayment --- */}
+                                <p className="text-[10px] text-gray-400 mt-1 text-right">
+                                    Repayment: ฿{showLoans ? formatCurrency(loan.monthlyRepayment) : censor}/mo
+                                </p>
+                                {/* -------------------------------------- */}
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-gray-500 text-xs text-center py-4">You have no active loans.</p>
+                )}
+            </div>
         </div>
     );
 };

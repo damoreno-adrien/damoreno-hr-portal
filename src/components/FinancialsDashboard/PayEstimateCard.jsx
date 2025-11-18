@@ -1,10 +1,13 @@
-// src/components/FinancialsDashboard/PayEstimateCard.jsx
-import React from 'react';
+import React, { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
 const formatCurrency = (num) => num != null ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const censor = '*,***.**';
 
 export const PayEstimateCard = ({ payEstimate, isLoading }) => { 
+    // --- FIX: Set default visibility to FALSE (Hidden) ---
+    const [isVisible, setIsVisible] = useState(false); 
+    // ----------------------------------------------------
 
     if (isLoading) {
         return (
@@ -22,16 +25,33 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
          );
     }
 
-    const isVisible = true;
-    // --- FIX: Check if eligible (if amount is 0 and not on track, likely not eligible or lost) ---
-    // A better check is if we pass 'isEligible' from backend, but currently if it's 0, hiding it is safer 
-    // than showing "Lost 0.00" for someone who never had a chance.
     const showBonusRow = payEstimate.potentialBonus?.amount > 0 || payEstimate.potentialBonus?.onTrack; 
-    // -------------------------------------------------------------------------------------------
+
+    const contract = payEstimate.contractDetails || {};
+    const isHourly = contract.payType === 'Hourly';
+    
+    let contractLabel = 'Base Salary';
+    let contractValue = 0;
+
+    if (isHourly) {
+        contractLabel = 'Hourly Rate';
+        contractValue = contract.hourlyRate || contract.rate || 0;
+    } else {
+        contractLabel = `Base Salary${contract.standardHours ? ` (${contract.standardHours}h)` : ''}`;
+        contractValue = contract.baseSalary || contract.rate || 0;
+    }
 
     return (
         <>
-            <div className="text-center border-b border-gray-700 pb-6 mb-6">
+            <div className="text-center border-b border-gray-700 pb-6 mb-6 relative">
+                <button 
+                    onClick={() => setIsVisible(!isVisible)} 
+                    className="absolute right-0 top-0 text-gray-400 hover:text-white p-2"
+                    title={isVisible ? "Hide details" : "Show details"}
+                >
+                    {isVisible ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+
                 <p className="text-gray-400 text-sm">Estimated Net Pay To Date</p>
                 <p className="text-4xl lg:text-5xl font-bold text-amber-400 mt-2">
                     {isVisible ? `฿${formatCurrency(payEstimate?.estimatedNetPay)}` : `฿${censor}`}
@@ -41,21 +61,24 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                 <div className="space-y-4">
                     <h4 className="font-semibold text-white text-lg">Earnings</h4>
+                    
+                    <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">{contractLabel}</span>
+                        <span className="font-mono text-gray-300">{isVisible ? `฿${formatCurrency(contractValue)}` : `฿${censor}`}</span>
+                    </div>
+
                     <div className="flex justify-between">
-                        <span className="text-gray-300">Base Salary Earned</span>
+                        <span className="text-gray-300">Earned (Pro-rated)</span>
                         <span className="font-mono text-white">{isVisible ? `฿${formatCurrency(payEstimate?.baseSalaryEarned)}` : `฿${censor}`}</span>
                     </div>
                     
-                    {/* --- NEW: Approved Overtime --- */}
                     {payEstimate?.overtimePay > 0 && (
                         <div className="flex justify-between">
                             <span className="text-green-400">Approved Overtime</span>
                             <span className="font-mono text-green-400">{isVisible ? `฿${formatCurrency(payEstimate?.overtimePay)}` : `฿${censor}`}</span>
                         </div>
                     )}
-                    {/* ----------------------------- */}
 
-                    {/* --- UPDATED: Hide Bonus Row if not applicable --- */}
                     {showBonusRow && (
                         <div className="flex justify-between items-center">
                             <span className="text-gray-300">Potential Bonus</span>
@@ -69,7 +92,6 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
                             </div>
                         </div>
                     )}
-                    {/* ---------------------------------------------- */}
                 </div>
 
                 <div className="space-y-4">
