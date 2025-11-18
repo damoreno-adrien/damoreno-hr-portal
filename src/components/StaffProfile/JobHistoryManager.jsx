@@ -1,26 +1,21 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Pencil } from 'lucide-react'; // Added Pencil
+import { Plus, Trash2, Pencil } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
 const formatRate = (job) => {
     if (!job) return 'N/A';
-
     if (job.payType === 'Hourly') {
         const r = job.hourlyRate || job.rate;
         return typeof r === 'number' ? `${r.toLocaleString()} THB / hr` : 'N/A';
     } 
-    
     const salary = job.baseSalary || job.rate;
     const hours = job.standardDayHours || 8;
-    
-    return typeof salary === 'number' 
-        ? `${salary.toLocaleString()} THB / mo (${hours}h/day)` 
-        : 'N/A';
+    return typeof salary === 'number' ? `${salary.toLocaleString()} THB / mo (${hours}h/day)` : 'N/A';
 };
 
 export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJob, onEditJob, onDeleteJob }) => {
     const [isAddingJob, setIsAddingJob] = useState(false);
-    const [originalJobToEdit, setOriginalJobToEdit] = useState(null); // Track which job we are editing
+    const [originalJobToEdit, setOriginalJobToEdit] = useState(null);
     
     const [newJob, setNewJob] = useState({ 
         position: '', 
@@ -37,25 +32,41 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
 
     const handleNewJobChange = (e) => setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
 
+    // --- FIX: Smarter Edit Logic ---
     const handleEditClick = (job) => {
         setOriginalJobToEdit(job);
+        
+        // Determine Pay Type (Backward Compatibility)
+        let type = job.payType;
+        if (type === 'Monthly' || !type) type = 'Salary'; // Default old records to Salary
+
+        // Determine Rates
+        let salary = '';
+        let hourly = '';
+        if (type === 'Salary') {
+            // Use baseSalary if available, otherwise fall back to 'rate'
+            salary = job.baseSalary !== undefined ? job.baseSalary : job.rate;
+        } else {
+            hourly = job.hourlyRate !== undefined ? job.hourlyRate : job.rate;
+        }
+
         setNewJob({
             position: job.position,
             department: job.department,
             startDate: dateUtils.formatISODate(dateUtils.fromFirestore(job.startDate)),
-            payType: job.payType || 'Salary',
-            baseSalary: job.baseSalary || (job.payType !== 'Hourly' ? job.rate : '') || '',
-            standardDayHours: job.standardDayHours || 8,
-            hourlyRate: job.hourlyRate || (job.payType === 'Hourly' ? job.rate : '') || '',
+            payType: type,
+            baseSalary: salary,
+            standardDayHours: job.standardDayHours || 8, // Default to 8 for old records
+            hourlyRate: hourly,
         });
-        setIsAddingJob(true); // Open form
+        setIsAddingJob(true);
     };
+    // -------------------------------
 
     const handleCancel = () => {
         setIsAddingJob(false);
         setOriginalJobToEdit(null);
         setError('');
-        // Reset form
         setNewJob({ 
             position: '', 
             department: departments[0] || '', 
@@ -96,13 +107,11 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
         setError('');
         try {
             if (originalJobToEdit) {
-                // EDIT MODE
                 await onEditJob(originalJobToEdit, cleanJobData);
             } else {
-                // ADD MODE
                 await onAddNewJob(cleanJobData);
             }
-            handleCancel(); // Reset everything
+            handleCancel();
         } catch (err) {
             setError(originalJobToEdit ? "Failed to update job role." : "Failed to add new job role.");
             console.error("Error saving job:", err);
@@ -199,13 +208,9 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
                         </div>
                         <div className="flex items-center space-x-1">
                             <p className="text-sm text-gray-300 mr-2">{dateUtils.formatDisplayDate(job.startDate)}</p>
-                            
-                            {/* EDIT BUTTON */}
                             <button onClick={() => handleEditClick(job)} className="text-gray-400 hover:text-blue-400 p-2 rounded hover:bg-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Edit">
                                 <Pencil className="h-4 w-4"/>
                             </button>
-
-                            {/* DELETE BUTTON */}
                             <button onClick={() => onDeleteJob(job)} className="text-gray-400 hover:text-red-400 p-2 rounded hover:bg-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
                                 <Trash2 className="h-4 w-4"/>
                             </button>
