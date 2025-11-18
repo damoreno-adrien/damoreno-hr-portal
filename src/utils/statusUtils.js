@@ -1,9 +1,5 @@
 import * as dateUtils from './dateUtils';
 
-// --- CONFIGURATION ---
-// Staff can check in up to 5 minutes past their start time
-const GRACE_PERIOD_MINUTES = 5;
-
 /**
  * Helper to calculate duration in minutes from HH:mm strings
  */
@@ -43,10 +39,18 @@ const getWorkedMinutes = (attendance) => {
     return Math.floor(totalDurationMs / (1000 * 60));
 };
 
-export const calculateAttendanceStatus = (schedule, attendance, leave, date) => {
+/**
+ * Main Calculation Logic
+ * @param {Object} schedule - The schedule object for the day
+ * @param {Object} attendance - The attendance object
+ * @param {Object} leave - Approved leave object
+ * @param {Date} date - The date being processed
+ * @param {Object} config - Company config (contains gracePeriodMinutes)
+ */
+export const calculateAttendanceStatus = (schedule, attendance, leave, date, config = {}) => {
     // 1. Check for Leave FIRST
     if (leave) {
-        return { status: 'Leave', isLate: false, otMinutes: 0 };
+        return { status: 'Leave', isLate: false, otMinutes: 0, lateMinutes: 0 };
     }
 
     // 2. Get Scheduled Minutes
@@ -58,21 +62,25 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date) => 
     // 3. Check for Attendance (Present/Late/On Break/Completed)
     if (attendance && attendance.checkInTime) {
         let isLate = false;
+        let lateMinutes = 0;
         const checkInTime = dateUtils.fromFirestore(attendance.checkInTime);
         const checkOutTime = dateUtils.fromFirestore(attendance.checkOutTime);
 
         // Check for lateness
         if (schedule && schedule.type === 'work' && schedule.startTime) {
             const dateString = dateUtils.formatISODate(date);
-            // --- FIX 1: Correct Date/Time Parsing ---
             const scheduledStart = dateUtils.fromFirestore(`${dateString}T${schedule.startTime}`);
+            
+            // Dynamic Grace Period (Default to 5 if not set)
+            const gracePeriod = config.gracePeriodMinutes !== undefined ? Number(config.gracePeriodMinutes) : 5;
 
             if (checkInTime && scheduledStart) {
                 const diffMs = checkInTime - scheduledStart;
                 const diffMins = Math.floor(diffMs / 60000);
 
-                if (diffMins > GRACE_PERIOD_MINUTES) {
+                if (diffMins > gracePeriod) {
                     isLate = true;
+                    lateMinutes = diffMins;
                 }
             }
         }
@@ -85,14 +93,15 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date) => 
         let status = 'Present';
         if (checkOutTime) status = 'Completed';
         else if (attendance.breakStart && !attendance.breakEnd) status = 'On Break';
-        else if (isLate) status = 'Late'; // 'Late' overrides 'Present'
+        else if (isLate) status = 'Late';
         
         return { 
             status, 
-            isLate, 
+            isLate,
+            lateMinutes, // Exact minutes late for reporting
             otMinutes, 
-            checkInTime, // Pass actual times through
-            checkOutTime // Pass actual times through
+            checkInTime, 
+            checkOutTime 
         };
     }
 
@@ -103,20 +112,18 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date) => 
     targetDate.setHours(0,0,0,0);
 
     if (schedule && schedule.type === 'work' && !attendance && targetDate < now) {
-        return { status: 'Absent', isLate: false, otMinutes: 0 };
+        return { status: 'Absent', isLate: false, otMinutes: 0, lateMinutes: 0 };
     }
 
     // 5. Default (Day Off, Future shift, or Empty)
     if (schedule && schedule.type === 'off') {
-        return { status: 'Off', isLate: false, otMinutes: 0 };
+        return { status: 'Off', isLate: false, otMinutes: 0, lateMinutes: 0 };
     }
 
-    return { status: 'Empty', isLate: false, otMinutes: 0 };
+    return { status: 'Empty', isLate: false, otMinutes: 0, lateMinutes: 0 };
 };
 
-// --- Updated to match PlanningPage.jsx ---
 export const getStatusClass = (status) => {
-    // This function now only determines the background/border color
     switch (status) {
         case 'Present':
             return 'bg-green-800/60 border-l-4 border-green-500';
@@ -133,6 +140,6 @@ export const getStatusClass = (status) => {
         case 'Off':
         case 'Empty':
         default:
-            return 'hover:bg-gray-700'; // Clean look for empty/off cells
+            return 'hover:bg-gray-700';
     }
 };
