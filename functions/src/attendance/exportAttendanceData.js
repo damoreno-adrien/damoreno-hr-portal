@@ -1,278 +1,114 @@
-/* functions/src/attendance/exportAttendanceData.js */
-
-const { HttpsError, https } = require("firebase-functions/v2");
-const { onCall } = require("firebase-functions/v2/https");
-const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
+// functions/src/attendance/exportAttendanceData.js
+const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const { getFirestore } = require('firebase-admin/firestore');
 
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
-const { Parser } = require('json2csv');
-const { DateTime } = require('luxon');
+if (admin.apps.length === 0) {
+    admin.initializeApp();
+}
 
-const db = admin.firestore();
-const THAILAND_TIMEZONE = 'Asia/Bangkok';
+const db = getFirestore();
 
-// --- Helpers (formatTimeForExportLuxon, getStaffNames, generateDateRange) ---
-const formatTimeForExportLuxon = (timestamp) => {
-    if (!timestamp || !(timestamp instanceof Timestamp)) return '';
-    try {
-        const jsDate = timestamp.toDate();
-        const dtUtc = DateTime.fromJSDate(jsDate);
-        if (!dtUtc.isValid) return '';
-        const dtLocal = dtUtc.setZone(THAILAND_TIMEZONE);
-        return dtLocal.toFormat('HH:mm:ss');
-    } catch (e) {
-        console.error("Error formatting timestamp:", timestamp, e);
-        return '';
+// Helper to escape CSV fields
+const escapeCsv = (value) => {
+    if (value === null || value === undefined) return '';
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
     }
+    return str;
 };
 
-const getStaffNames = async (staffIds) => {
-    const namesMap = new Map();
-    if (staffIds.size === 0) return namesMap;
-    const staffIdArray = Array.from(staffIds);
-    const MAX_IN_QUERY_SIZE = 30;
-    const promises = [];
-    for (let i = 0; i < staffIdArray.length; i += MAX_IN_QUERY_SIZE) {
-        const batchIds = staffIdArray.slice(i, i + MAX_IN_QUERY_SIZE);
-        const q = db.collection('staff_profiles').where(admin.firestore.FieldPath.documentId(), 'in', batchIds);
-        promises.push(q.get());
-    }
+// Helper to format date
+const formatDate = (timestamp) => {
+    if (!timestamp) return '';
     try {
-        const snapshots = await Promise.all(promises);
-        snapshots.forEach(snapshot => {
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                if (!data) return;
-                const name = data.nickname || (data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : null) || data.firstName || 'Unknown';
-                namesMap.set(doc.id, name.trim());
-            });
+        return timestamp.toDate().toLocaleString('en-GB', { 
+            day: '2-digit', month: '2-digit', year: 'numeric', 
+            hour: '2-digit', minute: '2-digit', hour12: false 
+        }).replace(',', '');
+    } catch (e) { return ''; }
+};
+
+exports.exportAttendanceData = onCall({ region: "us-central1" }, async (request) => {
+    const { startDate, endDate, staffIds } = request.data;
+
+    if (!startDate || !endDate) {
+        throw new HttpsError("invalid-argument", "Start date and end date are required.");
+    }
+
+    console.log(`Exporting attendance from ${startDate} to ${endDate} for ${staffIds ? staffIds.length + ' staff' : 'ALL staff'}`);
+
+    try {
+        // 1. Fetch ALL attendance for the date range
+        const snapshot = await db.collection("attendance")
+            .where("date", ">=", startDate)
+            .where("date", "<=", endDate)
+            .orderBy("date", "asc")
+            .get();
+
+        if (snapshot.empty) {
+            return { csvData: null, filename: `attendance_${startDate}_${endDate}.csv` };
+        }
+
+        // 2. Filter in Memory
+        let docs = snapshot.docs;
+        if (staffIds && Array.isArray(staffIds) && staffIds.length > 0) {
+            const allowedIds = new Set(staffIds);
+            docs = docs.filter(doc => allowedIds.has(doc.data().staffId));
+        }
+
+        if (docs.length === 0) {
+             return { csvData: null, filename: `attendance_${startDate}_${endDate}.csv` };
+        }
+
+        // 3. Generate CSV
+        const header = [
+            "Staff ID", // <-- NEW: Added ID column for robust re-importing
+            "Date", 
+            "Staff Name", 
+            "Check-In", 
+            "Check-Out", 
+            "Break Start", 
+            "Break End", 
+            "Status", 
+            "OT Minutes", 
+            "Late Minutes", 
+            "Location Check-In", 
+            "Location Check-Out"
+        ];
+
+        const rows = docs.map(doc => {
+            const data = doc.data();
+            
+            let status = 'Present';
+            if (data.checkInTime && data.checkOutTime) status = 'Completed';
+
+            return [
+                escapeCsv(data.staffId), // <-- NEW: Data for ID column
+                escapeCsv(data.date),
+                escapeCsv(data.staffName),
+                escapeCsv(formatDate(data.checkInTime)),
+                escapeCsv(formatDate(data.checkOutTime)),
+                escapeCsv(formatDate(data.breakStart)),
+                escapeCsv(formatDate(data.breakEnd)),
+                escapeCsv(status),
+                escapeCsv(data.otApprovedMinutes || 0),
+                '', 
+                escapeCsv(data.checkInLocation ? 'Verified' : '-'),
+                escapeCsv(data.checkOutLocation ? 'Verified' : '-')
+            ].join(",");
         });
+
+        const csvContent = [header.join(","), ...rows].join("\n");
+
+        return {
+            csvData: csvContent,
+            filename: `attendance_${startDate}_${endDate}.csv`
+        };
+
     } catch (error) {
-        console.error("Error fetching staff names:", error);
-    }
-    return namesMap;
-};
-
-const generateDateRange = (startDateStr, endDateStr) => {
-    const dates = [];
-    let current = DateTime.fromISO(startDateStr, { zone: THAILAND_TIMEZONE });
-    const end = DateTime.fromISO(endDateStr, { zone: THAILAND_TIMEZONE });
-    if (!current.isValid || !end.isValid || current > end) {
-        console.error("Invalid date range:", startDateStr, endDateStr);
-        return [];
-    }
-    while (current <= end) {
-        dates.push(current.toISODate());
-        current = current.plus({ days: 1 });
-    }
-    return dates;
-};
-// --- End Helpers ---
-
-exports.exportAttendanceDataHandler = onCall({
-    region: "us-central1",
-    timeoutSeconds: 300,
-    memory: "512MiB"
-}, async (request) => {
-    console.log("exportAttendanceDataHandler: Function execution started.");
-
-    // 1. --- Authentication and Authorization ---
-    if (!request.auth) throw new OnCallHttpsError("unauthenticated", "Authentication required.");
-    const callerUid = request.auth.uid;
-    try {
-        const callerDoc = await db.collection("users").doc(callerUid).get();
-        if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-            const roleFound = !callerDoc.exists ? 'No document' : callerDoc.data().role;
-            console.error(`exportAttendanceDataHandler: Permission denied for user ${callerUid}. Role check failed (Role found: ${roleFound}).`);
-            throw new OnCallHttpsError("permission-denied", "Manager role required.");
-        }
-        console.log(`exportAttendanceDataHandler: User ${callerUid} authorized as manager.`);
-    } catch (err) {
-        console.error(`exportAttendanceDataHandler: Error verifying manager role for ${callerUid}:`, err);
-        if (err instanceof OnCallHttpsError) throw err;
-        throw new OnCallHttpsError("internal", `Failed to verify user role. ${err.message}`, err.stack);
-    }
-
-    // 2. --- Input Validation (Date Range) ---
-    const { startDate, endDate } = request.data;
-    if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new OnCallHttpsError("invalid-argument", "Valid 'startDate' and 'endDate' (YYYY-MM-DD) required.");
-    if (startDate > endDate) throw new OnCallHttpsError("invalid-argument", "Start date cannot be after end date.");
-    console.log(`Exporting attendance data for range ${startDate} to ${endDate}`);
-
-
-    try {
-        // --- 3. Fetch All Necessary Data Concurrently ---
-        const dateRange = generateDateRange(startDate, endDate);
-        const filename = `attendance_export_${startDate}_to_${endDate}_${DateTime.now().setZone(THAILAND_TIMEZONE).toFormat('yyyyMMddHHmmss')}.csv`;
-        if (dateRange.length === 0) return { csvData: "", filename: filename };
-
-        const attendancePromise = db.collection("attendance").where("date", ">=", startDate).where("date", "<=", endDate).get();
-        const schedulesPromise = db.collection("schedules").where("date", ">=", startDate).where("date", "<=", endDate).get();
-
-        const leaveQuery = db.collection("leave_requests")
-            .where("status", "==", "approved")
-            .where("endDate", ">=", startDate);
-        const leavePromise = leaveQuery.get();
-
-        const [attendanceSnap, schedulesSnap, leaveSnap] = await Promise.all([attendancePromise, schedulesPromise, leavePromise]);
-
-        // Process snapshots into maps
-        const attendanceMap = new Map();
-        attendanceSnap.forEach(doc => {
-            const data = doc.data();
-            if (data.staffId && data.date) {
-                // *** FIX: Use the formatted ID as the key ***
-                const key = `${data.staffId}_${data.date}`;
-                attendanceMap.set(key, { id: doc.id, ...data });
-            }
-        });
-
-        const schedulesMap = new Map();
-        schedulesSnap.forEach(doc => {
-            const data = doc.data();
-            if (data.staffId && data.date) {
-                schedulesMap.set(`${data.staffId}_${data.date}`, data);
-            }
-        });
-
-        const leaveMap = new Map();
-        const reportStartDt = DateTime.fromISO(startDate, { zone: THAILAND_TIMEZONE });
-        const reportEndDt = DateTime.fromISO(endDate, { zone: THAILAND_TIMEZONE });
-
-        leaveSnap.forEach(doc => {
-            const data = doc.data();
-            if (!data.staffId || !data.startDate || !data.endDate) return;
-            if (data.startDate > endDate) return;
-
-            let current = DateTime.fromISO(data.startDate, { zone: THAILAND_TIMEZONE });
-            const leaveEnd = DateTime.fromISO(data.endDate, { zone: THAILAND_TIMEZONE });
-
-            if (!current.isValid || !leaveEnd.isValid) return;
-
-            while (current <= leaveEnd) {
-                if (current >= reportStartDt && current <= reportEndDt) {
-                    const dateStr = current.toISODate();
-                    leaveMap.set(`${data.staffId}_${dateStr}`, data);
-                }
-                current = current.plus({ days: 1 });
-            }
-        });
-
-        console.log(`Fetched: ${attendanceMap.size} attendance, ${schedulesMap.size} schedules, ${leaveMap.size} leave days.`);
-
-        // --- 4. Determine Relevant Staff and Fetch Names ---
-        const staffIdsInPeriod = new Set();
-        // *** FIX: Get *all* staff from staff_profiles, not just those with data ***
-        // This ensures we export "Off" days for people who had no records.
-        // We will fetch all *active* staff
-        const staffQuery = db.collection('staff_profiles').where('status', '==', 'active');
-        const staffSnap = await staffQuery.get();
-        staffSnap.forEach(doc => {
-            staffIdsInPeriod.add(doc.id);
-        });
-
-        if (staffIdsInPeriod.size === 0) {
-             console.log("No active staff found. Returning empty CSV.");
-            return { csvData: "", filename: filename };
-        }
-        const staffNamesMap = await getStaffNames(staffIdsInPeriod);
-
-        // --- 5. Process Data: Iterate Staff & Dates to Build CSV Rows ---
-        const records = [];
-        for (const staffId of staffIdsInPeriod) {
-            const staffName = staffNamesMap.get(staffId) || 'Unknown';
-            for (const dateStr of dateRange) {
-                const key = `${staffId}_${dateStr}`;
-                const attendance = attendanceMap.get(key);
-                const schedule = schedulesMap.get(key);
-                const approvedLeave = leaveMap.get(key);
-
-                // --- *** THIS IS THE KEY LOGIC FIX *** ---
-                // We are matching the logic from AttendanceReportsPage.jsx EXACTLY.
-
-                let status = 'Unknown';
-                const checkInTs = attendance?.checkInTime;
-
-                // Match frontend logic: 'work' is explicitly 'work'
-                const isWorkSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'work';
-                const isOffSchedule = schedule && typeof schedule.type === 'string' && schedule.type.toLowerCase() === 'off';
-                const scheduledStartTimeStr = (isWorkSchedule && schedule.startTime) ? schedule.startTime : null;
-
-                if (attendance) {
-                    // Attendance record EXISTS
-                    if (isWorkSchedule && scheduledStartTimeStr) {
-                        // Work day, checked in
-                        if (checkInTs) {
-                            try {
-                                const schDt = DateTime.fromISO(`${dateStr}T${scheduledStartTimeStr}`, { zone: THAILAND_TIMEZONE });
-                                const actDt = DateTime.fromJSDate(checkInTs.toDate()).setZone(THAILAND_TIMEZONE);
-                                if (schDt.isValid && actDt.isValid && actDt > schDt) {
-                                    status = `Late (${Math.ceil(actDt.diff(schDt, 'minutes').minutes)}m)`;
-                                } else if (actDt.isValid) {
-                                    status = 'Present';
-                                } else {
-                                    status = 'Present (Check-in Invalid)';
-                                }
-                            } catch (e) {
-                                status = 'Present (Time Error)';
-                            }
-                        } else {
-                            status = 'Present (No Check-in?)';
-                        }
-                    } else if (isOffSchedule) {
-                        status = 'Worked on Day Off';
-                    } else {
-                        status = 'Present (Unscheduled)';
-                    }
-                } else {
-                    // No attendance record for this day
-                    if (approvedLeave) {
-                        status = 'Leave';
-                    } else if (isWorkSchedule) {
-                        status = 'Absent';
-                    } else if (isOffSchedule) {
-                        status = 'Off';
-                    } else if (!schedule) {
-                        // No schedule at all also means "Off"
-                        status = 'Off';
-                    } else {
-                        // Any other schedule type (e.g., 'training')
-                        status = 'Off';
-                    }
-                }
-                // --- *** END OF LOGIC FIX *** ---
-                
-                // We only push rows that are *not* 'Off'.
-                // This matches the old export behavior (only showing relevant attendance)
-                // and avoids exporting 30 "Off" rows for every employee.
-                if (status !== 'Off' && status !== 'Unknown') {
-                    records.push({
-                        attendanceDocId: attendance ? attendance.id : '',
-                        staffId,
-                        staffName,
-                        date: dateStr,
-                        attendanceStatus: status,
-                        checkInTime: formatTimeForExportLuxon(attendance?.checkInTime),
-                        checkOutTime: formatTimeForExportLuxon(attendance?.checkOutTime),
-                        breakStartTime: formatTimeForExportLuxon(attendance?.breakStart),
-                        breakEndTime: formatTimeForExportLuxon(attendance?.breakEnd),
-                    });
-                }
-            }
-        }
-        records.sort((a, b) => a.staffName.localeCompare(b.staffName) || a.date.localeCompare(b.date));
-
-        // --- 6. Generate CSV Output ---
-        const fields = ['attendanceDocId', 'staffId', 'staffName', 'date', 'attendanceStatus', 'checkInTime', 'checkOutTime', 'breakStartTime', 'breakEndTime'];
-        const json2csvParser = new Parser({ fields, excelStrings: true });
-        const csv = json2csvParser.parse(records);
-        console.log(`Generated filename: ${filename}`);
-        return { csvData: csv, filename: filename };
-
-    } catch (error) { // Error handling
-        console.error("Unhandled error:", error);
-        if (error instanceof OnCallHttpsError) throw error;
-        throw new OnCallHttpsError("internal", `Error: ${error.message}`, error.stack);
+        console.error("Export error:", error);
+        throw new HttpsError("internal", "Failed to generate export.", error.message);
     }
 });

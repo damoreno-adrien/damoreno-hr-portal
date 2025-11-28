@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
-import * as dateUtils from '../../utils/dateUtils'; // Use new standard
+import * as dateUtils from '../../utils/dateUtils';
 
 export default function EditAttendanceModal({ db, record, onClose }) {
-    // isCreating is now false when we pass a 'fullRecord' (even a partial one)
-    const isCreating = !record.fullRecord; 
-    
-    // --- UPDATED: Handle partial 'fullRecord' from alert ---
-    // If 'fullRecord' exists, use it. Otherwise, initialize with empty strings.
+    // --- FIX: Detect Placeholder Records ---
+    const isPlaceholder = record.id && record.id.startsWith('no_attendance_');
+    const isCreating = !record.fullRecord || isPlaceholder;
+    // ---------------------------------------
+
     const [formData, setFormData] = useState({
         checkIn: record.fullRecord?.checkInTime ? dateUtils.formatCustom(record.fullRecord.checkInTime, 'HH:mm') : '',
         breakStart: record.fullRecord?.breakStart ? dateUtils.formatCustom(record.fullRecord.breakStart, 'HH:mm') : '',
@@ -27,12 +27,9 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         try {
             const datePart = record.date;
             
-            // Use dateUtils to reliably combine date and time
             const toTimestamp = (timeString) => {
                 if (!timeString) return null;
-                // Create a local ISO-like string (e.g., "2025-10-23T14:30:00")
                 const isoString = `${datePart}T${timeString}:00`;
-                // Parse it as a local date
                 const date = dateUtils.fromFirestore(isoString);
                 return date ? Timestamp.fromDate(date) : null;
             };
@@ -45,7 +42,6 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             };
 
             if (isCreating) {
-                // This path is for creating a *new* record from scratch
                 const newDocId = `${record.staffId}_${record.date}`;
                 const docRef = doc(db, 'attendance', newDocId);
                 await setDoc(docRef, {
@@ -55,18 +51,14 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     date: record.date,
                 });
             } else {
-                // This path is for *updating* an existing record (like from an alert)
-                // record.id here is the attendanceDocId
                 const docRef = doc(db, 'attendance', record.id); 
                 await updateDoc(docRef, dataToSave);
             }
 
-            // --- NEW: Delete the alert if it exists ---
             if (record.alertId) {
                 const alertRef = doc(db, 'manager_alerts', record.alertId);
                 await deleteDoc(alertRef);
             }
-            // --- END NEW BLOCK ---
 
             onClose();
         } catch (err) {
@@ -81,15 +73,16 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         if (window.confirm("Are you sure you want to permanently delete this attendance record?")) {
             setIsSaving(true);
             try {
-                const docRef = doc(db, 'attendance', record.id);
-                await deleteDoc(docRef);
+                // If it's a placeholder, there is nothing to delete from DB
+                if (!isPlaceholder) {
+                    const docRef = doc(db, 'attendance', record.id);
+                    await deleteDoc(docRef);
+                }
 
-                // --- NEW: Also delete the alert ---
                 if (record.alertId) {
                     const alertRef = doc(db, 'manager_alerts', record.alertId);
                     await deleteDoc(alertRef);
                 }
-                // --- END NEW BLOCK ---
 
                 onClose();
             } catch (err) { setError('Failed to delete the record.');
@@ -103,24 +96,23 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label htmlFor="checkIn" className="block text-sm font-medium text-gray-300 mb-1">Check-In Time</label>
-                    <input type="time" id="checkIn" value={formData.checkIn} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input type="time" id="checkIn" value={formData.checkIn} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md text-white" />
                 </div>
                  <div>
                     <label htmlFor="checkOut" className="block text-sm font-medium text-gray-300 mb-1">Check-Out Time</label>
-                    <input type="time" id="checkOut" value={formData.checkOut} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input type="time" id="checkOut" value={formData.checkOut} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md text-white" />
                 </div>
                  <div>
                     <label htmlFor="breakStart" className="block text-sm font-medium text-gray-300 mb-1">Break Start Time</label>
-                    <input type="time" id="breakStart" value={formData.breakStart} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input type="time" id="breakStart" value={formData.breakStart} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md text-white" />
                 </div>
                  <div>
                     <label htmlFor="breakEnd" className="block text-sm font-medium text-gray-300 mb-1">Break End Time</label>
-                    <input type="time" id="breakEnd" value={formData.breakEnd} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md" />
+                    <input type="time" id="breakEnd" value={formData.breakEnd} onChange={handleInputChange} className="w-full p-2 bg-gray-700 rounded-md text-white" />
                 </div>
             </div>
             {error && <p className="text-red-400 text-sm text-center">{error}</p>}
             
-            {/* --- UPDATED BUTTON LAYOUT --- */}
             <div className="flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center pt-4 mt-4 border-t border-gray-600">
                 <div>
                     {!isCreating && (
@@ -128,8 +120,8 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     )}
                 </div>
                 <div className="flex w-full sm:w-auto justify-end space-x-4">
-                    <button type="button" onClick={onClose} className="flex-grow sm:flex-grow-0 px-6 py-2 rounded-lg bg-gray-600">Cancel</button>
-                    <button onClick={handleSave} disabled={isSaving} className="flex-grow sm:flex-grow-0 px-6 py-2 rounded-lg bg-amber-600">{isSaving ? 'Saving...' : 'Save'}</button>
+                    <button type="button" onClick={onClose} className="flex-grow sm:flex-grow-0 px-6 py-2 rounded-lg bg-gray-600 text-white hover:bg-gray-500">Cancel</button>
+                    <button onClick={handleSave} disabled={isSaving} className="flex-grow sm:flex-grow-0 px-6 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700">{isSaving ? 'Saving...' : 'Save'}</button>
                 </div>
             </div>
         </div>
