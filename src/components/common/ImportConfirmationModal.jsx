@@ -1,29 +1,21 @@
 import React, { useMemo } from 'react';
 import Modal from './Modal';
 import { CheckCircle, AlertTriangle, Info, ArrowRight, Plus } from 'lucide-react'; 
-import * as dateUtils from '../../utils/dateUtils'; // Ensure this import is present
+import * as dateUtils from '../../utils/dateUtils';
 
 // Helper to get a consistent display name
 const getRowName = (row) => {
     let name = 'Unknown';
     
-    // 1. Determine Name
     if (row.name) name = row.name;
     else if (row.displayName) name = row.displayName;
     else if (row.staffName) name = row.staffName;
     else if (row.staffId) name = row.staffId;
 
-    // 2. Append Date if available (The Fix you asked for)
     if (row.date) {
-        // row.date is usually YYYY-MM-DD from the backend analysis
-        // We use dateUtils to parse and reformat it nicely
         const dateObj = dateUtils.parseISODateString(row.date);
-        if (dateObj) {
-             const dateStr = dateUtils.formatCustom(dateObj, 'dd/MM/yy');
-             return `${dateStr} - ${name}`;
-        }
-        // Fallback if dateUtils fails
-        return `${row.date} - ${name}`;
+        const dateStr = dateObj ? dateUtils.formatCustom(dateObj, 'dd/MM/yy') : row.date;
+        return `${dateStr} - ${name}`;
     }
 
     if (row.email) {
@@ -33,7 +25,6 @@ const getRowName = (row) => {
     return name;
 };
 
-// Helper to format a value (e.g., from a 'details' object)
 const formatValue = (value) => {
     if (value && typeof value === 'object' && value._seconds !== undefined) {
         try {
@@ -46,7 +37,6 @@ const formatValue = (value) => {
     return String(value);
 };
 
-// Renders the list of changes for an "update" row
 const renderUpdateChanges = (details) => {
     return (
         <ul className="list-['▹'] list-inside ml-4 text-gray-400">
@@ -62,8 +52,9 @@ const renderUpdateChanges = (details) => {
     );
 };
 
-// Renders the details for a "create" row (for Planning)
+// --- FIX 1: Add safety check for null details ---
 const renderCreateChanges = (details) => {
+    if (!details) return '';
     if (details.type === 'work') {
         return `Set to WORK: ${details.startTime} - ${details.endTime}`;
     }
@@ -85,12 +76,18 @@ export default function ImportConfirmationModal({
     const { creates = [], updates = [], deletes = [], noChanges = [], errors = [] } = safeAnalysis;
     const totalProcessed = creates.length + updates.length + deletes.length + noChanges.length + errors.length;
 
+    // --- FIX 2: Smarter detection logic ---
     const isPlanningImport = useMemo(() => {
-        const firstRow = creates[0] || updates[0] || errors[0];
-        return firstRow ? firstRow.hasOwnProperty('date') : false;
-    }, [creates, updates, errors]);
+        // Explicitly check fileName to distinguish between Attendance and Planning
+        if (fileName && fileName.toLowerCase().includes('planning')) return true;
+        if (fileName && fileName.toLowerCase().includes('attendance')) return false;
 
-    // Determine the label for "New [Item] to Create"
+        // Fallback: Check data structure if fileName is generic
+        const firstRow = creates[0] || updates[0] || errors[0];
+        // Planning imports usually have 'details' with schedule info, not just 'date'
+        return firstRow && firstRow.hasOwnProperty('date') && !firstRow.hasOwnProperty('checkInTime'); 
+    }, [creates, updates, errors, fileName]);
+
     const label = entityName || (isPlanningImport ? 'Schedules' : 'Staff');
     
     const AnalysisSection = ({ title, icon, data, colorClass }) => {
@@ -105,7 +102,6 @@ export default function ImportConfirmationModal({
                     {data.map((row) => (
                         <div key={row.rowNum} className="text-sm border-b border-gray-700 pb-2 last:border-b-0">
                             <p className="font-medium text-gray-200">
-                                {/* Use the improved getRowName helper here */}
                                 Row {row.rowNum}: {getRowName(row)}
                             </p>
                             
