@@ -9,380 +9,197 @@ const { DateTime } = require('luxon');
 const { isEqual: isDateEqual, isValid: isJsDateValid } = require('date-fns');
 
 const db = getFirestore();
-
-// --- Configuration ---
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
-const REQUIRED_HEADERS = ['staffid', 'date'];
-const ALL_EXPECTED_HEADERS = [
-    'attendancedocid', 'staffid', 'staffname', 'date',
-    'checkintime', 'checkouttime', 'breakstarttime', 'breakendtime'
-];
-const TIME_FIELDS_MAP = {
-    checkintime: 'checkInTime',
-    checkouttime: 'checkOutTime',
-    breakstarttime: 'breakStart',
-    breakendtime: 'breakEnd'
-};
-
 
 // --- Helpers ---
-
 const parseDateString = (dateString) => {
     if (!dateString) return null;
-    const formatsToTry = ['yyyy-MM-dd', 'dd-MM-yy', 'dd-MM-yyyy'];
+    const formatsToTry = [
+        'yyyy-MM-dd', 'dd-MM-yyyy', 'd-M-yyyy', 'dd/MM/yyyy', 'd/M/yyyy',
+        'dd-MM-yy', 'dd/MM/yy', 'd-M-yy', 'd/M/yy'
+    ];
     for (const format of formatsToTry) {
         const dt = DateTime.fromFormat(dateString, format, { zone: THAILAND_TIMEZONE });
-        if (dt.isValid) {
-            return dt.toFormat('yyyy-MM-dd');
-        }
+        if (dt.isValid) return dt.toISODate();
     }
     return null;
 };
 
-const parseDateTimeToTimestampLuxon = (dateString, timeString) => {
-    if (!dateString || !timeString) return null;
+const parseDateTimeToTimestamp = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr || timeStr === '-' || timeStr.trim() === '') return null;
     
-    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(timeString)) {
-        console.warn(`parseDateTimeLuxon: Invalid time format: "${timeString}"`);
-        return null;
-    }
-    const dateTimeString = `${dateString}T${timeString}`;
-    try {
-        const dt = DateTime.fromISO(dateTimeString, { zone: THAILAND_TIMEZONE });
-        if (!dt.isValid) {
-            console.warn(`parseDateTimeLuxon: Invalid combined date/time: "${dateTimeString}". Reason: ${dt.invalidReason || dt.invalidExplanation}`);
-            return null;
-        }
-        return Timestamp.fromDate(dt.toJSDate());
-    } catch (e) {
-        console.error(`parseDateTimeLuxon: Unexpected error parsing "${dateTimeString}":`, e);
-        return null;
-    }
+    let dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm', { zone: THAILAND_TIMEZONE });
+    if (!dt.isValid) dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd H:mm', { zone: THAILAND_TIMEZONE });
+    if (!dt.isValid) dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm:ss', { zone: THAILAND_TIMEZONE });
+    if (!dt.isValid) dt = DateTime.fromISO(timeStr, { zone: THAILAND_TIMEZONE });
+
+    if (!dt.isValid) return null;
+    return Timestamp.fromDate(dt.toJSDate());
 };
 
 const areValuesEqual = (val1, val2) => {
-    if (val1 instanceof Timestamp && val2 instanceof Timestamp) {
-        try {
-            const date1 = val1.toDate();
-            const date2 = val2.toDate();
-            if (isJsDateValid(date1) && isJsDateValid(date2)) {
-                return isDateEqual(date1, date2);
-            }
-        } catch (e) {
-            console.warn("areValuesEqual: Error converting Timestamps to Dates for comparison, falling back.", e);
-        }
-        return val1.isEqual(val2);
-    }
-    if (typeof val1 === 'number' || typeof val2 === 'number') {
-        return Number(val1) === Number(val2);
-    }
-    const v1IsEmpty = val1 === null || val1 === undefined || val1 === '';
-    const v2IsEmpty = val2 === null || val2 === undefined || val2 === '';
-    if (v1IsEmpty && v2IsEmpty) return true;
+    if (val1 instanceof Timestamp && val2 instanceof Timestamp) return val1.isEqual(val2);
+    if (!val1 && !val2) return true;
     return val1 === val2;
 };
 
-
-// --- Main Cloud Function ---
 exports.importAttendanceDataHandler = functions.https.onCall({
     region: "us-central1",
     timeoutSeconds: 540,
     memory: "1GiB"
 }, async (request) => {
-    // 1. --- Authentication and Authorization ---
-    if (!request.auth) {
-        console.error("importAttendanceData: Unauthenticated access attempt.");
-        throw new HttpsError("unauthenticated", "Authentication required.");
-    }
+    
+    if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
     const callerUid = request.auth.uid;
-    try {
-        const callerDoc = await db.collection("users").doc(callerUid).get();
-        if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-             console.error(`importAttendanceData: Permission denied for user ${callerUid}. Role: ${callerDoc.data()?.role}`);
-            throw new HttpsError("permission-denied", "Manager role required.");
-        }
-         console.log(`importAttendanceData: Authorized manager ${callerUid}.`);
-    } catch(err) {
-         console.error(`importAttendanceData: Error verifying role for user ${callerUid}:`, err);
-         throw new HttpsError("internal", "Failed to verify user role.", err.message);
+    
+    const callerDoc = await db.collection("users").doc(callerUid).get();
+    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
+        throw new HttpsError("permission-denied", "Manager role required.");
     }
 
-    // 2. --- Input Validation ---
     const { csvData, confirm } = request.data;
-    if (!csvData || typeof csvData !== 'string') {
-        console.error("importAttendanceData: Invalid argument - csvData missing or not a string.");
-        throw new HttpsError("invalid-argument", "CSV data string is required.");
-    }
-    const isDryRun = !confirm;
-    console.log(`importAttendanceData: Running in ${isDryRun ? 'dry run' : 'execution'} mode.`);
+    if (!csvData) throw new HttpsError("invalid-argument", "No CSV data.");
 
-    // 3. --- Initialization ---
+    const isDryRun = !confirm;
     let analysisResults = [];
-    let overallErrors = [];
 
     try {
-        // 4. --- CSV Parsing and Header Validation ---
-        console.log("importAttendanceData: Parsing CSV data...");
         const records = csvParseSync(csvData, {
-            columns: true,
+            columns: header => header.map(h => h.toLowerCase().trim()),
             skip_empty_lines: true,
             trim: true
         });
-        console.log(`importAttendanceData: Parsed ${records.length} records.`);
 
-        if (records.length === 0) {
-            console.log("importAttendanceData: CSV file was empty.");
-            return { result: "CSV file was empty or contained no data rows.", analysis: { creates: [], updates: [], noChanges: [], errors: [] } };
-        }
+        if (records.length === 0) return { result: "Empty CSV." };
 
-        console.log("importAttendanceData: Validating CSV headers...");
-        const headers = Object.keys(records[0]).map(h => h.toLowerCase());
-        const missingRequired = REQUIRED_HEADERS.filter(h => !headers.includes(h.toLowerCase()));
-        if (missingRequired.length > 0) {
-            console.error(`importAttendanceData: Missing required headers: ${missingRequired.join(', ')}`);
-            throw new HttpsError("invalid-argument", `Missing required columns in CSV: ${missingRequired.join(', ')}`);
-        }
-        const hasAttendanceDocId = headers.includes('attendancedocid');
-        console.log(`importAttendanceData: Headers validated. Has attendanceDocId column: ${hasAttendanceDocId}`);
-
-
-        // 5. --- Analyze Each Record ---
-        console.log("importAttendanceData: Analyzing records...");
         for (let index = 0; index < records.length; index++) {
-            const record = records[index];
+            const row = records[index];
             const rowNum = index + 2;
-            let analysis = { rowNum, action: 'error', details: null, errors: [], attendanceDocId: null, staffId: null, date: null, staffName: null };
+            let analysis = { rowNum, action: 'skip', details: null, errors: [] };
 
             try {
-                const getRecordValue = (key) => {
-                    const actualHeader = Object.keys(record).find(h => h.toLowerCase() === key.toLowerCase());
-                    return actualHeader ? record[actualHeader]?.trim() : undefined;
-                };
-
-                // a. --- Row-Level Validation (Required Fields) ---
-                const missingRequiredCheck = REQUIRED_HEADERS.filter(h => {
-                    const value = getRecordValue(h);
-                    return value === null || value === undefined || value === '';
-                });
-                if (missingRequiredCheck.length > 0) {
-                    throw new Error(`Missing/empty required data for: ${missingRequiredCheck.join(', ')}`);
-                }
-
-                // b. --- Extract and Validate Key Identifying Fields ---
-                let csvDocId = hasAttendanceDocId ? getRecordValue('attendanceDocId') : null;
-                const staffId = getRecordValue('staffId');
-                const rawDate = getRecordValue('date');
-                const staffName = getRecordValue('staffName') || '';
+                const staffId = row['staff id'] || row['staffid'];
+                const rawDate = row['date'];
+                let attendanceDocId = row['attendance doc id'] || row['attendancedocid'];
                 
+                if (!staffId || !rawDate) throw new Error("Missing Staff ID or Date");
+
                 const date = parseDateString(rawDate);
-                
-                if (!date) {
-                    throw new Error(`Missing or invalid required data for: date (Could not parse '${rawDate}'. Must be YYYY-MM-DD, dd-MM-yy, or dd-MM-yyyy)`);
+                if (!date) throw new Error(`Invalid Date: ${rawDate}`);
+
+                // --- FIX: ADD DATE TO ANALYSIS OBJECT ---
+                analysis.date = date; // <--- This enables the "Date - Name" label in the modal
+                // ----------------------------------------
+
+                if (!attendanceDocId) {
+                    attendanceDocId = `${staffId}_${date}`;
+                }
+
+                const rawCheckIn = row['check-in'] || row['checkintime'];
+                const docRef = db.collection('attendance').doc(attendanceDocId);
+                const docSnap = await docRef.get();
+                const exists = docSnap.exists;
+
+                if (!rawCheckIn || rawCheckIn === '-' || rawCheckIn.trim() === '') {
+                    if (exists) {
+                        analysis.action = 'delete';
+                        analysis.docId = attendanceDocId;
+                        analysis.name = docSnap.data().staffName || 'Unknown';
+                        analysis.details = { note: "Deleting record because Check-In is empty in CSV" };
+                    } else {
+                        analysis.action = 'nochange'; 
+                    }
+                    analysisResults.push(analysis);
+                    continue; 
                 }
                 
-                if (!staffId || staffId.length < 5) {
-                    throw new Error(`Invalid or missing staffId`);
+                let checkInTime = parseDateTimeToTimestamp(date, rawCheckIn);
+                let checkOutTime = parseDateTimeToTimestamp(date, row['check-out'] || row['checkouttime']);
+                let breakStart = parseDateTimeToTimestamp(date, row['break start'] || row['breakstarttime']);
+                let breakEnd = parseDateTimeToTimestamp(date, row['break end'] || row['breakendtime']);
+
+                if (checkInTime && checkOutTime && checkOutTime.toMillis() < checkInTime.toMillis()) {
+                    checkOutTime = new Timestamp(checkOutTime.seconds + 86400, checkOutTime.nanoseconds);
                 }
-
-                // --- *** LOGIC FIX: Generate the ID consistently *** ---
-                const expectedDocId = `${staffId}_${date}`;
-                if (csvDocId && csvDocId !== expectedDocId) {
-                    // If an ID is provided but it doesn't match our format, trust it
-                    console.warn(`Row ${rowNum}: Provided attendanceDocId '${csvDocId}' does not match expected format '${expectedDocId}'. Using provided ID.`);
-                } else {
-                    // Use the formatted, predictable ID
-                    csvDocId = expectedDocId;
-                }
-                // --- *** END LOGIC FIX *** ---
-
-                analysis.attendanceDocId = csvDocId; // This is now ALWAYS the formatted ID
-                analysis.staffId = staffId;
-                analysis.date = date;
-                analysis.staffName = staffName;
-
-                // c. --- Prepare Potential Firestore Data ---
-                const csvAttendanceData = {
-                    staffId: staffId,
-                    date: date,
-                    staffName: staffName,
-                    checkInTime: parseDateTimeToTimestampLuxon(date, getRecordValue('checkInTime')),
-                    checkOutTime: parseDateTimeToTimestampLuxon(date, getRecordValue('checkOutTime')),
-                    breakStart: parseDateTimeToTimestampLuxon(date, getRecordValue('breakStartTime')),
-                    breakEnd: parseDateTimeToTimestampLuxon(date, getRecordValue('breakEndTime')),
+                
+                const newData = {
+                    staffId,
+                    date,
+                    staffName: row['staff name'] || row['staffname'] || 'Imported Staff',
+                    checkInTime,
+                    checkOutTime,
+                    breakStart,
+                    breakEnd
                 };
 
-                // d. --- Find Existing Attendance Record in Firestore ---
-                let existingRecord = null;
-                let attendanceRef = null;
+                if (exists) {
+                    const current = docSnap.data();
+                    let updates = {};
+                    let hasChanges = false;
 
-                // --- *** LOGIC FIX: Always find by the formatted ID *** ---
-                console.log(`importAttendanceData: Row ${rowNum} - Checking for doc with ID: ${csvDocId}`);
-                attendanceRef = db.collection('attendance').doc(csvDocId);
-                const docSnap = await attendanceRef.get();
-                if (docSnap.exists) {
-                    existingRecord = docSnap.data();
-                    console.log(`importAttendanceData: Row ${rowNum} - Successfully found existing record.`);
-                } else {
-                    console.log(`importAttendanceData: Row ${rowNum} - No existing record found. Will proceed with create action if checkInTime is present.`);
-                    existingRecord = null;
-                }
-                // --- *** END LOGIC FIX *** ---
-
-                // e. --- Determine Action (Create, Update, NoChange) ---
-                if (existingRecord) {
-                    // ** Case: Update or No Change **
-                    analysis.action = 'update';
-                    let changes = {};
-                    let requiresUpdate = false;
-
-                    Object.keys(TIME_FIELDS_MAP).forEach(csvKey => {
-                        const firestoreKey = TIME_FIELDS_MAP[csvKey];
-                        const csvValue = csvAttendanceData[firestoreKey];
-                        const existingValue = existingRecord[firestoreKey];
-                        if (!areValuesEqual(csvValue, existingValue)) {
-                            changes[firestoreKey] = { from: existingValue ?? null, to: csvValue };
-                            requiresUpdate = true;
+                    ['checkInTime', 'checkOutTime', 'breakStart', 'breakEnd'].forEach(field => {
+                        if (!areValuesEqual(current[field], newData[field])) {
+                            updates[field] = newData[field];
+                            hasChanges = true;
                         }
                     });
 
-                    if (requiresUpdate) {
-                        analysis.details = changes;
-                        analysis.dataForUpdate = {
-                            updateData: {
-                                checkInTime: csvAttendanceData.checkInTime,
-                                checkOutTime: csvAttendanceData.checkOutTime,
-                                breakStart: csvAttendanceData.breakStart,
-                                breakEnd: csvAttendanceData.breakEnd,
-                            }
-                        };
-                         console.log(`importAttendanceData: Row ${rowNum} - Marked for UPDATE. Changes:`, changes);
+                    if (hasChanges) {
+                        analysis.action = 'update';
+                        analysis.details = updates;
+                        analysis.docId = attendanceDocId;
+                        analysis.updateData = updates;
+                        analysis.name = current.staffName || newData.staffName;
                     } else {
                         analysis.action = 'nochange';
-                        analysis.details = null;
-                         console.log(`importAttendanceData: Row ${rowNum} - Marked as NO CHANGE.`);
                     }
-
                 } else {
-                    // ** Case: Create New Record **
-                    if (csvAttendanceData.checkInTime) {
-                        analysis.action = 'create';
-                        analysis.details = {
-                            checkInTime: csvAttendanceData.checkInTime,
-                            checkOutTime: csvAttendanceData.checkOutTime,
-                            breakStart: csvAttendanceData.breakStart,
-                            breakEnd: csvAttendanceData.breakEnd,
-                            staffName: csvAttendanceData.staffName
-                        };
-                        analysis.dataForCreate = csvAttendanceData;
-                         console.log(`importAttendanceData: Row ${rowNum} - Marked for CREATE.`);
-                    } else {
-                        analysis.action = 'nochange';
-                        analysis.details = null;
-                        console.log(`importAttendanceData: Row ${rowNum} - Marked as NO CHANGE (no existing record and no new check-in time).`);
-                    }
+                    analysis.action = 'create';
+                    analysis.docId = attendanceDocId;
+                    analysis.createData = newData;
+                    analysis.name = newData.staffName;
                 }
 
-            } catch (error) {
+            } catch (err) {
                 analysis.action = 'error';
-                const errorMessage = error.message || 'Unknown processing error for row';
-                analysis.errors.push(errorMessage);
-                console.error(`importAttendanceData: Error processing row ${rowNum}:`, error);
-                overallErrors.push(`Row ${rowNum}: ${errorMessage}`);
+                analysis.errors.push(err.message);
             }
             analysisResults.push(analysis);
-        } // --- End of record analysis loop ---
-        console.log("importAttendanceData: Finished analyzing all records.");
+        }
 
-
-        // 6. --- Return Analysis (Dry Run) or Execute Writes (Confirm) ---
         if (isDryRun) {
-            console.log("importAttendanceData: Dry run complete. Returning analysis summary.");
             const summary = analysisResults.reduce((acc, cur) => {
-                const key = cur.action + (cur.action.endsWith('s') ? '' : 's');
-                 if (!acc[key]) acc[key] = [];
-                 acc[key].push(cur);
+                 const k = cur.action + 's'; 
+                 if (!acc[k]) acc[k] = [];
+                 acc[k].push(cur);
                  return acc;
-            }, { creates: [], updates: [], noChanges: [], errors: [] });
-
+            }, {});
             return { analysis: summary };
-
         } else {
-            // --- Execute Confirmed Writes ---
-            console.log("importAttendanceData: Executing confirmed import writes...");
-            let recordsCreated = 0;
-            let recordsUpdated = 0;
-            const finalExecutionErrors = [];
-
-            // --- *** LOGIC FIX: Use Batch write for creates/updates *** ---
             const batch = db.batch();
-
+            let count = 0;
+            
             analysisResults.forEach(res => {
-                // Get the consistent document reference
-                const docRef = db.collection('attendance').doc(res.attendanceDocId);
-
-                if (res.action === 'create' && res.dataForCreate) {
-                    console.log(`importAttendanceData: Executing CREATE for row ${res.rowNum}, DocID: ${res.attendanceDocId}`);
-                    batch.set(docRef, {
-                        ...res.dataForCreate,
-                        createdAt: FieldValue.serverTimestamp()
-                    });
-                    recordsCreated++;
-                }
-                else if (res.action === 'update' && res.dataForUpdate) {
-                    console.log(`importAttendanceData: Executing UPDATE for row ${res.rowNum}, DocID: ${res.attendanceDocId}`);
-                    batch.update(docRef, {
-                        ...res.dataForUpdate.updateData,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    recordsUpdated++;
-                 }
-                else if (res.action === 'error') {
-                     res.errors.forEach(errMsg => {
-                        const fullMsg = `Row ${res.rowNum}: ${errMsg}`;
-                        if (!finalExecutionErrors.includes(fullMsg) && !overallErrors.some(e => e.startsWith(`Row ${res.rowNum}:`))) {
-                            finalExecutionErrors.push(fullMsg);
-                        }
-                    });
+                if (res.action === 'create') {
+                    const ref = db.collection('attendance').doc(res.docId);
+                    batch.set(ref, { ...res.createData, createdAt: FieldValue.serverTimestamp() });
+                    count++;
+                } else if (res.action === 'update') {
+                    const ref = db.collection('attendance').doc(res.docId);
+                    batch.update(ref, { ...res.updateData, updatedAt: FieldValue.serverTimestamp() });
+                    count++;
+                } else if (res.action === 'delete') {
+                    const ref = db.collection('attendance').doc(res.docId);
+                    batch.delete(ref);
+                    count++;
                 }
             });
 
-            try {
-                await batch.commit();
-                console.log("importAttendanceData: Batch commit successful.");
-            } catch (batchError) {
-                console.error("importAttendanceData: CRITICAL Batch Commit Error:", batchError);
-                finalExecutionErrors.push(`Batch Write Failed: ${batchError.message}. Some records may not have saved.`);
-            }
-            // --- *** END LOGIC FIX *** ---
-
-             const uniqueRowErrors = new Map();
-             [...overallErrors, ...finalExecutionErrors].forEach(e => {
-                 const rowPrefix = e.match(/^Row \d+:/)?.[0];
-                 if (rowPrefix && !uniqueRowErrors.has(rowPrefix)) {
-                     uniqueRowErrors.set(rowPrefix, e);
-                 } else if (!rowPrefix && !uniqueRowErrors.has(e)) {
-                     uniqueRowErrors.set(e, e);
-                 }
-             });
-            const allErrors = Array.from(uniqueRowErrors.values());
-
-            const finalSummaryMessage = `Attendance import finished. Processed: ${records.length}. Created: ${recordsCreated}. Updated: ${recordsUpdated}. Errors: ${allErrors.length}.`;
-            console.log(finalSummaryMessage);
-             if (allErrors.length > 0) console.error("importAttendanceData: Final import errors encountered:", allErrors);
-
-            return {
-                result: finalSummaryMessage,
-                errors: allErrors,
-            };
+            if (count > 0) await batch.commit();
+            return { result: `Success! Processed ${count} records.` };
         }
 
     } catch (error) {
-        console.error("importAttendanceData: CRITICAL error during import process:", error);
-        if (error instanceof HttpsError) throw error;
-         return {
-            result: `Import failed with a critical error: ${error.message}`,
-            errors: [`General Error: ${error.message}`, ...overallErrors],
-             analysis: null
-        };
+        throw new HttpsError("internal", error.message);
     }
 });

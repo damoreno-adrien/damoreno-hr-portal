@@ -1,19 +1,40 @@
-// src/components/ImportConfirmationModal.jsx
 import React, { useMemo } from 'react';
 import Modal from './Modal';
 import { CheckCircle, AlertTriangle, Info, ArrowRight, Plus } from 'lucide-react'; 
+import * as dateUtils from '../../utils/dateUtils'; // Ensure this import is present
 
 // Helper to get a consistent display name
 const getRowName = (row) => {
-    if (row.displayName) return row.displayName; // From Staff Import
-    if (row.staffName) return row.staffName; // From Planning Import
-    if (row.staffId) return row.staffId;
-    return 'Unknown';
+    let name = 'Unknown';
+    
+    // 1. Determine Name
+    if (row.name) name = row.name;
+    else if (row.displayName) name = row.displayName;
+    else if (row.staffName) name = row.staffName;
+    else if (row.staffId) name = row.staffId;
+
+    // 2. Append Date if available (The Fix you asked for)
+    if (row.date) {
+        // row.date is usually YYYY-MM-DD from the backend analysis
+        // We use dateUtils to parse and reformat it nicely
+        const dateObj = dateUtils.parseISODateString(row.date);
+        if (dateObj) {
+             const dateStr = dateUtils.formatCustom(dateObj, 'dd/MM/yy');
+             return `${dateStr} - ${name}`;
+        }
+        // Fallback if dateUtils fails
+        return `${row.date} - ${name}`;
+    }
+
+    if (row.email) {
+        return `${name} (${row.email})`;
+    }
+
+    return name;
 };
 
 // Helper to format a value (e.g., from a 'details' object)
 const formatValue = (value) => {
-    // Check for Firestore Timestamp structure
     if (value && typeof value === 'object' && value._seconds !== undefined) {
         try {
             return new Date(value._seconds * 1000).toLocaleDateString('en-GB');
@@ -49,28 +70,28 @@ const renderCreateChanges = (details) => {
     return `Set to OFF`;
 };
 
-
 export default function ImportConfirmationModal({
     isOpen,
     onClose,
     onConfirm,
-    analysis, // Renamed from analysisResult to be generic
-    isLoading, // Renamed from isConfirming
-    fileName = "Import", // New prop to set the title
-    error // New prop for general errors
+    analysis,
+    isLoading,
+    fileName = "Import",
+    error,
+    entityName
 }) {
-    // Ensure analysis is an object before destructuring
     const safeAnalysis = useMemo(() => analysis || {}, [analysis]);
     
-    // Default to empty arrays if properties are missing
-    const { creates = [], updates = [], noChanges = [], errors = [] } = safeAnalysis;
-    const totalProcessed = creates.length + updates.length + noChanges.length + errors.length;
+    const { creates = [], updates = [], deletes = [], noChanges = [], errors = [] } = safeAnalysis;
+    const totalProcessed = creates.length + updates.length + deletes.length + noChanges.length + errors.length;
 
-    // Check what type of import this is. Staff import has 'email'. Planning import has 'date'.
     const isPlanningImport = useMemo(() => {
         const firstRow = creates[0] || updates[0] || errors[0];
         return firstRow ? firstRow.hasOwnProperty('date') : false;
     }, [creates, updates, errors]);
+
+    // Determine the label for "New [Item] to Create"
+    const label = entityName || (isPlanningImport ? 'Schedules' : 'Staff');
     
     const AnalysisSection = ({ title, icon, data, colorClass }) => {
         if (!data || data.length === 0) return null;
@@ -84,29 +105,32 @@ export default function ImportConfirmationModal({
                     {data.map((row) => (
                         <div key={row.rowNum} className="text-sm border-b border-gray-700 pb-2 last:border-b-0">
                             <p className="font-medium text-gray-200">
+                                {/* Use the improved getRowName helper here */}
                                 Row {row.rowNum}: {getRowName(row)}
-                                {isPlanningImport && ` (${row.date})`}
-                                {!isPlanningImport && row.email && ` (${row.email})`}
                             </p>
                             
-                            {/* Render Errors */}
                             {row.action === 'error' && (
                                 <p className="text-red-400 text-xs">{row.errors.join(', ')}</p>
                             )}
 
-                            {/* Render Planning Create */}
                             {isPlanningImport && row.action === 'create' && (
                                 <div className="text-gray-400 text-xs">{renderCreateChanges(row.details)}</div>
                             )}
                             
-                            {/* Render Staff Create (simple) */}
                             {!isPlanningImport && row.action === 'create' && (
-                                <div className="text-gray-400 text-xs">New user will be created.</div>
+                                <div className="text-gray-400 text-xs">
+                                    {row.createData ? "New record will be created." : "New user will be created."}
+                                </div>
                             )}
 
-                            {/* Render Updates (works for both) */}
                             {row.action === 'update' && (
                                 <div className="text-gray-400">{renderUpdateChanges(row.details)}</div>
+                            )}
+                             
+                            {row.action === 'delete' && (
+                                <div className="text-red-400 text-xs">
+                                    Record will be deleted. {row.details?.note && `(${row.details.note})`}
+                                </div>
                             )}
                         </div>
                     ))}
@@ -115,7 +139,7 @@ export default function ImportConfirmationModal({
         );
     };
 
-    if (!analysis) return null; // Don't render if no analysis data
+    if (!analysis) return null;
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={`Confirm ${fileName}`}>
@@ -149,13 +173,19 @@ export default function ImportConfirmationModal({
                         colorClass="text-red-400"
                     />
                     <AnalysisSection
-                        title={`New ${isPlanningImport ? 'Schedules' : 'Staff'} to Create`}
+                        title="Deletions"
+                        icon={<AlertTriangle className="h-5 w-5" />}
+                        data={deletes}
+                        colorClass="text-red-500"
+                    />
+                    <AnalysisSection
+                        title={`New ${label} to Create`}
                         icon={<Plus className="h-5 w-5" />}
                         data={creates}
                         colorClass="text-green-400"
                     />
                     <AnalysisSection
-                        title={`${isPlanningImport ? 'Schedules' : 'Staff'} to Update`}
+                        title={`${label} to Update`}
                         icon={<CheckCircle className="h-5 w-5" />}
                         data={updates}
                         colorClass="text-yellow-400"
@@ -180,10 +210,10 @@ export default function ImportConfirmationModal({
                     <button
                         type="button"
                         onClick={onConfirm}
-                        disabled={isLoading || errors.length > 0 || (creates.length === 0 && updates.length === 0)}
+                        disabled={isLoading || errors.length > 0 || (creates.length === 0 && updates.length === 0 && deletes.length === 0)}
                         className="w-full sm:w-auto px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:bg-gray-500"
                     >
-                        {isLoading ? 'Importing...' : `Confirm Import (${creates.length + updates.length} changes)`}
+                        {isLoading ? 'Importing...' : `Confirm Import (${creates.length + updates.length + deletes.length} changes)`}
                     </button>
                 </div>
             </div>

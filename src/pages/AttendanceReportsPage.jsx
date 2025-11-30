@@ -1,4 +1,3 @@
-// src/pages/AttendanceReportsPage.jsx
 import React, { useState, useRef, useEffect } from 'react';
 import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -17,6 +16,7 @@ const cleanupBadAttendanceIds = httpsCallable(functions, 'cleanupBadAttendanceId
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
+    if (staff && staff.firstName && staff.lastName) return `${staff.firstName} ${staff.lastName}`;
     if (staff && staff.firstName) return staff.firstName;
     if (staff && staff.fullName) return staff.fullName;
     return 'Unknown Staff';
@@ -29,11 +29,10 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
     
-    // --- NEW: Multi-Select State ---
-    const [selectedStaffIds, setSelectedStaffIds] = useState([]); // Empty array means "All"
+    // Multi-Select State
+    const [selectedStaffIds, setSelectedStaffIds] = useState([]); 
     const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
     const dropdownRef = useRef(null);
-    // -------------------------------
 
     const [editingRecord, setEditingRecord] = useState(null);
     const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'ascending' });
@@ -50,6 +49,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const [cleanupLoading, setCleanupLoading] = useState(false);
     const [cleanupResult, setCleanupResult] = useState(null);
 
+    // 1. Fetch Config on Mount
     useEffect(() => {
         if (!db) return;
         const configRef = doc(db, 'settings', 'company_config');
@@ -78,7 +78,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
     };
 
     const handleSelectAllStaff = () => {
-        // If all are currently selected, deselect all (empty array). Otherwise, select all IDs.
         const activeStaffIds = staffList.filter(s => s.status !== 'inactive').map(s => s.id);
         if (selectedStaffIds.length === activeStaffIds.length) {
             setSelectedStaffIds([]);
@@ -96,7 +95,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         try {
             console.log(`Generating report for ${startDate} to ${endDate}`);
             
-            // 1. Fetch Data (Optimized: Fetching logic remains same, filtering happens later)
             const [schedulesSnapshot, attendanceSnapshot, leaveSnapshot] = await Promise.all([
                 getDocs(query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate))),
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate))),
@@ -129,10 +127,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 }
             });
 
-            // --- 2. Filter Staff Logic Updated ---
             const activeStaff = staffList.filter(s => s.status !== 'inactive');
             const staffToReport = selectedStaffIds.length === 0
-                ? activeStaff // If empty, show ALL
+                ? activeStaff 
                 : activeStaff.filter(s => selectedStaffIds.includes(s.id));
 
             const generatedData = [];
@@ -195,6 +192,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 }
             }
             setUnsortedReportData(generatedData);
+
         } catch (error) {
             console.error("Error generating report: ", error);
              setImportResult({ message: "Error generating report.", errors: [error.message] });
@@ -231,16 +229,8 @@ export default function AttendanceReportsPage({ db, staffList }) {
         if (!startDate || !endDate) { alert("Please select both a start and end date."); return; }
         setIsExporting(true); setImportResult(null); setCleanupResult(null);
         try {
-            // --- FIX: Send selectedStaffIds to backend ---
-            // If array is empty, send null (meaning "All")
             const staffIdsToSend = selectedStaffIds.length > 0 ? selectedStaffIds : null;
-            
-            const result = await exportAttendanceData({ 
-                startDate, 
-                endDate,
-                staffIds: staffIdsToSend // <-- New Parameter
-            }); 
-            // ---------------------------------------------
+            const result = await exportAttendanceData({ startDate, endDate, staffIds: staffIdsToSend }); 
             const csvData = result.data.csvData;
             const filename = result.data.filename || `attendance_export.csv`;
             if (!csvData) { alert("No data to export."); setIsExporting(false); return; }
@@ -258,19 +248,85 @@ export default function AttendanceReportsPage({ db, staffList }) {
         finally { setIsExporting(false); }
     };
 
-    // ... (Import/Cleanup handlers are unchanged) ...
     const handleImportClick = () => { if (fileInputRef.current) { setImportResult(null); setCleanupResult(null); setAnalysisResult(null); setCsvDataToConfirm(null); setIsConfirmModalOpen(false); fileInputRef.current.value = ''; fileInputRef.current.click(); } };
-    const handleFileSelected = (event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async (e) => { const csvData = e.target?.result; setIsImporting(true); setAnalysisResult(null); setImportResult(null); setCleanupResult(null); try { const result = await importAttendanceData({ csvData, confirm: false }); if (result.data && result.data.analysis) { setAnalysisResult(result.data.analysis); setCsvDataToConfirm(csvData); setIsConfirmModalOpen(true); } else { setImportResult({ message: result.data?.result || "Analysis failed.", errors: result.data?.errors || [] }); } } catch (error) { setImportResult({ message: `Analysis failed: ${error.message}`, errors: [] }); } finally { setIsImporting(false); if (fileInputRef.current) fileInputRef.current.value = ''; } }; reader.readAsText(file); };
-    const handleConfirmImport = async () => { if (!csvDataToConfirm) return; setIsConfirmingImport(true); setIsConfirmModalOpen(false); setImportResult(null); setCleanupResult(null); try { const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true }); setImportResult({ message: result.data.result, errors: result.data.errors || [] }); if (!result.data.errors || result.data.errors.length === 0) await handleGenerateReport(); } catch (error) { setImportResult({ message: `Import failed: ${error.message}`, errors: [] }); } finally { setIsConfirmingImport(false); setCsvDataToConfirm(null); setAnalysisResult(null); } };
+    
+    const handleFileSelected = (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'application/vnd.ms-excel') {
+            alert("Invalid file type. Please upload a CSV file (.csv).");
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const csvData = e.target?.result;
+            setIsImporting(true); setAnalysisResult(null); setImportResult(null); setCleanupResult(null);
+            try {
+                const result = await importAttendanceData({ csvData, confirm: false });
+                if (result.data && result.data.analysis) { setAnalysisResult(result.data.analysis); setCsvDataToConfirm(csvData); setIsConfirmModalOpen(true); } 
+                else { setImportResult({ message: result.data?.result || "Analysis failed.", errors: result.data?.errors || [] }); }
+            } catch (error) { setImportResult({ message: `Analysis failed: ${error.message}`, errors: [] }); } 
+            finally { setIsImporting(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+        };
+        reader.readAsText(file);
+    };
+
+    // --- FIX: Improved Import Confirmation Handler ---
+    const handleConfirmImport = async () => {
+        if (!csvDataToConfirm) return;
+        setIsConfirmingImport(true);
+        // Don't close modal yet, show loading state on button
+        setImportResult(null); 
+        setCleanupResult(null);
+
+        try {
+            const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
+            setIsConfirmModalOpen(false); // Close modal on success
+
+            if (!result.data.errors || result.data.errors.length === 0) {
+                alert(`✅ Import Successful!\n\n${result.data.result}`);
+                await handleGenerateReport(); // Refresh report
+            } else {
+                setImportResult({ message: result.data.result, errors: result.data.errors || [] });
+                alert("Import completed with some warnings. Please check the result message below the buttons.");
+            }
+        } catch (error) {
+            setIsConfirmModalOpen(false);
+            setImportResult({ message: `Import failed: ${error.message}`, errors: [] });
+            alert(`Import Failed: ${error.message}`);
+        } finally {
+            setIsConfirmingImport(false);
+            setCsvDataToConfirm(null);
+            setAnalysisResult(null);
+        }
+    };
+
     const handleCancelImport = () => { setIsConfirmModalOpen(false); setAnalysisResult(null); setCsvDataToConfirm(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
-    const handleCleanup = async () => { if (!window.confirm("Run cleanup? This deletes bad attendance IDs.")) return; setCleanupLoading(true); setCleanupResult(null); setImportResult(null); try { const response = await cleanupBadAttendanceIds(); setCleanupResult({ message: response.data.message, error: false }); await handleGenerateReport(); } catch (err) { setCleanupResult({ message: err.message, error: true }); } finally { setCleanupLoading(false); } };
+    
+    const handleCleanup = async () => {
+        if (!window.confirm("Run cleanup? This deletes bad attendance IDs.")) return;
+        setCleanupLoading(true); setCleanupResult(null); setImportResult(null);
+        try { const response = await cleanupBadAttendanceIds(); setCleanupResult({ message: response.data.message, error: false }); await handleGenerateReport(); } 
+        catch (err) { setCleanupResult({ message: err.message, error: true }); } finally { setCleanupLoading(false); }
+    };
     
     const getSortIcon = (key) => { if (sortConfig.key !== key) return null; return sortConfig.direction === 'ascending' ? <ArrowUp className="inline-block h-4 w-4 ml-1" /> : <ArrowDown className="inline-block h-4 w-4 ml-1" />; };
 
     return (
         <div>
             {editingRecord && ( <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}> <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} /> </Modal> )}
-            <ImportConfirmationModal isOpen={isConfirmModalOpen} onClose={handleCancelImport} analysis={analysisResult} onConfirm={handleConfirmImport} isLoading={isConfirmingImport} fileName="Attendance Import" />
+            
+            {/* --- FIX: Pass entityName to fix modal title --- */}
+            <ImportConfirmationModal 
+                isOpen={isConfirmModalOpen} 
+                onClose={handleCancelImport} 
+                analysis={analysisResult} 
+                onConfirm={handleConfirmImport} 
+                isLoading={isConfirmingImport} 
+                fileName="Attendance Import" 
+                entityName="Records" 
+            />
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
 
@@ -279,43 +335,25 @@ export default function AttendanceReportsPage({ db, staffList }) {
                      <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" /></div>
                      <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">End Date</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" /></div>
                      
-                     {/* --- NEW: Multi-Select Dropdown --- */}
                      <div className="flex-grow relative" ref={dropdownRef}>
                         <label className="block text-sm font-medium text-gray-300 mb-1">Staff Selection</label>
-                        <button 
-                            onClick={() => setIsStaffDropdownOpen(!isStaffDropdownOpen)}
-                            className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 flex justify-between items-center"
-                        >
-                            <span>
-                                {selectedStaffIds.length === 0 
-                                    ? "All Active Staff" 
-                                    : `${selectedStaffIds.length} Selected`}
-                            </span>
+                        <button onClick={() => setIsStaffDropdownOpen(!isStaffDropdownOpen)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 flex justify-between items-center">
+                            <span>{selectedStaffIds.length === 0 ? "All Active Staff" : `${selectedStaffIds.length} Selected`}</span>
                             <ChevronDown className="h-4 w-4" />
                         </button>
                         
                         {isStaffDropdownOpen && (
                             <div className="absolute z-50 w-full mt-1 bg-gray-700 border border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                                <div 
-                                    className="px-4 py-2 hover:bg-gray-600 cursor-pointer border-b border-gray-600 flex items-center"
-                                    onClick={handleSelectAllStaff}
-                                >
+                                <div className="px-4 py-2 hover:bg-gray-600 cursor-pointer border-b border-gray-600 flex items-center" onClick={handleSelectAllStaff}>
                                     <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${selectedStaffIds.length === 0 ? 'bg-amber-600 border-amber-600' : 'border-gray-400'}`}>
                                         {selectedStaffIds.length === 0 && <Check className="h-3 w-3 text-white" />}
                                     </div>
                                     <span className="text-sm text-white font-bold">Select All / None</span>
                                 </div>
-                                {staffList
-                                    .filter(s => s.status !== 'inactive')
-                                    .sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b)))
-                                    .map(staff => {
+                                {staffList.filter(s => s.status !== 'inactive').sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => {
                                         const isSelected = selectedStaffIds.includes(staff.id);
                                         return (
-                                            <div 
-                                                key={staff.id} 
-                                                className="px-4 py-2 hover:bg-gray-600 cursor-pointer flex items-center"
-                                                onClick={() => handleToggleStaff(staff.id)}
-                                            >
+                                            <div key={staff.id} className="px-4 py-2 hover:bg-gray-600 cursor-pointer flex items-center" onClick={() => handleToggleStaff(staff.id)}>
                                                 <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-400'}`}>
                                                     {isSelected && <Check className="h-3 w-3 text-white" />}
                                                 </div>
@@ -327,23 +365,19 @@ export default function AttendanceReportsPage({ db, staffList }) {
                             </div>
                         )}
                     </div>
-                    {/* ------------------------------------- */}
 
                      <button onClick={handleGenerateReport} disabled={isLoading || isImporting || isConfirmingImport || isExporting || cleanupLoading} className="w-full sm:w-auto px-5 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 text-white font-semibold">{isLoading ? 'Generating...' : 'Generate Report'}</button>
                  </div>
-                
                 <div className="flex flex-col sm:flex-row sm:justify-end gap-3 mt-4 border-t border-gray-700 pt-4">
                      <button onClick={handleExport} disabled={isExporting || isLoading} className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-semibold"> <Download className="h-5 w-5 mr-2" /> {isExporting ? 'Exporting...' : 'Export CSV'} </button>
-                     {/* ... (other buttons unchanged) ... */}
                      <button onClick={handleImportClick} disabled={isImporting} className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 text-white font-semibold"> <Upload className="h-5 w-5 mr-2" /> {isImporting ? 'Analyzing...' : 'Import CSV'} </button>
                      <input type="file" ref={fileInputRef} onChange={handleFileSelected} accept=".csv, text/csv, application/vnd.ms-excel" style={{ display: 'none' }} />
                     <button onClick={handleCleanup} disabled={cleanupLoading} className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white font-semibold"> <Trash2 className="h-5 w-5 mr-2" /> {cleanupLoading ? 'Cleaning...' : 'Run Cleanup'} </button>
                 </div>
             </div>
 
-            {/* ... (Results and Table section unchanged) ... */}
-            {cleanupResult && ( <div className={`p-4 rounded-lg mb-6 shadow ${cleanupResult.error ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> <p className={`font-semibold ${cleanupResult.error ? 'text-red-300' : 'text-green-300'}`}>{cleanupResult.error ? 'Cleanup Failed' : 'Cleanup Success'}</p> <p className="text-sm text-gray-300">{cleanupResult.message}</p> </div> )}
-            {importResult && ( <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}> Import Result: {importResult.message} </p> {importResult.errors?.length > 0 && ( <div className="mt-3"> <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered:</p> <ul className="list-disc list-inside text-sm text-red-400 space-y-1 max-h-40 overflow-y-auto"> {importResult.errors.map((err, index) => ( <li key={index}>{err}</li> ))} </ul> </div> )} </div> )}
+             {cleanupResult && ( <div className={`p-4 rounded-lg mb-6 shadow ${cleanupResult.error ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> <p className={`font-semibold ${cleanupResult.error ? 'text-red-300' : 'text-green-300'}`}>{cleanupResult.error ? 'Cleanup Failed' : 'Cleanup Success'}</p> <p className="text-sm text-gray-300">{cleanupResult.message}</p> </div> )}
+             {importResult && ( <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}> Import Result: {importResult.message} </p> {importResult.errors?.length > 0 && ( <div className="mt-3"> <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered during import:</p> <ul className="list-disc list-inside text-sm text-red-400 space-y-1 max-h-40 overflow-y-auto"> {importResult.errors.map((err, index) => ( <li key={index}>{err}</li> ))} </ul> </div> )} </div> )}
 
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
