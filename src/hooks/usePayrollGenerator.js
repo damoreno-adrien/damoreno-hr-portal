@@ -8,33 +8,28 @@ import { calculateMonthlyStats } from '../utils/attendanceCalculator';
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips');
 
-// --- HELPER: Normalize Job Data ---
-// Ensures we handle both old (rate) and new (baseSalary/hourlyRate) formats safely
 const getCurrentJob = (staff) => {
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-        return { payType: 'Salary', baseSalary: 0, standardDayHours: 8, department: 'N/A' };
+        return { rate: 0, payType: 'Salary', department: 'N/A', baseSalary: 0, standardDayHours: 8 };
     }
-    // Get latest job
     const latestJob = [...staff.jobHistory].sort((a, b) => {
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
         return dateA - dateB;
     })[0];
 
-    // Normalize 'Monthly' to 'Salary' (Backward compatibility)
     let type = latestJob.payType;
     if (type === 'Monthly') type = 'Salary';
 
-    // Return normalized object
     return {
         ...latestJob,
         payType: type || 'Salary',
-        // Ensure these numbers exist, falling back to 'rate' if new fields are missing
         baseSalary: latestJob.baseSalary ?? (type === 'Salary' ? latestJob.rate : 0),
         hourlyRate: latestJob.hourlyRate ?? (type === 'Hourly' ? latestJob.rate : 0),
-        standardDayHours: latestJob.standardDayHours || 8 // Default to 8 if not set
+        standardDayHours: latestJob.standardDayHours || 8
     };
 };
+
 
 export default function usePayrollGenerator(db, staffList, companyConfig, payPeriod) {
     const [payrollData, setPayrollData] = useState([]);
@@ -45,12 +40,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
     const [selectedForPayroll, setSelectedForPayroll] = useState(new Set());
 
     const handleGeneratePayroll = async () => {
-        // --- VALIDATION ---
         const now = new Date();
         const currentYear = dateUtils.getYear(now);
         const currentMonth = dateUtils.getMonth(now);
         const payPeriodDate = dateUtils.parseISODateString(`${payPeriod.year}-${String(payPeriod.month).padStart(2, '0')}-01`);
-        
         if (payPeriod.year > currentYear || (payPeriod.year === currentYear && payPeriod.month > currentMonth)) {
             setError("Cannot generate payroll for a future period.");
             setPayrollData([]); setIsMonthFullyFinalized(false); return;
@@ -66,14 +59,13 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         setIsLoading(true); setError(''); setIsMonthFullyFinalized(false);
 
         try {
-            // --- DATE SETUP ---
+            // --- DATE BOUNDARIES ---
             const startOfMonth = dateUtils.startOfMonth(payPeriodDate);
             const endOfMonth = dateUtils.endOfMonth(payPeriodDate);
             const startDateStr = dateUtils.formatISODate(startOfMonth);
             const endDateStr = dateUtils.formatISODate(endOfMonth);
-            const daysInMonth = dateUtils.getDaysInMonth(payPeriodDate); // Used ONLY for Leave Payouts
+            const daysInMonth = dateUtils.getDaysInMonth(payPeriodDate);
 
-            // --- CHECK FINALIZED ---
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
@@ -83,25 +75,25 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const staffStartDate = dateUtils.fromFirestore(staff.startDate);
                 const staffEndDate = dateUtils.fromFirestore(staff.endDate);
                 if (!staffStartDate) return false;
-                const hasStarted = staffStartDate <= endOfMonth;
-                const wasEmployedDuringPeriod = !staffEndDate || staffEndDate >= startOfMonth;
-                return !isAlreadyFinalized && hasStarted && wasEmployedDuringPeriod;
+                
+                // Active during this period? (Started before end of month AND (No end date OR Ended after start of month))
+                const isActiveInPeriod = staffStartDate <= endOfMonth && (!staffEndDate || staffEndDate >= startOfMonth);
+                
+                return !isAlreadyFinalized && isActiveInPeriod;
             });
-
-            // Handle fully finalized month...
+            
             if (staffToProcess.length === 0 && staffList.length > 0) {
-                 const eligibleStaffIds = new Set(staffList
-                    .filter(s => {
-                        const staffStartDate = dateUtils.fromFirestore(s.startDate);
-                        const staffEndDate = dateUtils.fromFirestore(s.endDate);
-                        if (!staffStartDate) return false;
-                        return staffStartDate <= endOfMonth && (!staffEndDate || staffEndDate >= startOfMonth);
+                 const eligibleStaffIds = new Set(staffList.filter(s => {
+                        const sStart = dateUtils.fromFirestore(s.startDate);
+                        const sEnd = dateUtils.fromFirestore(s.endDate);
+                        if (!sStart) return false;
+                        return sStart <= endOfMonth && (!sEnd || sEnd >= startOfMonth);
                     }).map(s => s.id)
                  );
                  if ([...eligibleStaffIds].every(id => finalizedStaffIds.has(id)) && eligibleStaffIds.size > 0) {
                     setIsMonthFullyFinalized(true); setPayrollData([]); setIsLoading(false); return;
                  }
-            }
+             }
 
             const staffWithJobs = staffToProcess.map(staff => ({ ...staff, currentJob: getCurrentJob(staff) }));
 
@@ -129,29 +121,58 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 let basePay = 0;
                 let autoDeductions = 0;
-                let hourlyRateForOT = 0; // The rate used specifically for OT calc
+                let hourlyRateForOT = 0; 
                 let leavePayout = null;
 
+                // Dates
+                const staffStartDate = dateUtils.fromFirestore(staff.startDate);
                 const staffEndDate = dateUtils.fromFirestore(staff.endDate);
-                const isLastMonth = staffEndDate && dateUtils.getYear(staffEndDate) === payPeriod.year && dateUtils.getMonth(staffEndDate) === payPeriod.month;
 
-                // ==========================================
-                // === CORE LOGIC: SALARY vs HOURLY ===
-                // ==========================================
+                // === 3. SALARY vs HOURLY LOGIC (UPDATED) ===
                 if (currentJob.payType === 'Salary') {
-                    // --- SALARY (Type A & B) ---
                     const salary = currentJob.baseSalary || 0;
                     const standardHours = currentJob.standardDayHours || 8;
 
-                    // 1. Base Pay
-                    if (isLastMonth) {
-                         // Prorated for last month (Using calendar days for fairness on exit)
-                        const dailyRateCalendar = salary / daysInMonth;
-                        const daysWorked = dateUtils.differenceInCalendarDays(dateUtils.formatISODate(staffEndDate), startDateStr);
-                        basePay = dailyRateCalendar * daysWorked;
+                    // --- A. Pro-Rata Calculation ---
+                    // Determine the "Effective" start and end dates for this pay period
+                    let effectiveStart = startOfMonth;
+                    if (staffStartDate && staffStartDate > startOfMonth) {
+                        effectiveStart = staffStartDate; // Started mid-month
+                    }
+
+                    let effectiveEnd = endOfMonth;
+                    if (staffEndDate && staffEndDate < endOfMonth) {
+                        effectiveEnd = staffEndDate; // Left mid-month
+                    }
+
+                    // Check if they worked the FULL month range
+                    // (e.g. Start <= Nov 1 AND End >= Nov 30)
+                    const isFullMonth = effectiveStart.getTime() === startOfMonth.getTime() && effectiveEnd.getTime() === endOfMonth.getTime();
+
+                    if (isFullMonth) {
+                        basePay = salary;
+                    } else {
+                        // Partial Month (Start or End mid-month)
+                        // Calculate Calendar Days active
+                        const daysActive = dateUtils.differenceInCalendarDays(
+                            dateUtils.formatISODate(effectiveEnd), 
+                            dateUtils.formatISODate(effectiveStart)
+                        );
                         
-                        // ... (Leave Payout Logic - Unchanged) ...
-                        const hireDate = dateUtils.fromFirestore(staff.startDate);
+                        // Calculate Pro-Rata Pay
+                        const dailyRateCalendar = salary / daysInMonth; 
+                        basePay = dailyRateCalendar * daysActive;
+                    }
+
+                    // --- B. Leave Payout (Only if leaving this month) ---
+                    const isLeavingThisMonth = staffEndDate && 
+                                               dateUtils.getYear(staffEndDate) === payPeriod.year && 
+                                               dateUtils.getMonth(staffEndDate) === payPeriod.month;
+                                               
+                    if (isLeavingThisMonth) {
+                        const hireDate = staffStartDate;
+                        const dailyRateCalendar = salary / daysInMonth; // Always use calendar rate for payout
+                        
                         let annualLeaveEntitlement = 0;
                         if (hireDate) {
                             const yearsOfService = dateUtils.differenceInYears(staffEndDate, hireDate);
@@ -166,82 +187,72 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                              return holidayDate && holidayDate <= staffEndDate && dateUtils.getYear(holidayDate) === payPeriod.year;
                         });
                         const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-                        const staffLeaveTaken = []; // (Ideally fetch this)
-                        let usedAnnual = 0, usedPublicHoliday = 0;
-                        // ... (Existing leave logic) ...
+                        let usedAnnual = 0, usedPublicHoliday = 0; 
+                        // (Ideally fetch used leave here, using 0 for now or existing logic)
+                        
                         const finalAnnualBalance = Math.max(0, annualLeaveEntitlement - usedAnnual);
                         const finalHolidayCredit = Math.max(0, earnedCredits - usedPublicHoliday);
                         
-                        // Payout uses Calendar Rate
-                        leavePayout = { annualDays: finalAnnualBalance, holidayCredits: finalHolidayCredit, dailyRate: dailyRateCalendar, total: (finalAnnualBalance + finalHolidayCredit) * dailyRateCalendar };
-                    } else {
-                        basePay = salary;
+                        leavePayout = { 
+                            annualDays: finalAnnualBalance, 
+                            holidayCredits: finalHolidayCredit, 
+                            dailyRate: dailyRateCalendar, 
+                            total: (finalAnnualBalance + finalHolidayCredit) * dailyRateCalendar 
+                        };
                     }
 
-                    // 2. Deductions (Rule of 30)
-                    // Deduction Rate = Base Salary / 30
+                    // --- C. Deductions (Rule of 30) ---
                     const dailyDeductionRate = salary / 30;
                     autoDeductions = dailyDeductionRate * stats.daysToDeduct;
 
-                    // 3. OT Rate (Rule of 30 / Standard Hours)
-                    // Rate = (Base Salary / 30) / Standard Hours
+                    // --- D. OT Rate (Rule of 30) ---
                     hourlyRateForOT = dailyDeductionRate / standardHours;
 
                 } else {
-                    // --- HOURLY (Type C) ---
-                    // 1. Base Pay = Actual Hours * Rate
+                    // --- HOURLY STAFF ---
                     const rate = currentJob.hourlyRate || 0;
                     const totalHoursWorked = (stats.totalActualMillis / (1000 * 60 * 60));
                     basePay = totalHoursWorked * rate;
-
-                    // 2. No Deductions for Hourly
                     autoDeductions = 0;
-
-                    // 3. No OT for Hourly (as per rules)
                     hourlyRateForOT = 0; 
                 }
 
-                // ==========================================
-
-                // --- OT Calculation ---
+                // --- 4. ADD OVERTIME ---
                 const staffApprovedOT = approvedOtData.filter(ot => ot.staffId === staff.id);
                 const totalOtMinutes = staffApprovedOT.reduce((sum, ot) => sum + (ot.otApprovedMinutes || 0), 0);
-                // If Hourly staff, hourlyRateForOT is 0, so this becomes 0 (Correct)
                 const overtimePay = (totalOtMinutes / 60) * hourlyRateForOT * overtimeRateMultiplier;
 
-                // --- Adjustments ---
+                // --- 5. FINAL TOTALS ---
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
                 const otherEarnings = staffAdjustments.filter(a => a.type === 'Earning').reduce((sum, i) => sum + i.amount, 0);
                 const otherDeductions = staffAdjustments.filter(a => a.type === 'Deduction').reduce((sum, i) => sum + i.amount, 0);
                 
-                // --- Bonus ---
-                const attendanceBonus = isLastMonth ? 0 : stats.bonusAmount;
-                const bonusInfo = { newStreak: isLastMonth ? staff.bonusStreak : stats.newStreak };
+                const isLeavingThisMonth = staffEndDate && dateUtils.getYear(staffEndDate) === payPeriod.year && dateUtils.getMonth(staffEndDate) === payPeriod.month;
+                const attendanceBonus = isLeavingThisMonth ? 0 : stats.bonusAmount;
+                const bonusInfo = { newStreak: isLeavingThisMonth ? staff.bonusStreak : stats.newStreak };
 
-                // --- SSO Calculation ---
+                const leavePayoutTotal = leavePayout ? leavePayout.total : 0;
+                
+                // SSO Calculation
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
                 const ssoCap = companyConfig.ssoCap || 750;
-                const leavePayoutTotal = leavePayout ? leavePayout.total : 0;
                 const preSsoEarnings = basePay + attendanceBonus + otherEarnings + leavePayoutTotal + overtimePay;
-                
-                const ssoBase = Math.max(1650, preSsoEarnings);
+                const ssoBase = Math.max(1650, preSsoEarnings); 
                 const ssoDeduction = Math.min(ssoBase * ssoRate, ssoCap);
-                const ssoAllowance = ssoDeduction;
-
-                // --- Final Net Pay ---
+                const ssoAllowance = ssoDeduction; 
+                
                 const totalEarnings = preSsoEarnings + ssoAllowance;
                 
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
-                
                 const netPay = totalEarnings - totalDeductions;
 
                 return { 
                     id: staff.id, 
                     name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, 
                     displayName, 
-                    payType: currentJob.payType, // 'Salary' or 'Hourly'
+                    payType: currentJob.payType,
                     totalEarnings, totalDeductions, netPay, 
                     bonusInfo,
                     earnings: { 
@@ -265,42 +276,59 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 };
             });
             setPayrollData(data);
-        } catch (err) { 
-            setError('Failed to generate payroll.'); 
-            console.error(err); 
+        } catch (err) { setError('Failed to generate payroll. Check browser console (F12) for details.'); console.error(err);
         } finally { setIsLoading(false); }
     };
     
+    // ... (Rest of the hook, useEffects, handlers are unchanged) ...
     useEffect(() => {
-        if (payrollData.length > 0) { setSelectedForPayroll(new Set(payrollData.map(p => p.id))); }
-        else { setSelectedForPayroll(new Set()); }
+        if (payrollData.length > 0) {
+            setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
+        } else {
+            setSelectedForPayroll(new Set());
+        }
     }, [payrollData]);
 
     const handleFinalizePayroll = async () => {
         const dataToFinalize = payrollData.filter(p => selectedForPayroll.has(p.id));
-        if (dataToFinalize.length === 0) { alert("Please select at least one employee."); return; }
-        if (!window.confirm(`Finalize payroll for ${dataToFinalize.length} employee(s)?`)) return;
+        if (dataToFinalize.length === 0) { alert("Please select at least one employee to finalize."); return; }
+
+        const payPeriodDate = dateUtils.parseISODateString(`${payPeriod.year}-${String(payPeriod.month).padStart(2, '0')}-01`);
+        const monthName = dateUtils.formatCustom(payPeriodDate, 'MMMM');
+
+        if (!window.confirm(`Are you sure you want to finalize payroll for ${dataToFinalize.length} employee(s) for ${monthName} ${payPeriod.year}?`)) { return; }
+
         setIsFinalizing(true);
         try {
             await finalizeAndStorePayslips({ payrollData: dataToFinalize, payPeriod });
-            alert("Success!");
+            alert("Payroll finalized and payslips stored successfully!");
             handleGeneratePayroll();
-        } catch (error) { console.error(error); alert(`Failed: ${error.message}`);
+        } catch (error) { console.error("Error finalizing payroll:", error); alert(`Failed to finalize payroll: ${error.message}`);
         } finally { setIsFinalizing(false); }
     };
 
     const handleSelectOne = (staffId) => {
         setSelectedForPayroll(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(staffId)) newSet.delete(staffId); else newSet.add(staffId);
+            if (newSet.has(staffId)) { newSet.delete(staffId); }
+            else { newSet.add(staffId); }
             return newSet;
         });
     };
+
     const handleSelectAll = () => {
-        if (selectedForPayroll.size === payrollData.length) setSelectedForPayroll(new Set());
-        else setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
+        if (selectedForPayroll.size === payrollData.length) {
+            setSelectedForPayroll(new Set());
+        } else {
+            setSelectedForPayroll(new Set(payrollData.map(p => p.id)));
+        }
     };
-    const totalSelectedNetPay = useMemo(() => payrollData.filter(p => selectedForPayroll.has(p.id)).reduce((sum, p) => sum + p.netPay, 0), [payrollData, selectedForPayroll]);
+
+    const totalSelectedNetPay = useMemo(() => {
+        return payrollData
+            .filter(p => selectedForPayroll.has(p.id))
+            .reduce((sum, p) => sum + p.netPay, 0);
+    }, [payrollData, selectedForPayroll]);
 
     return {
         payrollData, isLoading, isFinalizing, error, isMonthFullyFinalized,
