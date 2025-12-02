@@ -5,28 +5,18 @@ const formatCurrency = (num) => num != null ? num.toLocaleString('en-US', { mini
 const censor = '*,***.**';
 
 export const PayEstimateCard = ({ payEstimate, isLoading }) => { 
-    // --- FIX: Set default visibility to FALSE (Hidden) ---
     const [isVisible, setIsVisible] = useState(false); 
-    // ----------------------------------------------------
 
     if (isLoading) {
-        return (
-            <div className="bg-gray-800 p-6 rounded-xl text-center border border-gray-700">
-                <p className="text-gray-400">Loading current pay estimate...</p>
-            </div>
-        );
+        return <div className="bg-gray-800 p-6 rounded-xl text-center border border-gray-700"><p className="text-gray-400">Loading...</p></div>;
     }
 
     if (!payEstimate) {
-        return (
-             <div className="bg-gray-800 p-6 rounded-xl text-center border border-gray-700">
-                 <p className="text-gray-400">Could not load pay estimate data.</p>
-             </div>
-         );
+        return <div className="bg-gray-800 p-6 rounded-xl text-center border border-gray-700"><p className="text-gray-400">No data.</p></div>;
     }
 
+    // Only show bonus row if eligible/exists
     const showBonusRow = payEstimate.potentialBonus?.amount > 0 || payEstimate.potentialBonus?.onTrack; 
-
     const contract = payEstimate.contractDetails || {};
     const isHourly = contract.payType === 'Hourly';
     
@@ -79,19 +69,27 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
                         </div>
                     )}
 
+                    {/* --- UPDATED: Bonus Row --- */}
                     {showBonusRow && (
                         <div className="flex justify-between items-center">
-                            <span className="text-gray-300">Potential Bonus</span>
+                            <span className="text-gray-300">Attendance Bonus</span>
                             <div className="flex items-center gap-2">
                                 {payEstimate?.potentialBonus?.onTrack ? (
-                                    <span className="text-xs font-bold text-green-400 bg-green-500/20 px-2 py-1 rounded-full">On Track</span>
+                                    <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded">On Track</span>
                                 ) : (
-                                    <span className="text-xs font-bold text-red-400 bg-red-500/20 px-2 py-1 rounded-full">Lost</span>
+                                    <span className="text-[10px] font-bold text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded">Lost</span>
                                 )}
                                 <span className="font-mono text-white">{isVisible ? `฿${formatCurrency(payEstimate?.potentialBonus?.amount)}` : `฿${censor}`}</span>
                             </div>
                         </div>
                     )}
+
+                    {/* --- NEW: SSO Allowance Row --- */}
+                    <div className="flex justify-between">
+                        <span className="text-gray-300">Social Security Allowance</span>
+                        <span className="font-mono text-white">{isVisible ? `฿${formatCurrency(payEstimate?.ssoAllowance)}` : `฿${censor}`}</span>
+                    </div>
+                    {/* ----------------------------- */}
                 </div>
 
                 <div className="space-y-4">

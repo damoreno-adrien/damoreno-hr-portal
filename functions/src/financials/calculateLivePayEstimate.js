@@ -65,7 +65,13 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const month = nowZoned.month;
         const startOfMonthDt = nowZoned.startOf('month');
         const startDateOfMonthStr = startOfMonthDt.toISODate();
-        const todayStr = nowZoned.toISODate();
+        
+        // Calculate "Yesterday" to avoid checking incomplete today
+        const yesterdayZoned = nowZoned.minus({ days: 1 });
+        const yesterdayStr = yesterdayZoned.toISODate();
+        
+        // Days passed for pro-rata (up to yesterday)
+        const daysPassed = Math.max(0, nowZoned.day - 1);
 
         const [
             staffProfileRes, configRes, advancesRes, loansRes, attendanceRes, schedulesRes, leaveRes, latestPayslipRes
@@ -74,8 +80,8 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             db.collection("settings").doc("company_config").get(),
             db.collection("salary_advances").where("staffId", "==", staffId).where("payPeriodYear", "==", year).where("payPeriodMonth", "==", month).get(),
             db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get(),
-            db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get(),
-            db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", todayStr).get(),
+            db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", yesterdayStr).get(),
+            db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startDateOfMonthStr).where("date", "<=", yesterdayStr).get(),
             db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("endDate", ">=", startDateOfMonthStr).get(),
             db.collection("payslips").where("staffId", "==", staffId).orderBy("generatedAt", "desc").limit(1).get()
         ]);
@@ -86,6 +92,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const staffProfile = staffProfileRes.data();
         const config = configRes.data();
         const job = getCurrentJob(staffProfile);
+
         if (!job) throw new OnCallHttpsError("failed-precondition", "No job history found.");
 
         // Base Pay
@@ -95,9 +102,8 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
 
         if (job.payType === 'Salary') {
             const monthlySalary = job.baseSalary || 0;
-            const daysInMonth = nowZoned.daysInMonth;
-            const daysPassed = nowZoned.day;
-            earnedPay = (monthlySalary / daysInMonth) * daysPassed;
+            // Rule of 30
+            earnedPay = (monthlySalary / 30) * daysPassed;
             deductionRate = monthlySalary / 30; 
             hourlyRateForOT = (monthlySalary / 30) / (job.standardDayHours || 8);
         } else {
@@ -142,21 +148,21 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const publicHolidays = config.publicHolidays?.map(h => h.date) || [];
 
         schedules.forEach(schedule => {
-            if (schedule.date > todayStr) return;
             const att = attendanceMap.get(schedule.date);
             const isOnLeave = approvedLeaves.some(l => schedule.date >= l.startDate && schedule.date <= l.endDate);
             const isHoliday = publicHolidays.includes(schedule.date);
 
-            if (!att && !isOnLeave && !isHoliday) {
+            // --- FIX: Check if it was actually a WORK shift ---
+            // Previously, this counted 'Day Off' schedules as absences if there was no attendance.
+            if (!att && !isOnLeave && !isHoliday && schedule.type === 'work') {
                 absenceCount++;
             } else if (att && att.checkInTime && schedule.startTime) {
+                 // (Strict late check)
                  const actualCheckInJS = safeToDate(att.checkInTime);
                  if (actualCheckInJS) {
                      try {
                          const checkIn = DateTime.fromJSDate(actualCheckInJS).setZone(timeZone);
                          const scheduled = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: timeZone });
-                         
-                         // STRICT CHECK: No Grace Period
                          if (checkIn > scheduled) { 
                              lateCount++;
                          }
@@ -189,8 +195,10 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const ssoCap = config.ssoCap || 750;
         const estimatedTotalEarnings = earnedPay + overtimePay + potentialBonus;
         const ssoDeduction = Math.min(Math.max(1650, estimatedTotalEarnings) * ssoRate, ssoCap);
+        const ssoAllowance = ssoDeduction;
+
         const totalDeductions = absenceDeductionAmount + approvedAdvancesTotal + loans + ssoDeduction;
-        const estimatedNet = (earnedPay + overtimePay + potentialBonus) - totalDeductions;
+        const estimatedNet = (earnedPay + overtimePay + potentialBonus + ssoAllowance) - totalDeductions;
 
         return {
             contractDetails: {
@@ -202,6 +210,7 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             baseSalaryEarned: earnedPay,
             overtimePay: overtimePay, 
             potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
+            ssoAllowance: ssoAllowance,
             deductions: { 
                 absences: absenceDeductionAmount, 
                 socialSecurity: ssoDeduction, 
