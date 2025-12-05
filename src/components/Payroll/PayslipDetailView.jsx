@@ -20,11 +20,13 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
     if (!details) return null;
 
+    // --- FIX: Handle both 'name' (Generator) and 'staffName' (History) ---
+    const staffName = details.name || details.staffName || 'Unknown Staff';
+    // ---------------------------------------------------------------------
+
     const hasAbsences = details.deductions.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
     const hasLeavePayout = details.earnings.leavePayout > 0 && details.earnings.leavePayoutDetails;
-    // --- NEW: Check for OT ---
     const hasOvertime = details.earnings.overtimePay > 0;
-    // -------------------------
     
     const absenceSummary = formatHours(details.deductions.totalAbsenceHours);
 
@@ -42,15 +44,21 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     reader.onerror = reject;
                     reader.readAsDataURL(blob);
                 });
+
                 const img = new Image();
                 img.src = base64Image;
                 await new Promise(resolve => { img.onload = resolve; });
+
                 const pdfLogoWidth = 30; 
                 const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; 
+                
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const rightMargin = 14;
                 doc.addImage(base64Image, 'PNG', pageWidth - pdfLogoWidth - rightMargin, 10, pdfLogoWidth, pdfLogoHeight);
-            } catch (error) { console.error("Error loading company logo for PDF:", error); }
+
+            } catch (error) {
+                console.error("Error loading company logo for PDF:", error);
+            }
         }
         
         doc.setFontSize(18);
@@ -60,13 +68,17 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
         autoTable(doc, {
             body: [
-                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, details.name || 'Unknown Staff'],
+                // --- FIX: Use the unified staffName variable ---
+                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, staffName],
+                // -----------------------------------------------
                 [{ content: 'Company:', styles: { fontStyle: 'bold' } }, companyConfig?.companyName || ''],
                 [{ content: 'Address:', styles: { fontStyle: 'bold' } }, companyConfig?.companyAddress || ''],
                 [{ content: 'Tax ID:', styles: { fontStyle: 'bold' } }, companyConfig?.companyTaxId || ''],
-                [{ content: 'Position:', styles: { fontStyle: 'bold' } }, details.payType],
+                [{ content: 'Position:', styles: { fontStyle: 'bold' } }, details.position || details.payType],
             ],
-            startY: 30, theme: 'plain', styles: { fontSize: 10 },
+            startY: 30,
+            theme: 'plain',
+            styles: { fontSize: 10 },
         });
 
         let earningsBody = [
@@ -76,12 +88,9 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             ...details.earnings.others.map(e => [e.description, formatCurrency(e.amount)])
         ];
 
-        // --- NEW: Add OT to PDF ---
         if (hasOvertime) {
-            // Insert OT right after Base Pay (index 1)
             earningsBody.splice(1, 0, ['Approved Overtime', formatCurrency(details.earnings.overtimePay)]);
         }
-        // --------------------------
 
         if (hasLeavePayout) {
             earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
@@ -100,11 +109,13 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
         autoTable(doc, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: doc.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
         autoTable(doc, { head: [['Deductions', 'Amount (THB)']], body: deductionsBody, foot: [['Total Deductions', formatCurrency(details.totalDeductions)]], startY: doc.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
 
-        doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
         doc.text("Net Pay:", 14, doc.lastAutoTable.finalY + 10);
         doc.text(`${formatCurrency(details.netPay)} THB`, 196, doc.lastAutoTable.finalY + 10, { align: 'right' });
         
-        doc.save(`payslip_${(details.name || 'Unknown_Staff').replace(' ', '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
+        // --- FIX: Use unified staffName for filename ---
+        doc.save(`payslip_${staffName.replace(/ /g, '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
     };
 
     return (
@@ -115,14 +126,12 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                     <div className="space-y-1 text-sm">
                         <div className="flex justify-between"><p>Base Pay:</p> <p>{formatCurrency(details.earnings.basePay)}</p></div>
                         
-                        {/* --- NEW: Add OT to View --- */}
                         {hasOvertime && (
                              <div className="flex justify-between text-green-400">
                                 <p>Approved Overtime:</p> 
                                 <p>{formatCurrency(details.earnings.overtimePay)}</p>
                             </div>
                         )}
-                        {/* --------------------------- */}
 
                         {hasLeavePayout && (
                              <div className="flex justify-between relative">
@@ -194,4 +203,4 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             <div className="flex justify-end mt-6"><button onClick={handleExportIndividualPDF} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-semibold">Export This Payslip to PDF</button></div>
         </div>
     );
-};
+}

@@ -64,6 +64,7 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
             bonusInfo: payslip.bonusInfo || { newStreak: 0 }, // Ensure bonusInfo exists
             // Add any other relevant top-level fields from payslip if needed
             payType: payslip.payType || null, // e.g., 'Monthly' or position title
+            position: payslip.position || null,
         };
 
         batch.set(payslipRef, payslipToSave);

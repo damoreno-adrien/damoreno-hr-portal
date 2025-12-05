@@ -251,7 +251,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 return { 
                     id: staff.id, 
                     name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, 
-                    displayName, 
+                    displayName,
+                    position: currentJob.position, 
                     payType: currentJob.payType,
                     totalEarnings, totalDeductions, netPay, 
                     bonusInfo,
