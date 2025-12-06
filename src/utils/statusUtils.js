@@ -40,7 +40,7 @@ const getWorkedMinutes = (attendance) => {
 };
 
 /**
- * Main Calculation Logic (STRICT - No Grace Period)
+ * Main Calculation Logic
  */
 export const calculateAttendanceStatus = (schedule, attendance, leave, date) => {
     // 1. Check for Leave FIRST
@@ -64,11 +64,9 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date) => 
         // Check for lateness (Strict)
         if (schedule && schedule.type === 'work' && schedule.startTime) {
             const dateString = dateUtils.formatISODate(date);
-            // Parsing fix stays: ensure we compare correct timestamps
             const scheduledStart = dateUtils.fromFirestore(`${dateString}T${schedule.startTime}`);
 
             if (checkInTime && scheduledStart) {
-                // STRICT COMPARISON
                 if (checkInTime > scheduledStart) {
                     isLate = true;
                     const diffMs = checkInTime - scheduledStart;
@@ -81,11 +79,22 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date) => 
         const workedMinutes = getWorkedMinutes(attendance);
         const otMinutes = Math.max(0, workedMinutes - scheduledMinutes);
 
-        // Return detailed status
+        // --- FIX: Adjusted Priority ---
+        // 1. If checked out -> Completed (Gray)
+        // 2. If on break -> On Break (Orange)
+        // 3. If late (and still working) -> Late (Yellow)
+        // 4. Else -> Present (Green)
+        
         let status = 'Present';
-        if (checkOutTime) status = 'Completed';
-        else if (attendance.breakStart && !attendance.breakEnd) status = 'On Break';
-        else if (isLate) status = 'Late';
+        
+        if (checkOutTime) {
+            status = 'Completed'; 
+        } else if (attendance.breakStart && !attendance.breakEnd) {
+            status = 'On Break';
+        } else if (isLate) {
+            status = 'Late';
+        }
+        // ------------------------------
         
         return { 
             status, 

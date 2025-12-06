@@ -5,10 +5,9 @@ import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/fir
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
-// 1. IMPORT NEW ICONS
 import { 
     ChevronLeft, ChevronRight, Download, Upload, 
-    CheckCircle, Clock, Coffee, Check, Flame // Added Flame for OT
+    CheckCircle, Clock, Coffee, Check, Flame // Icons
 } from 'lucide-react';
 import ShiftModal from '../components/Planning/ShiftModal.jsx'; 
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
@@ -48,7 +47,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
     const [selectedCellData, setSelectedCellData] = useState({ staffId: null, date: null, shift: null, attendance: null });
     
-    // Attendance Editing State
     const [isEditAttendanceModalOpen, setIsEditAttendanceModalOpen] = useState(false);
     const [attendanceRecordToEdit, setAttendanceRecordToEdit] = useState(null);
 
@@ -67,19 +65,16 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         setCurrentWeekStart(prevDate => dateUtils.addDays(prevDate, 7));
     };
 
-    // --- CLICK HANDLER ---
     const handleCellClick = (staff, dateObj, shiftData) => {
-        // Open the unified Manager Modal for EVERY interaction
         setSelectedCellData({
             staffId: staff.id,
             date: dateObj.dateObject,
             shift: shiftData?.schedule || null,
-            attendance: shiftData?.attendance || null // Pass attendance so we know if we need to warn about deleting it
+            attendance: shiftData?.attendance || null
         });
         setIsShiftModalOpen(true);
     };
 
-    // --- ATTENDANCE EDITING HANDLERS (RESTORED) ---
     const handleOpenAttendanceEditor = (data) => {
         const { staffId, staffName, date, rawAttendance } = data;
         const dateString = dateUtils.formatISODate(date);
@@ -108,12 +103,8 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
         refetchWeekData(); 
     };
 
-    // --- Wrapper Handler for ShiftModal ---
     const handleEditAttendanceFromModal = () => {
-        // 1. Close the shift modal (editor)
         setIsShiftModalOpen(false);
-        
-        // 2. Open the attendance editor with the correct data
         if (selectedCellData && selectedCellData.staffId && selectedCellData.date) {
              handleOpenAttendanceEditor({
                 staffId: selectedCellData.staffId,
@@ -377,14 +368,14 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                             {weekDates.map(dateObj => {
                                                 const shiftData = weekData[staff.id]?.[dateObj.dateString];
                                                 const shift = shiftData?.schedule;
-                
-                                                // Get all info from our upgraded util function
+                                                
                                                 const { 
                                                     status, 
                                                     isLate, 
+                                                    lateMinutes, // New field from utils
                                                     otMinutes,
-                                                    checkInTime, // Actual attendance check-in
-                                                    checkOutTime // Actual attendance check-out
+                                                    checkInTime, 
+                                                    checkOutTime 
                                                 } = calculateAttendanceStatus(
                                                     shift, 
                                                     shiftData?.attendance, 
@@ -394,28 +385,25 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                                 
                                                 const statusClass = getStatusClass(status);
 
-                                                // --- REWRITTEN CELL CONTENT LOGIC ---
+                                                // Determine Cell Content
                                                 let cellContent = null;
                                                 const baseTextClass = "flex items-center justify-center gap-1.5 text-xs";
                                                 
-                                                // Determine what time to show. Prioritize attendance time.
                                                 let timeToShow = '';
                                                 if (status === 'Present' || status === 'Late' || status === 'On Break' || status === 'Completed') {
-                                                    // Use ATTENDANCE time
                                                     const start = checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '...';
                                                     const end = checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '...';
                                                     timeToShow = `${start} - ${end}`;
                                                 } else if (shift && shift.type === 'work') {
-                                                    // Use SCHEDULE time
                                                     timeToShow = `${shift.startTime} - ${shift.endTime}`;
                                                 }
-                                                // ------------------------------------
 
                                                 switch (status) {
                                                     case 'Present':
                                                         cellContent = (<div className={`${baseTextClass} text-green-300`}><CheckCircle className="w-3 h-3" /><span>{timeToShow}</span></div>);
                                                         break;
                                                     case 'Late':
+                                                        // Fallback for "In-Progress" Late (Yellow)
                                                         cellContent = (<div className={`${baseTextClass} text-yellow-300`}><Clock className="w-3 h-3" /><span className="font-semibold">(Late)</span><span>{timeToShow}</span></div>);
                                                         break;
                                                     case 'On Break':
@@ -425,12 +413,7 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                                         cellContent = (<div className={`${baseTextClass} text-gray-400`}><Check className="w-3 h-3" /><span className="italic">(Done)</span><span>{timeToShow}</span></div>);
                                                         break;
                                                     case 'Absent':
-                                                        cellContent = (
-                                                            <>
-                                                                <span className="text-red-400 font-bold">Absent</span>
-                                                                {timeToShow && <span className="text-xs text-gray-500 block">{timeToShow}</span>}
-                                                            </>
-                                                        );
+                                                        cellContent = (<><span className="text-red-400 font-bold">Absent</span><span className="text-xs text-gray-500 block">{timeToShow}</span></>);
                                                         break;
                                                     case 'Leave':
                                                         cellContent = <span className="text-blue-400 italic">LEAVE</span>;
@@ -440,7 +423,6 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                                         break;
                                                     default: // 'Empty'
                                                         if (shift && shift.type === 'work') {
-                                                            // Future scheduled shift
                                                             cellContent = <span className="text-white">{timeToShow}</span>;
                                                         }
                                                         break;
@@ -450,18 +432,29 @@ export default function PlanningPage({ db, staffList, userRole, departments }) {
                                                     <td
                                                         key={dateObj.dateString}
                                                         onClick={() => handleCellClick(staff, dateObj, shiftData)}
-                                                        className={`px-3 py-3 text-center text-sm transition-colors cursor-pointer w-32 min-w-[8rem] ${statusClass}`}
+                                                        className={`px-3 py-3 text-center text-sm transition-colors cursor-pointer w-32 min-w-[8rem] ${statusClass || 'text-white hover:bg-gray-700'}`}
                                                         title={shift ? `Click to view/edit` : `Click to add shift`}
                                                     >
                                                         {cellContent}
                                                         
-                                                        {/* NEW: OT BADGE */}
+                                                        {/* --- NEW: VISUAL BADGES --- */}
+                                                        
+                                                        {/* OT Badge */}
                                                         {otMinutes > 0 && (
                                                             <div className="text-xs font-bold text-orange-400 flex items-center justify-center gap-1 mt-1" title="Overtime">
                                                                 <Flame className="w-3 h-3" />
                                                                 <span>+{Math.floor(otMinutes / 60)}h {otMinutes % 60}m</span>
                                                             </div>
                                                         )}
+
+                                                        {/* Late Badge (Even if Completed) */}
+                                                        {isLate && lateMinutes > 0 && (
+                                                            <div className="text-xs font-bold text-red-500 flex items-center justify-center gap-1 mt-1" title="Late Check-in">
+                                                                <Clock className="w-3 h-3" />
+                                                                <span>+{Math.floor(lateMinutes / 60)}h {lateMinutes % 60}m</span>
+                                                            </div>
+                                                        )}
+                                                        {/* -------------------------- */}
                                                     </td>
                                                 );
                                             })}
