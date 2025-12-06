@@ -1,11 +1,10 @@
-// src/pages/StaffManagementPage.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal';
-import { Plus, Download, Upload } from 'lucide-react'; 
+import { Plus, Download, Upload, FileText } from 'lucide-react'; 
 import { 
     fromFirestore, 
     differenceInCalendarMonths, 
@@ -13,6 +12,8 @@ import {
     formatDisplayDate 
 } from '../utils/dateUtils';
 import { app } from "../../firebase.js";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // --- Helper: Currency Formatter ---
 const formatCurrency = (num) => {
@@ -95,21 +96,19 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     };
 
     // --- FIX: Robust Job Retrieval ---
-    // This logic now correctly sorts mixed Date formats (Timestamps vs Strings)
-    // and handles the new salary structure (baseSalary vs hourlyRate).
     const getCurrentJob = (staff) => {
         if (!staff?.jobHistory || staff.jobHistory.length === 0) {
             return { position: 'N/A', department: 'Unassigned', displayRate: 0, payType: 'Salary' };
         }
         
+        // Sort by date descending (newest first)
         const latestJob = [...staff.jobHistory].sort((a, b) => {
-             // Use fromFirestore to handle both Timestamps and ISO strings safely
              const dateA = fromFirestore(b.startDate) || new Date(0);
              const dateB = fromFirestore(a.startDate) || new Date(0);
              return dateA - dateB;
         })[0];
 
-        // Determine correct rate to display
+        // Determine correct rate to display based on new structure
         let rate = 0;
         if (latestJob.payType === 'Hourly') {
             rate = latestJob.hourlyRate || latestJob.rate || 0;
@@ -120,14 +119,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
         return { ...latestJob, displayRate: rate };
     };
-    // ---------------------------------
 
     const groupedStaff = useMemo(() => {
         const normalizedQuery = searchQuery.toLowerCase().trim();
 
         const filteredList = staffList.filter(staff => {
             const isArchived = staff.status === 'inactive';
-            // This filter correctly handles the "Show Archived" toggle
             if (!showArchived && isArchived) {
                 return false;
             }
@@ -170,6 +167,50 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             setSelectedStaff(updatedStaff || null);
         }
     }, [staffList, selectedStaff]);
+
+    // --- PDF Export Function ---
+    const handleExportPDF = () => {
+        const doc = new jsPDF();
+        const today = new Date().toLocaleDateString('en-GB');
+        
+        doc.setFontSize(18);
+        doc.text("Staff List", 14, 20);
+        doc.setFontSize(10);
+        doc.text(`Generated on: ${today}`, 14, 26);
+
+        const tableBody = [];
+
+        sortedDepartments.forEach(dept => {
+            groupedStaff[dept].forEach(staff => {
+                const currentJob = getCurrentJob(staff);
+                const startDate = fromFirestore(staff.startDate);
+                
+                const rateLabel = currentJob.payType === 'Hourly' ? '/hr' : '/mo';
+                const salaryDisplay = `${formatCurrency(currentJob.displayRate)} ${rateLabel}`;
+
+                tableBody.push([
+                    getDisplayName(staff),
+                    dept,
+                    currentJob.position,
+                    salaryDisplay,
+                    staff.bonusStreak || 0,
+                    formatDisplayDate(startDate),
+                    staff.status || 'Active'
+                ]);
+            });
+        });
+
+        autoTable(doc, {
+            startY: 35,
+            head: [['Name', 'Department', 'Position', 'Salary', 'Streak', 'Start Date', 'Status']],
+            body: tableBody,
+            headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+            alternateRowStyles: { fillColor: [245, 245, 245] },
+            styles: { fontSize: 9 },
+        });
+
+        doc.save(`staff_list_${new Date().toISOString().split('T')[0]}.pdf`);
+    };
 
     const handleExport = async () => {
         setIsExporting(true);
@@ -302,19 +343,16 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
     return (
         <div>
-            {/* Add Staff Modal */}
             <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
                 <AddStaffForm auth={auth} onClose={() => setIsAddModalOpen(false)} departments={departments} />
             </Modal>
 
-            {/* Staff Profile Modal */}
             {selectedStaff && (
                  <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
                     <StaffProfileModal staff={selectedStaff} db={db} onClose={closeProfileModal} departments={departments} userRole={userRole} />
                 </Modal>
             )}
 
-             {/* Import Confirmation Modal */}
              <ImportConfirmationModal
                 isOpen={isConfirmModalOpen}
                 onClose={handleCancelImport}
@@ -323,7 +361,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 isLoading={isConfirmingImport}
             />
 
-            {/* Header and Action Buttons */}
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
                 <div className="flex flex-wrap items-center gap-4 justify-start md:justify-end">
@@ -346,10 +383,18 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
-                    <button onClick={handleExport} disabled={isExporting || isImporting || isConfirmingImport} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <Download className="h-5 w-5 mr-2" />
-                        {isExporting ? 'Exporting...' : 'Export CSV'}
-                    </button>
+                    
+                    <div className="flex space-x-2">
+                        <button onClick={handleExport} disabled={isExporting || isImporting || isConfirmingImport} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
+                            <Download className="h-5 w-5 mr-2" />
+                            {isExporting ? 'Exporting...' : 'CSV'}
+                        </button>
+                        <button onClick={handleExportPDF} disabled={isExporting || isImporting} className="flex items-center bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
+                            <FileText className="h-5 w-5 mr-2" />
+                            PDF
+                        </button>
+                    </div>
+
                     <button onClick={handleImportClick} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                         <Upload className="h-5 w-5 mr-2" />
                         {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
@@ -368,7 +413,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 </div>
             </div>
 
-             {/* FINAL Import Results Display */}
              {importResult && (
                 <div className={`p-4 rounded-lg mb-6 ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
                     <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}>
@@ -390,14 +434,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 </div>
              )}
 
-            {/* Staff List Table */}
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Display Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Position</th>
-                            {/* NEW: Salary Column */}
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">Salary (THB)</th>
                             <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">Bonus Streak</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Start Date</th>
@@ -421,7 +463,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                 </tr>
                                 {groupedStaff[department].map(staff => {
                                     const currentJob = getCurrentJob(staff);
-                                    // Safely handle Firestore timestamp vs Date string vs Date object
                                     const startDate = fromFirestore(staff.startDate);
 
                                     return (
@@ -429,14 +470,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{currentJob.position}</td>
                                             
-                                            {/* --- NEW: Salary Cell --- */}
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">
-                                                {formatCurrency(currentJob.displayRate)}
+                                                {formatCurrency(currentJob.displayRate)} 
                                                 <span className="text-xs text-gray-500 ml-1">
                                                     {currentJob.payType === 'Hourly' ? '/hr' : '/mo'}
                                                 </span>
                                             </td>
-                                            {/* ---------------------- */}
                                             
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">
                                                 {staff.bonusStreak || 0}
@@ -461,4 +500,4 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             </div>
         </div>
     );
-};
+}
