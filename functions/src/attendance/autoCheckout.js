@@ -19,7 +19,6 @@ try {
 const db = getFirestore();
 const timeZone = "Asia/Bangkok";
 
-// --- CORE LOGIC (Shared) ---
 const performOperationalScan = async () => {
     console.log("Running Operational Scan (Shared Logic)...");
 
@@ -34,7 +33,6 @@ const performOperationalScan = async () => {
         const startOfMonthStr = now.startOf('month').toISODate();
         const todayStr = now.toISODate();
 
-        // 1. FETCH DATA
         const [configSnap, activeStaffSnap] = await Promise.all([
             db.collection("settings").doc("company_config").get(),
             db.collection("staff_profiles").where("status", "!=", "inactive").get()
@@ -42,11 +40,10 @@ const performOperationalScan = async () => {
 
         const config = configSnap.data() || {};
         const bonusRules = config.attendanceBonus || {};
-        
         const batch = db.batch();
         let alertsCount = 0;
 
-        // 2. SCAN FOR MISSING CHECKOUTS (Previous days)
+        // 1. SCAN FOR MISSING CHECKOUTS
         const openShiftsSnap = await db.collection("attendance")
             .where("checkOutTime", "==", null)
             .where("date", "<", todayStr) 
@@ -71,28 +68,24 @@ const performOperationalScan = async () => {
             alertsCount++;
         });
 
-        // 3. RISK ANALYSIS (Month-to-date)
+        // 2. RISK ANALYSIS
         for (const staffDoc of activeStaffSnap.docs) {
             const staff = staffDoc.data();
             const staffId = staff.uid;
 
-            // Fetch schedules & attendance up to yesterday
             const [attSnap, schedSnap] = await Promise.all([
-                db.collection("attendance")
-                    .where("staffId", "==", staffId)
-                    .where("date", ">=", startOfMonthStr)
-                    .where("date", "<=", yesterdayStr)
-                    .get(),
-                db.collection("schedules")
-                    .where("staffId", "==", staffId)
-                    .where("date", ">=", startOfMonthStr)
-                    .where("date", "<=", yesterdayStr)
-                    .get()
+                db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startOfMonthStr).where("date", "<=", yesterdayStr).get(),
+                db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startOfMonthStr).where("date", "<=", yesterdayStr).get()
             ]);
 
             let lateCount = 0;
-            let totalLateMinutes = 0; // --- NEW: Track minutes ---
+            let totalLateMinutes = 0;
             let absenceCount = 0;
+            
+            // --- NEW: Arrays to store details ---
+            const lateIncidents = [];
+            const absenceIncidents = [];
+            // ------------------------------------
             
             const attendanceMap = new Map();
             attSnap.forEach(d => attendanceMap.set(d.data().date, d.data()));
@@ -104,17 +97,20 @@ const performOperationalScan = async () => {
                 const att = attendanceMap.get(sched.date);
                 if (!att) {
                     absenceCount++;
+                    // Track Absence Detail
+                    absenceIncidents.push({ date: sched.date, shift: `${sched.startTime}-${sched.endTime}` });
                 } else if (att.checkInTime && sched.startTime) {
-                    // Strict Late Check
                     try {
                         const checkIn = DateTime.fromJSDate(att.checkInTime.toDate()).setZone(timeZone);
                         const scheduled = DateTime.fromISO(`${sched.date}T${sched.startTime}`, { zone: timeZone });
                         
                         if (checkIn > scheduled) {
                             lateCount++;
-                            // --- NEW: Calculate Difference ---
                             const diffMs = checkIn.diff(scheduled).toMillis();
-                            totalLateMinutes += Math.floor(diffMs / 60000);
+                            const mins = Math.floor(diffMs / 60000);
+                            totalLateMinutes += mins;
+                            // Track Late Detail
+                            lateIncidents.push({ date: sched.date, minutes: mins, time: checkIn.toFormat('HH:mm') });
                         }
                     } catch(e) { console.error("Date parse error", e); }
                 }
@@ -122,7 +118,7 @@ const performOperationalScan = async () => {
 
             const maxLates = bonusRules.allowedLates || 3;
             const maxAbsences = bonusRules.allowedAbsences || 0;
-            const maxLateMinutesAllowed = bonusRules.maxLateMinutesAllowed || 30; // --- NEW: Get Limit ---
+            const maxLateMinutesAllowed = bonusRules.maxLateMinutesAllowed || 30;
 
             // A. Late Count Warning
             if (lateCount >= maxLates) {
@@ -139,6 +135,7 @@ const performOperationalScan = async () => {
                         date: todayStr,
                         count: lateCount,
                         limit: maxLates,
+                        details: lateIncidents, // <-- Save Details
                         createdAt: Timestamp.now(),
                         message: `High Risk: ${lateCount} Lateness incidents this month (Limit: ${maxLates})`
                     });
@@ -146,7 +143,7 @@ const performOperationalScan = async () => {
                 }
             }
 
-            // --- NEW: B. Late Minutes Warning ---
+            // B. Late Minutes Warning
             if (totalLateMinutes > maxLateMinutesAllowed) {
                 const alertId = `risk_late_min_${staffId}_${now.month}_${now.year}`;
                 const alertRef = db.collection("manager_alerts").doc(alertId);
@@ -154,13 +151,14 @@ const performOperationalScan = async () => {
                 
                 if (!existingAlert.exists || existingAlert.data().count !== totalLateMinutes) {
                      batch.set(alertRef, {
-                        type: "risk_late", // Reuse type for Yellow styling
+                        type: "risk_late",
                         status: "pending",
                         staffId: staffId,
                         staffName: staff.nickname || staff.firstName,
                         date: todayStr,
                         count: totalLateMinutes,
                         limit: maxLateMinutesAllowed,
+                        details: lateIncidents, // <-- Save Details
                         createdAt: Timestamp.now(),
                         message: `High Risk: ${totalLateMinutes} total minutes late this month (Limit: ${maxLateMinutesAllowed})`
                     });
@@ -183,6 +181,7 @@ const performOperationalScan = async () => {
                         date: todayStr,
                         count: absenceCount,
                         limit: maxAbsences,
+                        details: absenceIncidents, // <-- Save Details
                         createdAt: Timestamp.now(),
                         message: `High Risk: ${absenceCount} Absences this month (Limit: ${maxAbsences})`
                     });
