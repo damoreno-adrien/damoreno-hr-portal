@@ -52,7 +52,7 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
             <div className="flex items-center justify-end gap-2 flex-shrink-0 w-full sm:w-auto">
                 <button onClick={() => onManualFix(alert)} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white rounded-md disabled:opacity-50 transition-colors">Fix Manually</button>
                 <button onClick={handleAutoFix} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-md disabled:opacity-50 flex items-center gap-1.5 transition-colors">
-                    {isFixing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Auto-Fix (+9h)"}
+                    {isFixing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Auto-Fix (23h00)"}
                 </button>
             </div>
             {error && <p className="text-xs text-red-400 w-full text-center sm:text-left">{error}</p>}

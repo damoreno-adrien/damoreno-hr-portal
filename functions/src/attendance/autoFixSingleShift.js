@@ -78,11 +78,12 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
 
         // Find the earlier of the two times
         let finalCheckOutTime;
-        if (autoFixTime < capTime) {
-            finalCheckOutTime = autoFixTime; // Use the +9h time
-        } else {
-            finalCheckOutTime = capTime; // Use the 11 PM cap
-        }
+        // if (autoFixTime < capTime) {
+        //     finalCheckOutTime = autoFixTime; // Use the +9h time
+        // } else {
+        //     finalCheckOutTime = capTime; // Use the 11 PM cap
+        // }
+        finalCheckOutTime = capTime; // Use the 11 PM cap
 
         // Convert the final Luxon time back to a Firestore Timestamp
         const finalTimestamp = Timestamp.fromDate(finalCheckOutTime.toJSDate());
