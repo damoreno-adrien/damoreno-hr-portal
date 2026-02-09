@@ -1,3 +1,5 @@
+/* src/hooks/useMonthlyStats.js */
+
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { DateTime } from 'luxon';
@@ -5,15 +7,17 @@ import { calculateMonthlyStats } from '../utils/attendanceCalculator';
 
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
+// --- HELPER: Safe Formatting ---
 const formatMillisToHours = (ms) => {
-    if (ms <= 0) return '0h 0m';
+    if (!ms || isNaN(ms) || ms <= 0) return '0h 0m';
     const totalMinutes = Math.floor(ms / 60000);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return `${hours}h ${minutes}m`;
 };
+
 const formatMinutesToHours = (min) => {
-    if (min <= 0) return '0h 0m';
+    if (!min || isNaN(min) || min <= 0) return '0h 0m';
     const hours = Math.floor(min / 60);
     const minutes = min % 60;
     return `${hours}h ${minutes}m`;
@@ -33,7 +37,7 @@ export const useMonthlyStats = (db, user, companyConfig) => {
     useEffect(() => {
         if (!db || !user || !companyConfig) return;
 
-        // Listen to the user's profile to get their *current* bonus streak
+        // Listen to the user's profile to get their *current* bonus streak & eligibility
         const profileRef = doc(db, 'staff_profiles', user.uid);
         const unsubscribe = onSnapshot(profileRef, (profileSnap) => {
             if (!profileSnap.exists()) return;
@@ -45,17 +49,18 @@ export const useMonthlyStats = (db, user, companyConfig) => {
             // --- 1. Call the calculator ---
             calculateMonthlyStats(db, staffProfile, currentPayPeriod, companyConfig)
                 .then(stats => {
-                    // --- 2. Set Final Stats for the dashboard ---
+                    // --- 2. Set Final Stats (Safe Defaults Applied) ---
                     setMonthlyStats({
-                        totalHoursWorked: formatMillisToHours(stats.totalActualMillis),
-                        totalHoursScheduled: formatMillisToHours(stats.totalScheduledMillis),
-                        workedDays: stats.workedDays,
-                        absences: stats.totalAbsencesCount,
-                        totalTimeLate: formatMinutesToHours(stats.totalLateMinutes),
-                        totalEarlyDepartures: formatMinutesToHours(stats.totalEarlyDepartureMinutes),
+                        totalHoursWorked: formatMillisToHours(stats.totalActualMillis || 0),
+                        totalHoursScheduled: formatMillisToHours(stats.totalScheduledMillis || 0),
+                        workedDays: stats.workedDays || 0,
+                        absences: stats.totalAbsencesCount || 0,
+                        // Fix for NaN: Default to 0 if undefined
+                        totalTimeLate: formatMinutesToHours(stats.totalLateMinutes || 0),
+                        totalEarlyDepartures: formatMinutesToHours(stats.totalEarlyDepartureMinutes || 0),
                     });
 
-                    // --- 3. Calculate Bonus Status (UPDATED) ---
+                    // --- 3. Calculate Bonus Status ---
                     // Check eligibility flag explicitly
                     if (staffProfile.isAttendanceBonusEligible === false) {
                         setBonusStatus({ 
@@ -66,11 +71,14 @@ export const useMonthlyStats = (db, user, companyConfig) => {
                     } else {
                         setBonusStatus({
                             onTrack: stats.didQualifyForBonus,
-                            text: stats.didQualifyForBonus ? 'On Track' : 'Bonus Lost for this month'
+                            text: stats.didQualifyForBonus ? 'On Track' : 'Bonus Lost'
                         });
                     }
                 })
-                .catch(console.error);
+                .catch(err => {
+                    console.error("Error calculating monthly stats:", err);
+                    // On error, keep defaults to prevent crash
+                });
         });
 
         return () => unsubscribe(); // Unsubscribe from profile listener

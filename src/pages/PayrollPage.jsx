@@ -39,7 +39,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
 
             {/* --- NEW: Modal for the Payroll HISTORY --- */}
             {selectedHistoryDetails && historyPayPeriod && (
-                <Modal isOpen={true} onClose={() => setSelectedHistoryDetails(null)} title={`Payslip for ${selectedHistoryDetails.name} (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}>
+                <Modal isOpen={true} onClose={() => setSelectedHistoryDetails(null)} title={`Payslip for ${selectedHistoryDetails.staffName} (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}>
                      <PayslipDetailView 
                         details={selectedHistoryDetails} 
                         companyConfig={companyConfig} 

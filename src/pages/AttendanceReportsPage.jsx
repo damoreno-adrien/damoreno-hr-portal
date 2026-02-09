@@ -1,3 +1,5 @@
+/* src/pages/AttendanceReportsPage.jsx */
+
 import React, { useState, useRef, useEffect } from 'react';
 import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -144,6 +146,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key);
 
+                    // --- KEY FIX: Rely on statusUtils for the correct status ---
                     const { status, isLate, lateMinutes, otMinutes, checkInTime, checkOutTime } = calculateAttendanceStatus(
                         schedule, 
                         attendance, 
@@ -153,16 +156,17 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     );
 
                     let displayStatus = status;
+                    
                     if (isLate) {
                         displayStatus = `Late (${lateMinutes}m)`;
-                    } else if (status === 'Present' || status === 'Completed') {
-                         if (otMinutes > 0) {
-                             const h = Math.floor(otMinutes / 60);
-                             const m = otMinutes % 60;
-                             displayStatus = `Overtime (+${h}h ${m}m)`;
-                         } else if (status === 'Present' && !schedule) {
-                             displayStatus = 'Extra Shift'; 
-                         }
+                    } else if (status === 'Overtime') {
+                         const h = Math.floor(otMinutes / 60);
+                         const m = otMinutes % 60;
+                         displayStatus = `Overtime (+${h}h ${m}m)`;
+                    } else if (status === 'Present') {
+                        // Sometimes 'Present' can happen for Extra Shift
+                        if (!schedule) displayStatus = 'Extra Shift';
+                        else displayStatus = 'Completed';
                     }
 
                     let workHours = 0;
@@ -272,21 +276,19 @@ export default function AttendanceReportsPage({ db, staffList }) {
         reader.readAsText(file);
     };
 
-    // --- FIX: Improved Import Confirmation Handler ---
     const handleConfirmImport = async () => {
         if (!csvDataToConfirm) return;
         setIsConfirmingImport(true);
-        // Don't close modal yet, show loading state on button
         setImportResult(null); 
         setCleanupResult(null);
 
         try {
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
-            setIsConfirmModalOpen(false); // Close modal on success
+            setIsConfirmModalOpen(false); 
 
             if (!result.data.errors || result.data.errors.length === 0) {
                 alert(`✅ Import Successful!\n\n${result.data.result}`);
-                await handleGenerateReport(); // Refresh report
+                await handleGenerateReport(); 
             } else {
                 setImportResult({ message: result.data.result, errors: result.data.errors || [] });
                 alert("Import completed with some warnings. Please check the result message below the buttons.");
@@ -317,7 +319,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         <div>
             {editingRecord && ( <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}> <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} /> </Modal> )}
             
-            {/* --- FIX: Pass entityName to fix modal title --- */}
             <ImportConfirmationModal 
                 isOpen={isConfirmModalOpen} 
                 onClose={handleCancelImport} 

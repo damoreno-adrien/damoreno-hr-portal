@@ -1,14 +1,13 @@
 /* src/pages/TeamSchedulePage.jsx */
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import { ChevronLeft, ChevronRight } from 'lucide-react'; // Assuming lucide-react
+import { collection, query, where, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
+import { ChevronLeft, ChevronRight, Flame, Coffee } from 'lucide-react'; 
 import * as dateUtils from '../utils/dateUtils';
-// --- NEW IMPORT ---
 import { calculateAttendanceStatus } from '../utils/statusUtils';
-import { DateTime } from 'luxon'; // --- NEW IMPORT ---
+import { DateTime } from 'luxon'; 
 
-const THAILAND_TIMEZONE = 'Asia/Bangkok'; // --- NEW ---
+const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
 // --- HELPER FUNCTIONS ---
 const getDisplayName = (staff) => {
@@ -19,14 +18,23 @@ const getDisplayName = (staff) => {
 };
 
 const getStaffCurrentJob = (staff) => {
-    if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) {
-        return null;
-    }
+    if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) return null;
     return [...staff.jobHistory].sort((a, b) => {
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
         return dateA - dateB;
     })[0];
+};
+
+// Helper: Department Colors
+const getDeptColor = (dept) => {
+    const map = {
+        'Service': 'text-blue-400',
+        'Kitchen': 'text-orange-400',
+        'Bar': 'text-purple-400',
+        'Pizza': 'text-red-400'
+    };
+    return map[dept] || 'text-gray-400';
 };
 
 export default function TeamSchedulePage({ db, user }) {
@@ -37,21 +45,19 @@ export default function TeamSchedulePage({ db, user }) {
     const [weekData, setWeekData] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Effect to get the current user's department
+    // 1. Get User Department (Stable)
     useEffect(() => {
-        if (!db || !user) return;
+        if (!db || !user?.uid) return;
         const profileRef = doc(db, 'staff_profiles', user.uid);
         getDoc(profileRef).then(docSnap => {
             if (docSnap.exists()) {
                 const currentJob = getStaffCurrentJob(docSnap.data());
-                if (currentJob) {
-                    setMyDepartment(currentJob.department);
-                }
+                if (currentJob) setMyDepartment(currentJob.department);
             }
         });
-    }, [db, user]);
+    }, [db, user.uid]); // FIX: Use user.uid instead of user object
 
-    // Effect to get all staff profiles
+    // 2. Get All Staff (Stable)
     useEffect(() => {
         if (!db) return;
         const staffCollectionRef = collection(db, 'staff_profiles');
@@ -62,19 +68,18 @@ export default function TeamSchedulePage({ db, user }) {
         return () => unsubscribeStaff();
     }, [db]);
     
-    // Main effect to build the weekly schedule data
+    // 3. Main Schedule Logic (Loop Fix)
     useEffect(() => {
-        if (!db || !user || !myDepartment || staffList.length === 0) return;
+        // Wait for all dependencies to be ready
+        if (!db || !user?.uid || !myDepartment || staffList.length === 0) return;
+        
         setIsLoading(true);
 
-        // --- 🐞 THIS IS THE FIX ---
         const departmentStaff = staffList.filter(staff => {
             const currentJob = getStaffCurrentJob(staff);
-            // Check if staff is active (status is 'active', null, or undefined)
             const isActive = staff.status === undefined || staff.status === null || staff.status === 'active';
             return currentJob?.department === myDepartment && isActive;
         });
-        // --- END FIX ---
 
         const endOfWeek = dateUtils.addDays(startOfWeek, 6);
         const startStr = dateUtils.formatISODate(startOfWeek);
@@ -88,14 +93,13 @@ export default function TeamSchedulePage({ db, user }) {
             const shiftsMap = new Map();
             shiftsSnapshot.forEach(doc => {
                 const data = doc.data();
-                const key = `${data.staffId}_${data.date}`;
-                shiftsMap.set(key, data);
+                shiftsMap.set(`${data.staffId}_${data.date}`, data);
             });
 
-            // --- NESTED SNAPSHOTS ---
             const unsubLeaves = onSnapshot(leaveQuery, (leavesSnapshot) => {
                 const leaveMap = new Map();
                 const reportEndDt = DateTime.fromISO(endStr, { zone: THAILAND_TIMEZONE });
+                
                 leavesSnapshot.forEach(doc => {
                     const data = doc.data();
                     if (!data.staffId || !data.startDate || !data.endDate) return;
@@ -103,27 +107,22 @@ export default function TeamSchedulePage({ db, user }) {
 
                     let current = DateTime.fromISO(data.startDate, { zone: THAILAND_TIMEZONE });
                     const leaveEnd = DateTime.fromISO(data.endDate, { zone: THAILAND_TIMEZONE });
-                    if (!current.isValid || !leaveEnd.isValid) return;
-
+                    
                     while (current <= leaveEnd && current <= reportEndDt) {
                         if (current.toISODate() >= startStr) {
-                            const dateStr = current.toISODate();
-                            leaveMap.set(`${data.staffId}_${dateStr}`, data);
+                            leaveMap.set(`${data.staffId}_${current.toISODate()}`, data);
                         }
                         current = current.plus({ days: 1 });
                     }
                 });
 
-                // --- NEW: Attendance Snapshot ---
                 const unsubAttendance = onSnapshot(attendanceQuery, (attendanceSnapshot) => {
                     const attendanceMap = new Map();
                     attendanceSnapshot.forEach(doc => {
                         const data = doc.data();
-                        const key = `${data.staffId}_${data.date}`;
-                        attendanceMap.set(key, data);
+                        attendanceMap.set(`${data.staffId}_${data.date}`, data);
                     });
 
-                    // --- Build Final Data ---
                     const days = Array.from({ length: 7 }).map((_, i) => {
                         const date = dateUtils.addDays(startOfWeek, i);
                         const dateStr = dateUtils.formatISODate(date);
@@ -135,18 +134,20 @@ export default function TeamSchedulePage({ db, user }) {
                             const leave = leaveMap.get(key);
 
                             const { status } = calculateAttendanceStatus(shift, attendance, leave, date);
-
-                            if (status === 'Leave') {
-                                return { name: getDisplayName(staff), statusText: 'On Leave', statusClass: 'text-blue-400' };
-                            }
-                            if (status === 'Absent') {
-                                return { name: getDisplayName(staff), statusText: 'Absent', statusClass: 'text-red-400' };
-                            }
-                            if (shift) {
-                                return { name: getDisplayName(staff), statusText: `${shift.startTime} - ${shift.endTime}`, statusClass: 'text-white' };
-                            }
+                            
+                            // Determine what to show
+                            if (leave) return { staffId: staff.id, name: getDisplayName(staff), dept: myDepartment, leave: leave, status };
+                            if (shift) return { staffId: staff.id, name: getDisplayName(staff), dept: myDepartment, sched: shift, status };
+                            
                             return null;
                         }).filter(Boolean);
+
+                        // Sort by Time
+                        dailyEntries.sort((a, b) => {
+                            const timeA = a.sched ? a.sched.startTime : '23:59';
+                            const timeB = b.sched ? b.sched.startTime : '23:59';
+                            return timeA.localeCompare(timeB);
+                        });
 
                         return { date, entries: dailyEntries };
                     });
@@ -154,48 +155,81 @@ export default function TeamSchedulePage({ db, user }) {
                     setWeekData(days);
                     setIsLoading(false);
                 });
-                return unsubAttendance; // Return inner unsub
+                return unsubAttendance;
             });
-            return unsubLeaves; // Return middle unsub
+            return unsubLeaves;
         });
-        return () => unsubShifts(); // Return outer unsub
-    }, [db, user, startOfWeek, staffList, myDepartment]);
+        return () => unsubShifts();
+    }, [db, user.uid, startOfWeek, staffList, myDepartment]); // FIX: user.uid is stable
 
-    // ... (rest of the component is unchanged) ...
     const changeWeek = (offset) => setStartOfWeek(prev => dateUtils.addDays(prev, 7 * offset));
-    
     const endOfWeek = dateUtils.addDays(startOfWeek, 6);
     const weekRangeString = `${dateUtils.formatCustom(startOfWeek, 'dd MMM')} - ${dateUtils.formatCustom(endOfWeek, 'dd MMM, yyyy')}`;
 
     return (
-        <div>
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 space-y-4 sm:space-y-0">
+        <div className="pb-20">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 space-y-4 sm:space-y-0">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Team Schedule: {myDepartment}</h2>
-                <div className="flex items-center space-x-2 sm:space-x-4">
-                    <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronLeft className="h-6 w-6" /></button>
-                    <h3 className="text-lg sm:text-xl font-semibold w-48 sm:w-64 text-center">{weekRangeString}</h3>
-                    <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600"><ChevronRight className="h-6 w-6" /></button>
+                <div className="flex items-center space-x-4">
+                    <button onClick={() => changeWeek(-1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors"><ChevronLeft className="h-6 w-6" /></button>
+                    <h3 className="text-lg font-semibold w-48 text-center bg-gray-800 py-1 rounded-lg border border-gray-700">{weekRangeString}</h3>
+                    <button onClick={() => changeWeek(1)} className="p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition-colors"><ChevronRight className="h-6 w-6" /></button>
                 </div>
             </div>
-            {isLoading ? (<p className="text-center text-gray-400">Loading schedule...</p>) : (
+
+            {isLoading ? (
+                <div className="flex justify-center py-12"><p className="text-gray-400 animate-pulse">Syncing team shifts...</p></div>
+            ) : (
                 <div className="space-y-6">
-                    {weekData.map(({ date, entries }) => (
-                        <div key={date.toISOString()} className="bg-gray-800 p-4 rounded-lg">
-                            <p className="font-bold text-amber-400 border-b border-gray-700 pb-2 mb-2">{dateUtils.formatCustom(date, 'EEEE')}, {dateUtils.formatCustom(date, 'dd MMMM')}</p>
-                            {entries.length > 0 ? (
-                                <ul className="space-y-2">
-                                    {entries.map(entry => (
-                                        <li key={entry.name} className="flex justify-between items-center text-sm">
-                                            <span className="text-gray-300">{entry.name}</span>
-                                            <span className={`font-semibold ${entry.statusClass}`}>{entry.statusText}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : (
-                                <p className="text-sm text-gray-500">No one scheduled.</p>
-                            )}
-                        </div>
-                    ))}
+                    {weekData.map(({ date, entries }) => {
+                        const isToday = dateUtils.formatISODate(new Date()) === dateUtils.formatISODate(date);
+                        return (
+                            <div key={date.toISOString()} className={`rounded-xl border p-4 ${isToday ? 'bg-gray-800/80 border-indigo-500/50' : 'bg-gray-800/40 border-gray-700/50'}`}>
+                                <h3 className={`font-bold mb-4 flex items-center gap-2 ${isToday ? 'text-indigo-400' : 'text-gray-400'}`}>
+                                    {dateUtils.formatCustom(date, 'EEEE, dd MMMM')}
+                                    {isToday && <span className="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full">TODAY</span>}
+                                </h3>
+                                
+                                {entries.length > 0 ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {entries.map(entry => {
+                                            const includesBreak = entry.sched?.includesBreak !== false;
+                                            return (
+                                                <div key={entry.staffId} className="bg-gray-900/50 p-3 rounded-lg flex items-center justify-between border border-gray-700/50 hover:border-gray-600 transition-colors">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs bg-gray-800 ${getDeptColor(entry.dept)}`}>
+                                                            {entry.name.substring(0,2).toUpperCase()}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-sm text-gray-200">{entry.name}</p>
+                                                            <p className={`text-[10px] uppercase font-bold ${getDeptColor(entry.dept)}`}>{entry.dept}</p>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {entry.leave ? (
+                                                        <span className="text-xs font-bold text-blue-400 bg-blue-900/20 px-2 py-1 rounded">On Leave</span>
+                                                    ) : (
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-bold text-white tabular-nums">{entry.sched.startTime}-{entry.sched.endTime}</p>
+                                                            <div className="flex justify-end mt-0.5">
+                                                                {includesBreak ? (
+                                                                    <Coffee className="w-3 h-3 text-gray-600" title="Break" />
+                                                                ) : (
+                                                                    <Flame className="w-3 h-3 text-amber-500" title="Continuous" />
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-600 italic">No shifts scheduled.</p>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
         </div>

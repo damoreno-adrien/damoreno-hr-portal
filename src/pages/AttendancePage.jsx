@@ -18,13 +18,13 @@ const getDisplayName = (staff) => {
 const UpcomingBirthdaysCard = ({ staffList }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
-        
-        const today = new Date(); 
-        today.setHours(0, 0, 0, 0); 
-        
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
         const birthDate = dateUtils.fromFirestore(staff.birthdate);
         if (!birthDate) return null;
-        
+
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
         if (nextBirthday < today) {
             nextBirthday.setFullYear(today.getFullYear() + 1);
@@ -32,7 +32,7 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
 
         const diffTime = nextBirthday - today;
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+
         if (diffDays <= 30) {
             return {
                 ...staff,
@@ -68,15 +68,18 @@ export default function AttendancePage({ db, staffList }) {
     const [todaysLeave, setTodaysLeave] = useState([]);
     const [editingRecord, setEditingRecord] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
-    const [alertToFix, setAlertToFix] = useState(null); 
-
-    // 2. NEW: State for Company Config
+    const [alertToFix, setAlertToFix] = useState(null);
     const [companyConfig, setCompanyConfig] = useState(null);
+    
+    // NEW: Refresh key to force child components to update
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+    const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
 
     useEffect(() => {
         if (!db) return;
-        const todayStr = dateUtils.formatISODate(new Date()); 
-        
+        const todayStr = dateUtils.formatISODate(new Date());
+
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
             setTodaysShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -85,8 +88,8 @@ export default function AttendancePage({ db, staffList }) {
         const checkInQuery = query(collection(db, "attendance"), where("date", "==", todayStr));
         const unsubscribeCheckIns = onSnapshot(checkInQuery, (snapshot) => {
             const checkInMap = {};
-            snapshot.forEach(doc => { 
-                checkInMap[doc.data().staffId] = { id: doc.id, ...doc.data() }; 
+            snapshot.forEach(doc => {
+                checkInMap[doc.data().staffId] = { id: doc.id, ...doc.data() };
             });
             setCheckIns(checkInMap);
         });
@@ -96,7 +99,6 @@ export default function AttendancePage({ db, staffList }) {
             setTodaysLeave(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
-        // 3. NEW: Fetch Company Config directly here
         const configRef = doc(db, 'settings', 'company_config');
         const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
             if (docSnap.exists()) {
@@ -104,18 +106,18 @@ export default function AttendancePage({ db, staffList }) {
             }
         });
 
-        return () => { 
-            unsubscribeShifts(); 
-            unsubscribeCheckIns(); 
-            unsubscribeLeave(); 
-            unsubscribeConfig(); // Cleanup config listener
+        return () => {
+            unsubscribeShifts();
+            unsubscribeCheckIns();
+            unsubscribeLeave();
+            unsubscribeConfig(); 
         };
     }, [db]);
 
     const handleCardClick = (staff) => {
-        const todayStr = dateUtils.formatISODate(new Date()); 
+        const todayStr = dateUtils.formatISODate(new Date());
         const attendanceRecord = checkIns[staff.id];
-        
+
         const recordForModal = {
             id: attendanceRecord ? attendanceRecord.id : `${staff.id}_${todayStr}`,
             staffId: staff.id,
@@ -132,10 +134,22 @@ export default function AttendancePage({ db, staffList }) {
             staffId: alert.staffId,
             staffName: alert.staffName,
             date: alert.date,
-            fullRecord: { 
-                checkInTime: alert.checkInTime.toDate()
+            fullRecord: alert.fullRecord || {
+                checkInTime: alert.checkInTime?.toDate ? alert.checkInTime.toDate() : alert.checkInTime
             },
             alertId: alert.id
+        };
+        setAlertToFix(recordForModal);
+    };
+
+    // --- NEW: FUNCTION TO HANDLE OT LIST EDITING ---
+    const handleManualFix = (req) => {
+        const recordForModal = {
+            id: req.attendanceDocId,
+            staffId: req.staffId,
+            staffName: req.staffName,
+            date: req.date,
+            fullRecord: req, // Passing the full attendance object from OT list
         };
         setAlertToFix(recordForModal);
     };
@@ -153,7 +167,7 @@ export default function AttendancePage({ db, staffList }) {
         const checkIn = checkIns[staff.id];
         const shift = todaysShifts.find(s => s.staffId === staff.id);
         const leave = todaysLeave.find(l => l.staffId === staff.id);
-        
+
         if (checkIn && !checkIn.checkOutTime && !(checkIn.breakStart && !checkIn.breakEnd)) return { ...staff, category: 'on-shift' };
         if (checkIn && checkIn.breakStart && !checkIn.breakEnd) return { ...staff, category: 'on-break' };
         if (checkIn && checkIn.checkOutTime) return { ...staff, category: 'completed' };
@@ -206,7 +220,7 @@ export default function AttendancePage({ db, staffList }) {
                 {isOpen && (
                     <div className="px-4 pb-4 space-y-3">
                         {staff.length > 0 ? staff.map(s => <StaffCard key={s.id} staff={s} checkInData={checkIns[s.id]} onClick={() => handleCardClick(s)} />)
-                        : <p className="text-sm text-gray-500">No staff in this category.</p>}
+                            : <p className="text-sm text-gray-500">No staff in this category.</p>}
                     </div>
                 )}
             </div>
@@ -218,17 +232,21 @@ export default function AttendancePage({ db, staffList }) {
             {/* Normal Edit Modal */}
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord ? "Edit Attendance Record" : "Create Attendance Record"}>
-                    <EditAttendanceModal db={db} record={editingRecord} onClose={() => setEditingRecord(null)} />
+                    <EditAttendanceModal 
+                        db={db} 
+                        record={editingRecord} 
+                        onClose={() => { setEditingRecord(null); triggerRefresh(); }} 
+                    />
                 </Modal>
             )}
 
-            {/* Manager Alerts Manual Fix Modal */}
+            {/* Manager Alerts / OT List Manual Fix Modal */}
             {alertToFix && (
                 <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
                     <EditAttendanceModal
                         db={db}
                         record={alertToFix}
-                        onClose={handleCloseManualFix}
+                        onClose={() => { setAlertToFix(null); triggerRefresh(); }}
                     />
                 </Modal>
             )}
@@ -237,7 +255,7 @@ export default function AttendancePage({ db, staffList }) {
                 <div className="flex items-center space-x-4">
                     <h2 className="text-2xl md:text-3xl font-bold text-white">Live Attendance Dashboard</h2>
                     <div className="flex items-center">
-                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
+                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
                 </div>
@@ -250,9 +268,12 @@ export default function AttendancePage({ db, staffList }) {
             </div>
 
             {/* 2. Overtime Approvals (Money) */}
-            <div className="mb-8">
-                <OvertimeRequests db={db} companyConfig={companyConfig} />
-            </div>
+            <OvertimeRequests
+                key={`ot-center-${refreshTrigger}`}
+                db={db}
+                companyConfig={companyConfig}
+                onManualFix={handleManualFix} 
+            />
 
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />

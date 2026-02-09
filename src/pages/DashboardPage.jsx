@@ -1,7 +1,8 @@
-// src/pages/DashboardPage.jsx
+/* src/pages/DashboardPage.jsx */
+
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore'; 
-import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, Calendar, Slash } from 'lucide-react'; // Added Slash icon
+import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, Calendar, Slash, Flame } from 'lucide-react'; 
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
@@ -11,7 +12,6 @@ import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 
 export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
-    // ... (All existing state and useEffects are unchanged) ...
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
@@ -21,7 +21,12 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [tomorrowsSchedule, setTomorrowsSchedule] = useState(null);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [upcomingLeave, setUpcomingLeave] = useState(null);
-    const { monthlyStats, bonusStatus } = useMonthlyStats(db, user, companyConfig);
+    
+    // Safety check for stats to prevent app crash or NaN display
+    const rawStats = useMonthlyStats(db, user, companyConfig);
+    const monthlyStats = rawStats.monthlyStats || { totalHoursWorked: "0h 0m", workedDays: 0, absences: 0, totalTimeLate: "0h 0m" };
+    const bonusStatus = rawStats.bonusStatus || { notEligible: true };
+
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
     const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
 
@@ -32,7 +37,6 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         return birthDateStr === todayStr;
     }
     const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
-
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -86,9 +90,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             if (!foundToday) setTodaysSchedule(undefined); 
             if (!foundTomorrow) setTomorrowsSchedule(undefined);
         }, (error) => { 
-            console.error("Error fetching today's/tomorrow's schedule:", error);
-            setTodaysSchedule(undefined);
-            setTomorrowsSchedule(undefined);
+            console.error("Error fetching schedules:", error);
         });
         return () => unsubscribe(); 
     }, [db, user]); 
@@ -108,11 +110,8 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             if (!snapshot.empty) {
                 const firstLeave = snapshot.docs[0].data();
                 setUpcomingLeave(firstLeave);
-                if (firstLeave.startDate === todayStr) {
-                    setIsOnLeaveToday(true);
-                } else {
-                    setIsOnLeaveToday(false);
-                }
+                if (firstLeave.startDate === todayStr) setIsOnLeaveToday(true);
+                else setIsOnLeaveToday(false);
             } else {
                 setUpcomingLeave(null);
                 setIsOnLeaveToday(false);
@@ -143,11 +142,11 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             },
             (error) => {
                 const messages = {
-                    [error.PERMISSION_DENIED]: "Location access was denied. Please enable it in your browser settings.",
-                    [error.POSITION_UNAVAILABLE]: "Location information is unavailable.",
-                    [error.TIMEOUT]: "The request to get user location timed out."
+                    [error.PERMISSION_DENIED]: "Location access was denied. Enable in settings.",
+                    [error.POSITION_UNAVAILABLE]: "Location unavailable.",
+                    [error.TIMEOUT]: "Location request timed out."
                 };
-                setLocationError(messages[error.code] || "An unknown error occurred while getting your location.");
+                setLocationError(messages[error.code] || "Error getting location.");
             }
         );
     }, [companyConfig]);
@@ -169,7 +168,9 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             staffName: user.displayName || user.email, 
             date: localDateString, 
             checkInTime: serverTimestamp(), 
-            checkOutTime: null 
+            checkOutTime: null,
+            // Automatically set includesBreak from schedule preference
+            includesBreak: todaysSchedule?.includesBreak !== false 
         });
     };
 
@@ -178,41 +179,54 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const handleCheckOut = async () => {
         const now = new Date();
         let proceedCheckout = true; 
-
         if (todaysSchedule && todaysSchedule.endTime) {
             try {
                 const [endHours, endMinutes] = todaysSchedule.endTime.split(':');
                 const scheduledEndTime = new Date(now); 
                 scheduledEndTime.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10), 0, 0);
-
                 if (now < scheduledEndTime) {
-                    proceedCheckout = window.confirm("Your shift isn't scheduled to end yet. Are you sure you want to check out early?");
+                    proceedCheckout = window.confirm("Checking out early?");
                 }
-            } catch (e) {
-                console.error("Error parsing schedule end time:", e);
-            }
+            } catch (e) { console.error("Error parsing time", e); }
         }
-
-        if (proceedCheckout) {
-            await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
-        }
+        if (proceedCheckout) await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
      };
 
+    // --- FIX: Dynamic Buttons based on Shift Type ---
     const renderButtons = () => {
-        if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">You are on approved leave today. Time clock is disabled.</p>;
-        
+        if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">On Leave. Clock disabled.</p>;
         const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
         
+        // Detect Continuous Shift (No Break)
+        const isContinuousShift = todaysSchedule && todaysSchedule.includesBreak === false;
+
         switch (status) {
-            case 'checked-out': return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
+            case 'checked-out': 
+                return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
+            
             case 'checked-in':
                 if (todaysAttendance?.breakEnd) return <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-red-600 hover:bg-red-700`}>Check-Out</button>;
+                
+                // If Continuous Shift, HIDE Start Break button
+                if (isContinuousShift) {
+                    return (
+                        <div className="space-y-2">
+                            <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button>
+                            <p className="text-center text-xs text-amber-500 flex items-center justify-center gap-1">
+                                <Flame className="w-3 h-3" /> Continuous Shift (No Break)
+                            </p>
+                        </div>
+                    );
+                }
+
+                // Standard Shift (Show Both)
                 return (
                     <div className="grid grid-cols-2 gap-4">
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button>
                         <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-red-600 hover:bg-red-700`}>Check-Out</button>
                     </div>
                 );
+
             case 'on-break': {
                 const breakStartTime = fromFirestore(todaysAttendance?.breakStart);
                 const minutesOnBreak = breakStartTime ? (currentTime - breakStartTime) / 60000 : 0;
@@ -221,54 +235,40 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 return (
                     <div>
                         <div className="text-center mb-4 space-y-1">
-                            {breakStartTime && <p className="text-sm text-gray-400">Break started at: <span className="font-semibold text-gray-200">{formatCustom(breakStartTime, 'HH:mm')}</span></p>}
-                            <p className="text-lg font-bold text-yellow-300">{Math.floor(remainingBreakMinutes)} minutes remaining</p>
+                            {breakStartTime && <p className="text-sm text-gray-400">Started: <span className="font-semibold text-gray-200">{formatCustom(breakStartTime, 'HH:mm')}</span></p>}
+                            <p className="text-lg font-bold text-yellow-300">{Math.floor(remainingBreakMinutes)} mins remaining</p>
                         </div>
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence || !canEndBreak} className={`${commonButtonClasses} bg-blue-500 hover:bg-blue-600`}>End Break</button>
-                        {!canEndBreak && breakStartTime && <p className="text-center text-xs text-gray-500 mt-2">(You can end your break in {Math.ceil(50 - minutesOnBreak)} minute(s))</p>}
+                        {!canEndBreak && <p className="text-center text-xs text-gray-500 mt-2">Wait {Math.ceil(50 - minutesOnBreak)}m to end break</p>}
                     </div>
                 );
             }
-            case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">You have checked out for the day. Thank you!</p>;
-            default: return <p className="text-center text-gray-400">Loading attendance status...</p>;
+            case 'checked-out-final': return <p className="text-center text-xl md:text-2xl text-gray-400">Shift Ended. See you tomorrow!</p>;
+            default: return <p className="text-center text-gray-400">Loading...</p>;
         }
     };
 
-    // --- FIX: Updated Bonus Display Logic ---
     let bonusContent;
     let bonusBgClass;
-
     if (bonusStatus.notEligible) {
-        bonusContent = (
-            <>
-                <span className="font-bold text-gray-400">Not Eligible</span>
-                <Slash className="w-5 h-5 text-gray-500" />
-            </>
-        );
+        bonusContent = <><span className="font-bold text-gray-400">Not Eligible</span><Slash className="w-5 h-5 text-gray-500" /></>;
         bonusBgClass = "bg-gray-700/40 border border-gray-600";
     } else if (bonusStatus.onTrack) {
-        bonusContent = (
-            <>
-                <span className="font-bold text-green-400">{bonusStatus.text}</span>
-                <CheckCircle className="w-5 h-5 text-green-400" />
-            </>
-        );
+        bonusContent = <><span className="font-bold text-green-400">{bonusStatus.text}</span><CheckCircle className="w-5 h-5 text-green-400" /></>;
         bonusBgClass = "bg-green-500/20";
     } else {
-        bonusContent = (
-            <>
-                <span className="font-bold text-red-400">{bonusStatus.text}</span>
-                <Award className="w-5 h-5 text-red-400" />
-            </>
-        );
+        bonusContent = <><span className="font-bold text-red-400">{bonusStatus.text}</span><Award className="w-5 h-5 text-red-400" /></>;
         bonusBgClass = "bg-red-500/20";
     }
-    // ----------------------------------------
+
+    // --- FIX: Sanitize NaN values for display ---
+    const sanitizeTime = (val) => (val && !val.includes('NaN') ? val : "0h 0m");
 
     return (
         <div>
-            {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday to you! We wish you all the best! 🎂</div>}
-            {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p className="font-semibold">🎈 Today is a special day for your colleague(s)!</p><p>Don't forget to wish a happy birthday to: {colleaguesWithBirthday.map(getDisplayName).join(', ')}!</p></div>}
+            {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday! 🎂</div>}
+            {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p>🎈 It's {colleaguesWithBirthday.map(getDisplayName).join(', ')}'s Birthday!</p></div>}
+            
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
@@ -280,54 +280,31 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                         <div className="mt-6 px-2 sm:px-0">{renderButtons()}</div>
                         <DailySummary todaysAttendance={todaysAttendance} />
                         <div className="text-center mt-6 text-sm text-gray-500 h-5">
-                            {locationError && <p className="text-red-400">{locationError}</p>}
-                            {!locationError && !isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p>Checking location...</p>}
-                            {!locationError && isWithinGeofence && status !== 'checked-out-final' && !isOnLeaveToday && <p className="text-green-400">✓ Location verified.</p>}
+                            {locationError ? <p className="text-red-400">{locationError}</p> : isWithinGeofence ? <p className="text-green-400">✓ Location verified.</p> : <p>Checking location...</p>}
                         </div>
                     </DashboardCard>
                 </div>
                 <div className="space-y-8">
                     <DashboardCard title="Bonus Status">
-                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>
-                            {bonusContent}
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">Based on monthly attendance.</p>
+                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>{bonusContent}</div>
                     </DashboardCard>
                     <UpcomingShiftsCard todaysSchedule={todaysSchedule} tomorrowsSchedule={tomorrowsSchedule} />
                     <QuickActionsCard setCurrentPage={setCurrentPage} />
                     <DashboardCard title="This Month's Summary">
                         <div className="space-y-4">
-                           <StatItem 
-                                icon={Clock} 
-                                label="Total Hours Worked" 
-                                value={monthlyStats.totalHoursWorked} 
-                                colorClass="blue"
-                                caption={`On total scheduled of ${monthlyStats.totalHoursScheduled}`}
-                           />
-                           <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays} colorClass="green" />
-                           <StatItem icon={Moon} label="Absences" value={monthlyStats.absences} colorClass="red" />
-                           <StatItem icon={AlertTriangle} label="Total Time Late" value={monthlyStats.totalTimeLate} colorClass="yellow" />
+                           <StatItem icon={Clock} label="Total Hours Worked" value={sanitizeTime(monthlyStats.totalHoursWorked)} colorClass="blue" caption={`Target: ${sanitizeTime(monthlyStats.totalHoursScheduled)}`} />
+                           <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays || 0} colorClass="green" />
+                           <StatItem icon={Moon} label="Absences" value={monthlyStats.absences || 0} colorClass="red" />
+                           {/* --- FIX: Safely display Late Time --- */}
+                           <StatItem icon={AlertTriangle} label="Total Time Late" value={sanitizeTime(monthlyStats.totalTimeLate)} colorClass="yellow" />
                         </div>
                     </DashboardCard>
                     <DashboardCard title="Leave Balance">
                         <div className="flex justify-between items-center">
-                            <span className="text-gray-300">Annual Leave Remaining</span>
+                            <span className="text-gray-300">Annual Leave</span>
                             <span className="text-3xl font-bold text-amber-400">{leaveBalances.annual}</span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-2">Days available for the rest of the year.</p>
-                        
-                        {upcomingLeave && (
-                            <div className="mt-4 border-t border-gray-700 pt-3">
-                                <p className="text-xs text-gray-400 mb-1">Your next approved leave:</p>
-                                <div className="flex items-center text-sm">
-                                    <Calendar className="w-4 h-4 text-blue-400 mr-2 flex-shrink-0" />
-                                    <div>
-                                        <span className="font-semibold text-blue-300">{upcomingLeave.leaveType}</span>
-                                        <span className="text-gray-300 ml-2">({upcomingLeave.startDate} to {upcomingLeave.endDate})</span>
-                                    </div>
-                                 </div>
-                            </div>
-                        )}
+                        {upcomingLeave && <div className="mt-4 border-t border-gray-700 pt-3"><p className="text-xs text-gray-400">Next: {upcomingLeave.leaveType} ({upcomingLeave.startDate})</p></div>}
                     </DashboardCard>
                 </div>
             </div>

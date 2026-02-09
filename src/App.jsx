@@ -1,3 +1,5 @@
+/* src/App.jsx */
+
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -42,9 +44,9 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
-    const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db); // Pass imported auth/db
-    const companyConfig = useCompanyConfig(db); // Pass imported db
-    const staffList = useStaffList(db, user); // Pass imported db
+    const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db); 
+    const companyConfig = useCompanyConfig(db); 
+    const staffList = useStaffList(db, user); 
     
     useEffect(() => {
         if (userRole === 'staff' && db && user) {
@@ -116,20 +118,20 @@ export default function App() {
 
     const handleLogin = async (email, password) => {
         setLoginError('');
-        if (!auth) { // Use imported auth
+        if (!auth) { 
              console.error("Firebase Auth not initialized.");
              setLoginError('Initialization error. Please refresh.');
              return;
         }
         try {
-            await signInWithEmailAndPassword(auth, email, password); // Use imported auth
+            await signInWithEmailAndPassword(auth, email, password); 
         } catch (error) {
             setLoginError('Invalid email or password. Please try again.');
         }
     };
     const handleLogout = async () => {
-        if (!auth) return; // Use imported auth
-        await signOut(auth); // Use imported auth
+        if (!auth) return; 
+        await signOut(auth); 
         setCurrentPage('dashboard');
     };
 
@@ -145,7 +147,6 @@ export default function App() {
         );
     }
 
-    // Pass imported db to pages/components that need it directly
      const renderPageContent = () => {
          if (currentPage === 'dashboard') {
              if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
@@ -153,13 +154,16 @@ export default function App() {
          }
          switch(currentPage) {
              case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} />;
-             // ... (Update other pages passing db and auth if needed) ...
-             case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} />;
-             case 'team-schedule': return <TeamSchedulePage db={db} user={user} />;
+             case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} companyConfig={companyConfig} />;
+             case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={companyConfig} />;
              case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
              case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
              case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
-             case 'financials-dashboard': return <FinancialsDashboardPage companyConfig={companyConfig} />; // Pass db if needed later
+             
+             // --- FIX START: Added db and user props ---
+             case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={companyConfig} />; 
+             // --- FIX END ---
+             
              case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
              case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
              case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
