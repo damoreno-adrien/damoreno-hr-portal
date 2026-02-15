@@ -57,6 +57,11 @@ export const ProfileDetailsView = ({ staff, currentJob }) => {
             <InfoRow label="Current Department" value={currentJob.department} />
             <InfoRow label="Current Position" value={currentJob.position} />
             <InfoRow label="Current Pay Rate" value={formatRate(currentJob)} />
+            <InfoRow 
+                label="SSO Status" 
+                value={staff.isSsoRegistered === false ? 'Not Enrolled' : 'Enrolled'} 
+                className={staff.isSsoRegistered === false ? 'text-amber-500' : 'text-green-400'}
+            />
         </div>
     );
 };

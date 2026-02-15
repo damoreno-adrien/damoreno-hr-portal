@@ -1,5 +1,4 @@
-/* src/App.jsx */
-
+// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -35,7 +34,9 @@ export default function App() {
     const [staffProfile, setStaffProfile] = useState(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-    const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0 });
+    
+    // Balance State
+    const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0, personal: 0 });
 
     const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
     const [unreadLeaveUpdatesCount, setUnreadLeaveUpdatesCount] = useState(0);
@@ -91,29 +92,77 @@ export default function App() {
         }
     }, [userRole, db, user]);
 
+    // --- LEAVE BALANCE CALCULATION ---
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
             const currentYear = new Date().getFullYear();
-            const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('status', 'in', ['approved', 'pending']), where('startDate', '>=', `${currentYear}-01-01`));
+            const q = query(
+                collection(db, 'leave_requests'), 
+                where('staffId', '==', user.uid), 
+                where('status', 'in', ['approved', 'pending']), 
+                where('startDate', '>=', `${currentYear}-01-01`)
+            );
+            
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 const today = new Date();
-                const hireDate = new Date(staffProfile.startDate);
+                
+                // --- FIX: Robust Date Parsing for Start Date ---
+                let hireDate = new Date();
+                if (staffProfile.startDate) {
+                    if (staffProfile.startDate.toDate) {
+                        hireDate = staffProfile.startDate.toDate(); // Firestore Timestamp
+                    } else if (typeof staffProfile.startDate === 'string') {
+                        // Handle "DD/MM/YYYY" format explicitly
+                        if (staffProfile.startDate.includes('/')) {
+                            const parts = staffProfile.startDate.split('/');
+                            // Assume DD/MM/YYYY
+                            if (parts.length === 3) hireDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+                            else hireDate = new Date(staffProfile.startDate);
+                        } else {
+                            hireDate = new Date(staffProfile.startDate); // ISO String
+                        }
+                    }
+                }
+                // -----------------------------------------------
+
                 const yearsOfService = (today - hireDate) / (1000 * 60 * 60 * 24 * 365);
+                
+                // 1. Annual Leave
                 let annualLeaveEntitlement = 0;
-                if (yearsOfService >= 1) { annualLeaveEntitlement = companyConfig.annualLeaveDays; }
-                else if (hireDate.getFullYear() === currentYear) { const monthsWorked = 12 - hireDate.getMonth(); annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked); }
+                if (yearsOfService >= 1) { 
+                    annualLeaveEntitlement = companyConfig.annualLeaveDays; 
+                } else if (hireDate.getFullYear() === currentYear) { 
+                    // Pro-rate for first year
+                    const monthsWorked = 12 - hireDate.getMonth(); 
+                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked); 
+                }
+                
+                // 2. Public Holiday Credits
                 const pastHolidays = companyConfig.publicHolidays.filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
                 const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-                let usedAnnual = 0, usedPublicHoliday = 0;
+                
+                // 3. Personal Leave
+                const personalLeaveEntitlement = companyConfig.paidPersonalDays || 0;
+
+                let usedAnnual = 0, usedPublicHoliday = 0, usedPersonal = 0;
+                
                 snapshot.docs.forEach(doc => {
                     const leave = doc.data();
                     if (leave.leaveType === 'Annual Leave') usedAnnual += leave.totalDays;
                     if (leave.leaveType === 'Public Holiday (In Lieu)') usedPublicHoliday += leave.totalDays;
+                    if (leave.leaveType === 'Personal Leave') usedPersonal += leave.totalDays;
                 });
-                setLeaveBalances({ annual: annualLeaveEntitlement - usedAnnual, publicHoliday: earnedCredits - usedPublicHoliday });
+
+                setLeaveBalances({ 
+                    annual: Math.max(0, annualLeaveEntitlement - usedAnnual), 
+                    publicHoliday: Math.max(0, earnedCredits - usedPublicHoliday),
+                    personal: Math.max(0, personalLeaveEntitlement - usedPersonal)
+                });
             });
             return () => unsubscribe();
-        } else { setLeaveBalances({ annual: 0, publicHoliday: 0 }); }
+        } else { 
+            setLeaveBalances({ annual: 0, publicHoliday: 0, personal: 0 }); 
+        }
     }, [db, user, userRole, companyConfig, staffProfile]);
 
     const handleLogin = async (email, password) => {
@@ -158,12 +207,8 @@ export default function App() {
              case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={companyConfig} />;
              case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
              case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
-             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} />;
-             
-             // --- FIX START: Added db and user props ---
+             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={companyConfig} />;
              case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={companyConfig} />; 
-             // --- FIX END ---
-             
              case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
              case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
              case 'financials': return <FinancialsPage db={db} staffList={staffList} />;

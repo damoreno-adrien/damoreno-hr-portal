@@ -20,14 +20,13 @@ const getStaffCurrentJob = (staff) => {
     })[0];
 };
 
-// --- FIX: Add companyConfig prop ---
 export default function SalaryAdvancePage({ db, user, companyConfig }) {
     const [eligibility, setEligibility] = useState({ 
         maxAdvance: 0, 
         maxTheoreticalAdvance: 0,
         salaryEarned: 0,
         currentAdvances: 0,
-        policyCap: 0 // New field for display
+        policyCap: 0 
     });
     const [isLoadingEligibility, setIsLoadingEligibility] = useState(true);
     
@@ -42,10 +41,11 @@ export default function SalaryAdvancePage({ db, user, companyConfig }) {
         if (!db || !user) return;
         setIsLoadingRequests(true);
 
+        // --- FIX 1: Changed 'requestDate' to 'date' ---
         const q = query(
             collection(db, 'salary_advances'), 
             where('staffId', '==', user.uid),
-            orderBy('requestDate', 'desc')
+            orderBy('date', 'desc') 
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -54,6 +54,9 @@ export default function SalaryAdvancePage({ db, user, companyConfig }) {
             setIsLoadingRequests(false);
         }, (err) => {
             console.error("Error fetching requests:", err);
+            if (err.message.includes("index")) {
+                setError("Database index is building. Please check the console for the Firebase link.");
+            }
             setIsLoadingRequests(false);
         });
 
@@ -86,11 +89,12 @@ export default function SalaryAdvancePage({ db, user, companyConfig }) {
             const startOfMonthStr = dateUtils.formatISODate(dateUtils.startOfMonth(now));
             const endOfMonthStr = dateUtils.formatISODate(dateUtils.endOfMonth(now));
 
+            // --- FIX 2: Changed 'requestDate' to 'date' ---
             const advancesQ = query(
                 collection(db, 'salary_advances'),
                 where('staffId', '==', user.uid),
-                where('requestDate', '>=', startOfMonthStr),
-                where('requestDate', '<=', endOfMonthStr)
+                where('date', '>=', startOfMonthStr),
+                where('date', '<=', endOfMonthStr)
             );
             const advancesSnap = await getDocs(advancesQ);
             
@@ -102,20 +106,18 @@ export default function SalaryAdvancePage({ db, user, companyConfig }) {
                 return sum;
             }, 0);
 
-            // --- D. The Updated Math ---
+            // D. The Updated Math
             const daysInMonth = dateUtils.getDaysInMonth(now);
             const currentDay = now.getDate();
             
-            // 1. Earned So Far (The "Reality" Limit)
+            // 1. Earned So Far 
             const earnedSalary = (baseSalary / daysInMonth) * currentDay;
 
-            // 2. Policy Cap (The "Settings" Limit)
-            // Default to 50% if not set in config
+            // 2. Policy Cap 
             const advanceCapPercent = companyConfig?.maxAdvancePercent || 50; 
             const policyCapAmount = baseSalary * (advanceCapPercent / 100);
 
             // 3. Gross Eligible = MIN(Earned, Policy Cap)
-            // You can't take more than you earned, AND you can't take more than 50% of total salary
             const grossEligible = Math.min(earnedSalary, policyCapAmount);
 
             // 4. Subtract Deductions
@@ -126,16 +128,16 @@ export default function SalaryAdvancePage({ db, user, companyConfig }) {
                 maxTheoreticalAdvance: Math.floor(grossEligible), 
                 salaryEarned: earnedSalary,
                 currentAdvances: usedAdvanceAmount,
-                policyCap: policyCapAmount // For UI reference if needed
+                policyCap: policyCapAmount 
             });
 
         } catch (err) {
             console.error("Eligibility Error:", err);
-            setError("Could not calculate eligibility. Please contact management.");
+            setError("Could not calculate eligibility.");
         } finally {
             setIsLoadingEligibility(false);
         }
-    }, [db, user, companyConfig]); // Added companyConfig dependency
+    }, [db, user, companyConfig]); 
 
     useEffect(() => {
         calculateLocalEligibility();

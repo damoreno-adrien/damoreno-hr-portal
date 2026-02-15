@@ -33,6 +33,7 @@ const getInitialFormData = (staff) => {
         address: staff.address || '',
         emergencyContactName: staff.emergencyContactName || '',
         emergencyContactPhone: staff.emergencyContactPhone || '',
+        isSsoRegistered: staff.isSsoRegistered ?? true,
     };
     if (staff.firstName || staff.lastName) {
         return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
@@ -68,7 +69,10 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     })[0] || {};
 
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
-    const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.id]: e.target.value }));
+    const handleInputChange = (e) => {
+        const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+        setFormData(prev => ({ ...prev, [e.target.id]: value }));
+    };
 
     // --- Action Handlers ---
     const handleSaveDetails = async () => {
@@ -88,6 +92,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                 address: formData.address || null,
                 emergencyContactName: formData.emergencyContactName || null,
                 emergencyContactPhone: formData.emergencyContactPhone || null,
+                isSsoRegistered: formData.isSsoRegistered,
             };
             if (updateData.firstName) {
                 updateData.fullName = null;

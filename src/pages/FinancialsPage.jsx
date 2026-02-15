@@ -68,29 +68,27 @@ export default function FinancialsPage({ staffList, db }) {
 
     // 4. Update Pending Advances listener to include eligibility calculation
     useEffect(() => {
-        if (!db || !companyConfig) {
-             // Don't run until config is loaded
-            return;
-        }
+        if (!db || !companyConfig) return;
         
         setIsLoadingPending(true);
         const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
         
         const unsubscribe = onSnapshot(q, (snap) => {
-            const eligibilityPercent = companyConfig.advanceEligibilityPercentage || 50; // Default 50%
+            const eligibilityPercent = companyConfig.advanceEligibilityPercentage || 50;
 
             const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
             const hydratedList = pendingList
                 .map(req => {
                     const staffMember = staffList.find(s => s.id === req.staffId);
-                    if (!staffMember) return null; // Staff not found
+                    if (!staffMember) return null;
 
-                    // --- NEW CALCULATION ---
-                    // Assumes salary is stored in jobHistory[0].rate
-                    const salary = staffMember.jobHistory?.[0]?.rate || 0;
+                    // --- FIX: Safely extract salary regardless of PayType ---
+                    const job = staffMember.jobHistory?.[0] || staffMember;
+                    const salary = Number(job.baseSalary) || Number(job.rate) || 0;
+                    
                     const maxEligible = (salary * eligibilityPercent) / 100;
-                    // -----------------------
+                    // --------------------------------------------------------
 
                     return { 
                         ...req, 
@@ -99,13 +97,12 @@ export default function FinancialsPage({ staffList, db }) {
                         maxEligible: maxEligible
                     };
                 })
-                .filter(req => req && req.staff.status !== 'inactive'); // Filter out nulls/inactive
+                .filter(req => req && req.staff.status !== 'inactive'); 
 
             setPendingAdvances(hydratedList);
             setIsLoadingPending(false);
         }, (err) => { console.error(err); setIsLoadingPending(false); });
         
-        // This listener now depends on db, staffList, AND companyConfig
         return () => unsubscribe();
     }, [db, staffList, companyConfig]);
 

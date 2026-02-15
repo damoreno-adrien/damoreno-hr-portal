@@ -43,7 +43,8 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             db.collection("attendance").where("staffId", "==", staffId).where("date", ">=", startStr).where("date", "<=", endStr).get(),
             db.collection("leave_requests").where("staffId", "==", staffId).where("status", "==", "approved").where("endDate", ">=", startStr).get(),
             db.collection("schedules").where("staffId", "==", staffId).where("date", ">=", startStr).where("date", "<=", endStr).get(),
-            db.collection("salary_advances").where("staffId", "==", staffId).where("status", "==", "approved").where("date", ">=", startStr).get(),
+            // --- FIX 1: Removed 'approved' filter to fetch Pending requests for the UI ---
+            db.collection("salary_advances").where("staffId", "==", staffId).where("date", ">=", startStr).where("date", "<=", endStr).get(),
             db.collection("loans").where("staffId", "==", staffId).where("status", "==", "active").get()
         ]);
 
@@ -54,7 +55,6 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const job = getCurrentJob(staff);
         if (!job) throw new OnCallHttpsError("failed-precondition", "No job history found.");
 
-        // --- 1. ROBUST RATE CALCULATION (Fixed 0 THB Issue) ---
         const payType = (job.payType || '').trim().toLowerCase();
         const isMonthly = (payType === 'salary' || payType === 'monthly');
         const baseSalary = Number(job.baseSalary) || 0;
@@ -62,13 +62,11 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         let hourlyRate = 0;
         if (isMonthly) {
             const standardHours = Number(job.standardDayHours) || 9; 
-            // Monthly Rate = Salary / 30 days / Standard Hours (e.g. 9)
             hourlyRate = (baseSalary / 30) / standardHours;
         } else {
             hourlyRate = Number(job.hourlyRate) || 0;
         }
 
-        // --- 2. BUILD DATA MAPS ---
         const attendanceMap = {}; 
         attendanceRes.docs.forEach(doc => { const d = doc.data(); attendanceMap[d.date] = d; });
 
@@ -80,21 +78,18 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             while (curr <= end) { approvedLeaveDates.add(curr.toISODate()); curr = curr.plus({ days: 1 }); }
         });
 
-        // --- 3. CALCULATE EARNINGS & ABSENCES ---
         let earnings = 0;
         let absenceDeduction = 0;
         let absenceHours = 0;
         let workedMinutes = 0;
 
         if (isMonthly) {
-            // Monthly Staff: Start with accrued salary, then deduct absences
             const daysPassed = Math.max(0, nowZoned.day); 
             earnings = (baseSalary / 30) * daysPassed;
 
-            // CHECK SCHEDULES FOR ABSENCES
             schedulesRes.docs.forEach(doc => {
                 const shift = doc.data();
-                if (shift.date >= nowZoned.toISODate()) return; // Don't deduct future days
+                if (shift.date >= nowZoned.toISODate()) return; 
 
                 const isAbsent = shift.startTime && !attendanceMap[shift.date] && !approvedLeaveDates.has(shift.date);
                 const isRecordedAbsent = attendanceMap[shift.date] && (attendanceMap[shift.date].status === 'absent' || attendanceMap[shift.date].status === 'no-show');
@@ -105,7 +100,6 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
                     let shiftHours = end.diff(start, 'hours').hours;
                     if (shiftHours < 0) shiftHours += 24; 
 
-                    // Break Logic: If they missed the shift, they missed the work hours (Total - Break)
                     const breakHours = (shift.includesBreak !== false && shiftHours >= 6) ? 1 : 0;
                     const netMissedHours = Math.max(0, shiftHours - breakHours);
 
@@ -115,7 +109,6 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             });
 
         } else {
-            // Hourly Staff: Only paid for tracked time
             Object.values(attendanceMap).forEach(d => {
                 if (d.checkInTime && d.checkOutTime) {
                     const duration = (d.checkOutTime.toDate() - d.checkInTime.toDate()) / 60000;
@@ -127,11 +120,8 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             earnings = (workedMinutes / 60) * hourlyRate;
         }
 
-        // --- 4. OVERTIME & EXTRAS ---
-        // Note: This relies on 'approvedOTMinutes' being updated in the staff_profile by your Overtime Approval system.
         const overtimePay = ((staff.approvedOTMinutes || 0) / 60) * hourlyRate * 1.5;
 
-        // Bonus Check
         const totalLates = Object.values(attendanceMap).filter(d => d.status === 'Late').length;
         const bonusConfig = config.attendanceBonus || {};
         const bonusOnTrack = totalLates <= (bonusConfig.allowedLates || 3) && absenceHours === 0;
@@ -144,32 +134,45 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             else potentialBonus = bonusConfig.month3 || 1200;
         }
 
-        // --- 5. FINAL DEDUCTIONS ---
-        const advancesTotal = advancesRes.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
-        const loansTotal = loansRes.docs.reduce((sum, d) => sum + (d.data().monthlyInstallment || 0), 0);
-        const ssoRate = (config.financialRules?.ssoRate || 5) / 100;
-        const estimatedGross = earnings + overtimePay + potentialBonus;
-        const ssoDeduction = Math.min(Math.max(1650, estimatedGross) * ssoRate, 750);
+        const allMonthAdvances = advancesRes.docs.map(d => ({ id: d.id, ...d.data() }));
+        const advancesTotal = allMonthAdvances
+            .filter(adv => adv.status === 'approved' || adv.status === 'paid')
+            .reduce((sum, d) => sum + (d.amount || 0), 0);
 
-        const estimatedNet = estimatedGross - (absenceDeduction + advancesTotal + loansTotal + ssoDeduction);
+        const loansTotal = loansRes.docs.reduce((sum, d) => sum + (d.data().monthlyInstallment || 0), 0);
+        
+        const estimatedGross = earnings + overtimePay + potentialBonus;
+        
+        // --- FIXED: Smart SSO Calculation ---
+        let ssoDeduction = 0;
+        let ssoAllowance = 0;
+
+        // Only apply SSO if staff is registered AND they actually earned money
+        if (staff.isSsoRegistered !== false && estimatedGross > 0) {
+            const ssoRate = (config.financialRules?.ssoRate || 5) / 100;
+            const ssoMax = Number(config.financialRules?.ssoMaxContribution) || 875; 
+            
+            ssoDeduction = Math.min(Math.max(1650, estimatedGross) * ssoRate, ssoMax);
+            ssoAllowance = ssoDeduction; // Employer pays it
+        }
+
+        const estimatedNet = estimatedGross + ssoAllowance - (absenceDeduction + advancesTotal + loansTotal + ssoDeduction);
 
         return {
-            contractDetails: {
-                payType: job.payType,
-                baseSalary: baseSalary,
-                hourlyRate: hourlyRate,
-            },
+            contractDetails: { payType: job.payType, baseSalary: baseSalary, hourlyRate: hourlyRate },
             baseSalaryEarned: Math.round(earnings),
             overtimePay: Math.round(overtimePay), 
             potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
+            ssoAllowance: Math.round(ssoAllowance), 
             deductions: { 
-                absences: Math.round(absenceDeduction), // Should now be non-zero
+                absences: Math.round(absenceDeduction), 
                 absenceHours: absenceHours,
                 socialSecurity: Math.round(ssoDeduction), 
                 salaryAdvances: advancesTotal, 
                 loanRepayment: loansTotal 
             },
             estimatedNetPay: Math.max(0, Math.round(estimatedNet)),
+            monthAdvances: allMonthAdvances, 
             activeLoans: loansRes.docs.map(d => d.data())
         };
 

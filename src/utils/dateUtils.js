@@ -9,6 +9,7 @@ import {
   eachDayOfInterval as dfnsEachDayOfInterval,
   addDays as dfnsAddDays,
   subDays as dfnsSubDays,
+  addMonths as dfnsAddMonths, // --- ADDED THIS IMPORT ---
   startOfWeek as dfnsStartOfWeek,
   startOfToday as dfnsStartOfToday,
   getMonth as dfnsGetMonth,
@@ -76,7 +77,6 @@ export const toFirestoreFormat = (dateObj) => {
 export const formatDisplayDate = (date) => {
   const dateObj = fromFirestore(date);
   if (!dateObj) return '';
-  // Updated to match your DD/MM/YYYY format
   return format(dateObj, 'dd/MM/yyyy');
 };
 
@@ -126,7 +126,6 @@ export const formatCustom = (date, formatString) => {
  */
 export const parseISODateString = (dateString) => {
   if (!dateString) return null;
-  // We parse it as a local date, not UTC.
   const date = parse(dateString, 'yyyy-MM-dd', new Date());
   return isValid(date) ? date : null;
 };
@@ -161,12 +160,21 @@ export const subDays = (date, amount) => {
 };
 
 /**
+ * --- NEW: Adds a specified number of months to a date. ---
+ * Handles edge cases like Jan 31 + 1 month = Feb 28.
+ */
+export const addMonths = (date, amount) => {
+  const dateObj = fromFirestore(date);
+  if (!dateObj) return null;
+  return dfnsAddMonths(dateObj, amount);
+};
+
+/**
  * Returns the start of the week (Monday) for a given date.
  */
 export const startOfWeek = (date) => {
   const dateObj = fromFirestore(date);
   if (!dateObj) return null;
-  // { weekStartsOn: 1 } makes Monday the first day of the week
   return dfnsStartOfWeek(dateObj, { weekStartsOn: 1 });
 };
 
@@ -183,7 +191,7 @@ export const startOfToday = () => {
 export const getMonth = (date) => {
   const dateObj = fromFirestore(date);
   if (!dateObj) return null;
-  return dfnsGetMonth(dateObj) + 1; // date-fns is 0-indexed, we want 1-indexed
+  return dfnsGetMonth(dateObj) + 1;
 };
 
 /**
@@ -207,42 +215,30 @@ export const differenceInCalendarDays = (endDateStr, startDateStr) => {
 
 /**
  * Calculates and formats the seniority (duration) of employment.
- * Example: "1 Year, 3 Months"
  */
 export const formatSeniority = (startDate, endDate) => {
     const start = fromFirestore(startDate);
     if (!start) return '-';
 
-    const end = fromFirestore(endDate) || new Date(); // Compare against end date or today
+    const end = fromFirestore(endDate) || new Date(); 
     if (start > end) return 'Pending Start';
 
-    // Calculate full years and the remaining months
     const numYears = dfnsDifferenceInYears(end, start);
-    // Recalculate start date based on full years passed for accurate month diff
     const startPlusYears = new Date(start.getFullYear() + numYears, start.getMonth(), start.getDate());
     const numMonths = dfnsDifferenceInMonths(end, startPlusYears);
 
     const yearStr = numYears > 0 ? `${numYears} Year${numYears > 1 ? 's' : ''}` : '';
     const monthStr = numMonths > 0 ? `${numMonths} Month${numMonths > 1 ? 's' : ''}` : '';
 
-    if (numYears > 0 && numMonths > 0) {
-        return `${yearStr}, ${monthStr}`;
-    }
-    // Handle cases less than a year
-    if (numYears === 0 && numMonths > 0) {
-        return monthStr;
-    }
-    // Handle cases less than a month (calculate days precisely)
+    if (numYears > 0 && numMonths > 0) return `${yearStr}, ${monthStr}`;
+    if (numYears === 0 && numMonths > 0) return monthStr;
     if (numYears === 0 && numMonths === 0) {
-        const numDays = dfnsDifferenceInCalendarDays(end, start); // Use calendar days for < 1 month
+        const numDays = dfnsDifferenceInCalendarDays(end, start);
         if (numDays === 0) return 'Started Today';
-        return `${numDays + 1} Day${numDays > 0 ? 's' : ''}`; // Inclusive days
+        return `${numDays + 1} Day${numDays > 0 ? 's' : ''}`;
     }
-    // Handle exact year anniversaries
-    if (numYears > 0 && numMonths === 0) {
-        return yearStr;
-    }
-    return '-'; // Fallback
+    if (numYears > 0 && numMonths === 0) return yearStr;
+    return '-';
 };
 
 
@@ -280,7 +276,6 @@ export const differenceInMilliseconds = (laterDate, earlierDate) => {
 export const formatDuration = (milliseconds) => {
   if (milliseconds <= 0) return '0h 0m';
   const duration = intervalToDuration({ start: 0, end: milliseconds });
-  // return dfnsFormatDuration(duration, { format: ['hours', 'minutes'] });
   const hours = duration.hours || 0;
   const minutes = duration.minutes || 0;
   return `${hours}h ${minutes}m`;
@@ -295,11 +290,10 @@ export const getDaysInMonth = (date) => {
     return dfnsGetDaysInMonth(dateObj);
 };
 
-// *** ADD EXPLICIT EXPORT FOR differenceInYears ***
 export const differenceInYears = (dateLeft, dateRight) => {
     const left = fromFirestore(dateLeft);
     const right = fromFirestore(dateRight);
-    if (!left || !right) return 0; // Or handle error appropriately
+    if (!left || !right) return 0; 
     return dfnsDifferenceInYears(left, right);
 };
 
@@ -325,7 +319,5 @@ export const differenceInCalendarMonths = (dateLeft, dateRight) => {
   const d1 = fromFirestore(dateLeft);
   const d2 = fromFirestore(dateRight);
   if (!d1 || !d2) return 0;
-
-  // Calculate total months
   return (d1.getFullYear() - d2.getFullYear()) * 12 + (d1.getMonth() - d2.getMonth());
 };

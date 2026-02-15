@@ -24,6 +24,18 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange }) => (
             <label className="text-sm text-gray-400">Emergency Contact Phone</label>
             <input id="emergencyContactPhone" value={formData.emergencyContactPhone || ''} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white"/>
         </div>
+        <div className="md:col-span-2 mt-2 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
+            <label className="flex items-center space-x-3 cursor-pointer">
+                <input 
+                    id="isSsoRegistered" 
+                    type="checkbox" 
+                    checked={formData.isSsoRegistered} 
+                    onChange={handleInputChange} 
+                    className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" 
+                />
+                <span className="text-sm font-bold text-white">Enrolled in Social Security (SSO)</span>
+            </label>
+        </div>
         {/* --- END NEW FIELDS --- */}
     </div>
 );

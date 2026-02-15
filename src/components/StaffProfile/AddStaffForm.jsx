@@ -20,6 +20,7 @@ export default function AddStaffForm({ auth, onClose, departments }) {
     const [baseSalary, setBaseSalary] = useState('');
     const [hourlyRate, setHourlyRate] = useState('');
     const [standardDayHours, setStandardDayHours] = useState('8');
+    const [isSsoRegistered, setIsSsoRegistered] = useState(true);
 
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -46,16 +47,8 @@ export default function AddStaffForm({ auth, onClose, departments }) {
         try {
             // Prepare payload matching new structure
             const userData = {
-                email, 
-                password, 
-                firstName, 
-                lastName, 
-                nickname, 
-                position, 
-                department, 
-                startDate, 
-                payType,
-                // Send null for fields that don't apply
+                email, password, firstName, lastName, nickname, position, department, startDate, payType,
+                isSsoRegistered,
                 baseSalary: payType === 'Salary' ? parseInt(baseSalary, 10) : null,
                 standardDayHours: payType === 'Salary' ? parseInt(standardDayHours, 10) : null,
                 hourlyRate: payType === 'Hourly' ? parseInt(hourlyRate, 10) : null,
@@ -149,6 +142,22 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                     </div>
                  )}
             </div>
+            <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                <label className="flex items-center space-x-3 cursor-pointer">
+                    <input 
+                        type="checkbox" 
+                        checked={isSsoRegistered} 
+                        onChange={(e) => setIsSsoRegistered(e.target.checked)} 
+                        className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" 
+                    />
+                    <div>
+                        <span className="text-sm font-bold text-white">Enrolled in Social Security (SSO)</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Calculates the 5% SSO deduction & allowance in payroll.</p>
+                    </div>
+                </label>
+            </div>
+
+            <div className="border-t border-gray-700 pt-6"></div>
 
             <div className="border-t border-gray-700 pt-6">
                  <p className="text-sm text-gray-400 mb-4">Create Login Credentials:</p>
