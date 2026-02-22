@@ -42,10 +42,10 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                 const rawProfile = { id: profileSnap.id, ...profileSnap.data() };
                 const jobInfo = getStaffCurrentJob(rawProfile) || rawProfile;
                 const baseSalary = parseFloat(jobInfo.baseSalary) || 0;
-                const isBonusEligible = rawProfile.isAttendanceBonusEligible === true;
+                const isBonusEligible = rawProfile.isAttendanceBonusEligible !== false; // Defaults to true
 
                 // 2. Fetch Active Loans (for SideCards)
-                const loansQ = query(collection(db, 'loans'), where('staffId', '==', user.uid), where('status', '==', 'active'));
+                const loansQ = query(collection(db, 'loans'), where('staffId', '==', user.uid), where('isActive', '==', true));
                 const loansSnap = await getDocs(loansQ);
                 const loans = loansSnap.docs.map(d => ({id: d.id, ...d.data()}));
                 setActiveLoans(loans);
@@ -65,11 +65,12 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                 const startOfMonthStr = dateUtils.formatISODate(dateUtils.startOfMonth(now));
                 const endOfMonthStr = dateUtils.formatISODate(dateUtils.endOfMonth(now));
                 
+                // --- FIX 1: Query by 'date' instead of 'requestDate' ---
                 const advancesQ = query(
                     collection(db, 'salary_advances'), 
                     where('staffId', '==', user.uid), 
-                    where('requestDate', '>=', startOfMonthStr),
-                    where('requestDate', '<=', endOfMonthStr)
+                    where('date', '>=', startOfMonthStr),
+                    where('date', '<=', endOfMonthStr)
                 );
                 const advancesSnap = await getDocs(advancesQ);
                 const monthAdvances = advancesSnap.docs.map(d => ({id: d.id, ...d.data()}));
@@ -88,30 +89,44 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                 const baseSalaryEarned = (baseSalary / daysInMonth) * currentDay;
                 const otPay = (stats.totalOtMinutes || 0) * minuteRate * 1.5;
                 
-                // --- FIX: Calculate CORRECT Step Bonus ---
+                // Calculate Bonus
                 let targetBonusAmount = 0;
                 if (isBonusEligible) {
                     const currentStreak = rawProfile.bonusStreak || 0;
-                    const nextStreak = currentStreak + 1; // The streak they are fighting for THIS month
+                    const nextStreak = currentStreak + 1;
 
                     if (nextStreak === 1) targetBonusAmount = companyConfig.attendanceBonus?.month1 || 400;
                     else if (nextStreak === 2) targetBonusAmount = companyConfig.attendanceBonus?.month2 || 800;
                     else targetBonusAmount = companyConfig.attendanceBonus?.month3 || 1200;
                 }
                 
-                // If they qualified, add it to earnings. If not, 0.
-                // But we still pass 'targetBonusAmount' to the card so it can show "Lost: 800"
                 const actualBonusEarnings = (isBonusEligible && stats.didQualifyForBonus) ? targetBonusAmount : 0;
                 
+                const estimatedGross = baseSalaryEarned + otPay + actualBonusEarnings;
+
+                // --- FIX 2: Dynamic SSO Logic (Matches Backend) ---
+                let sso = 0;
+                let ssoAllowanceAmount = 0;
+                
+                if (rawProfile.isSsoRegistered !== false && estimatedGross > 0) {
+                    const ssoRate = (companyConfig.financialRules?.ssoRate || 5) / 100;
+                    const ssoMax = Number(companyConfig.financialRules?.ssoMaxContribution) || 875;
+                    sso = Math.min(Math.max(1650, estimatedGross) * ssoRate, ssoMax);
+                    ssoAllowanceAmount = sso;
+                }
+
+                // Deductions
                 const absenceDeduction = (stats.totalAbsencesCount || 0) * dailyRate;
                 const lateDeduction = (stats.totalLateMinutes || 0) * minuteRate;
-                const sso = Math.min(baseSalary * 0.05, 750);
-                const loanDeduction = loans.reduce((sum, loan) => sum + (parseFloat(loan.monthlyDeduction) || 0), 0);
+                
+                // --- FIX 3: Robust Loan Repayment Lookup ---
+                const loanDeduction = loans.reduce((sum, loan) => sum + (parseFloat(loan.monthlyRepayment) || parseFloat(loan.monthlyInstallment) || 0), 0);
+                
                 const advanceDeduction = monthAdvances
                     .filter(a => a.status === 'approved' || a.status === 'paid')
                     .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
 
-                const totalEarnings = baseSalaryEarned + otPay + actualBonusEarnings;
+                const totalEarnings = estimatedGross + ssoAllowanceAmount;
                 const totalDeductions = absenceDeduction + lateDeduction + sso + loanDeduction + advanceDeduction;
                 const netPay = totalEarnings - totalDeductions;
 
@@ -120,7 +135,7 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                     estimatedNetPay: netPay, 
                     baseSalaryEarned: baseSalaryEarned,
                     overtimePay: otPay,
-                    ssoAllowance: 0, 
+                    ssoAllowance: ssoAllowanceAmount, 
                     
                     contractDetails: {
                         payType: 'Monthly',
@@ -129,9 +144,7 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                     },
 
                     potentialBonus: {
-                        // Show the target amount (e.g., 400, 800, or 1200)
                         amount: targetBonusAmount,
-                        // True = Green (Win), False = Red (Lost)
                         onTrack: isBonusEligible && stats.didQualifyForBonus
                     },
 
@@ -143,6 +156,7 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                     },
 
                     monthAdvances: monthAdvances,
+                    activeLoans: loans, // --- FIX 4: Send the loans to the SideCards! ---
                     latestPayslip: latestPayslip,
                     stats: stats 
                 };

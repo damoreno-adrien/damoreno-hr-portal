@@ -60,7 +60,12 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                     <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white cursor-pointer">{item.displayName}</td>
                     <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
                     <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
-                    <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400 cursor-pointer">{formatCurrency(item.netPay)}</td>
+                    
+                    {/* --- NEW: Highlighting Negative Net Pay in Red --- */}
+                    <td onClick={() => onViewDetails(item)} className={`px-6 py-4 whitespace-nowrap text-sm font-bold cursor-pointer ${item.netPay < 0 ? 'text-red-500' : 'text-amber-400'}`}>
+                        {formatCurrency(item.netPay)}
+                        {item.netPay < 0 && <span className="ml-2 text-xs text-red-400 font-normal">(Negative Pay!)</span>}
+                    </td>
                 </tr>
             ));
         }

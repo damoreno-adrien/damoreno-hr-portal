@@ -192,13 +192,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         };
                     }
 
-                    // --- C. Deductions (FIXED: Added Absences) ---
+                    // --- C. Deductions ---
                     const dailyDeductionRate = salary / 30; // Rule of 30
                     
-                    // Cost of Sick Leave Overage
                     const sickLeaveCost = dailyDeductionRate * (stats.daysToDeduct || 0);
-                    
-                    // Cost of Unexcused Absences (The "0 THB" Fix)
                     const absenceCost = dailyDeductionRate * (stats.totalAbsencesCount || 0);
                     
                     autoDeductions = sickLeaveCost + absenceCost;
@@ -242,7 +239,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const totalEarnings = preSsoEarnings + ssoAllowance;
                 
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
-                const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + item.monthlyRepayment, 0);
+                
+                // --- NEW: Using Math.min to prevent overcharging on the final loan payment ---
+                const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + Math.min(item.monthlyRepayment, item.remainingBalance), 0);
+                
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
 
@@ -266,7 +266,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     deductions: { 
                         absences: autoDeductions, 
                         unpaidAbsences: [
-                            // Show Breakdown if there are any absences
                             ...(stats.totalAbsencesCount > 0 ? [{ date: `${stats.totalAbsencesCount} Unexcused Days`, hours: stats.totalAbsencesCount * (currentJob.standardDayHours || 8), amount: (basePay/30 * stats.totalAbsencesCount) }] : []),
                             ...(stats.daysToDeduct > 0 ? [{ date: `${stats.daysToDeduct} Sick Leave Overage`, hours: stats.daysToDeduct * (currentJob.standardDayHours || 8), amount: (basePay/30 * stats.daysToDeduct) }] : [])
                         ],
@@ -283,7 +282,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         } finally { setIsLoading(false); }
     };
     
-    // ... Rest is unchanged ...
     useEffect(() => {
         if (payrollData.length > 0) { setSelectedForPayroll(new Set(payrollData.map(p => p.id))); } 
         else { setSelectedForPayroll(new Set()); }
