@@ -24,15 +24,23 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
         if (!alert.attendanceDocId) return;
         const unsub = onSnapshot(doc(db, "attendance", alert.attendanceDocId), async (docSnap) => {
             if (!docSnap.exists()) return;
+            // NEW: Do NOT try to auto-resolve if the user just clicked the fix button
+            if (isFixing) return; 
+
             const data = docSnap.data();
             if (data.checkOutTime || data.status === 'completed') {
                 try {
                     await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'resolved' });
-                } catch (e) { console.error("Auto-resolve failed", e); }
+                } catch (e) { 
+                    // Make the error silent if it just means the document is already handled
+                    if (e.code !== 'not-found') {
+                         console.error("Auto-resolve failed", e); 
+                    }
+                }
             }
         });
         return () => unsub();
-    }, [alert.attendanceDocId, alert.id]);
+    }, [alert.attendanceDocId, alert.id, isFixing]); // NEW: Add isFixing to dependencies
 
     const handleAutoFix = async () => {
         setIsFixing(true); setError(null);

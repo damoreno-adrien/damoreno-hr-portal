@@ -133,8 +133,8 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                 manuallyEdited: true
             };
 
-            if (docId) await updateDoc(recordRef, payload);
-            else await setDoc(recordRef, payload, { merge: true });
+            // Automatically creates the document if missing, or updates if it exists!
+            await setDoc(recordRef, payload, { merge: true });
 
             onClose();
         } catch (error) {
