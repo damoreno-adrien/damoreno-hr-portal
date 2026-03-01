@@ -71,7 +71,7 @@ const StatusBadge = ({ status }) => {
 };
 
 
-export default function StaffManagementPage({ auth, db, staffList, departments, userRole }) {
+export default function StaffManagementPage({ auth, db, staffList, departments, userRole, companyConfig }) {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
@@ -349,7 +349,14 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
             {selectedStaff && (
                  <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
-                    <StaffProfileModal staff={selectedStaff} db={db} onClose={closeProfileModal} departments={departments} userRole={userRole} />
+                    <StaffProfileModal 
+                        staff={selectedStaff} 
+                        db={db} 
+                        companyConfig={companyConfig}
+                        onClose={closeProfileModal} 
+                        departments={departments} 
+                        userRole={userRole} 
+                    />
                 </Modal>
             )}
 

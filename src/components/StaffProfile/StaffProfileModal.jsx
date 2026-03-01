@@ -8,6 +8,7 @@ import { ProfileDetailsEdit } from './ProfileDetailsEdit';
 import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
+import OffboardingModal from '../ManageStaff/OffboardingModal.jsx'; // --- NEW: Import the modal ---
 import { Archive, UserCheck, Trash, Key } from 'lucide-react'; 
 import * as dateUtils from '../../utils/dateUtils.js';
 
@@ -44,7 +45,8 @@ const getInitialFormData = (staff) => {
     return { ...initialData, firstName, lastName, nickname: staff.nickname || '' };
 };
 
-export default function StaffProfileModal({ staff, db, onClose, departments, userRole }) {
+// --- NEW PROPS: Added companyConfig so we can pass it down to the offboarding modal ---
+export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole }) {
     const [activeTab, setActiveTab] = useState('details');
     const [formData, setFormData] = useState(getInitialFormData(staff));
     const [isEditing, setIsEditing] = useState(false);
@@ -52,7 +54,9 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const [error, setError] = useState('');
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
     const [isBonusEligible, setIsBonusEligible] = useState(staff.isAttendanceBonusEligible ?? true);
-
+    
+    // --- NEW: State for the Offboarding Modal ---
+    const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
 
     useEffect(() => {
         setFormData(getInitialFormData(staff));
@@ -122,7 +126,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         }
     };
 
-    // --- NEW: Handle Edit Job ---
     const handleEditJob = async (oldJob, updatedJob) => {
         if (!dateUtils.parseISODateString(updatedJob.startDate)) {
             alert("Invalid start date provided.");
@@ -132,8 +135,6 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            // To update an item in an array, we must remove the old one and add the new one
-            // We do this sequentially to ensure the removal happens before addition (though batching is also possible, this is safer for array fields)
             await updateDoc(staffDocRef, { jobHistory: arrayRemove(oldJob) });
             await updateDoc(staffDocRef, { jobHistory: arrayUnion(updatedJob) });
         } catch (err) {
@@ -180,38 +181,24 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
         }
     };
 
-    const handleArchiveStaff = async (newStatus) => {
+    // --- MODIFIED: Now only handles Reactivating staff. Archiving is handled by the Modal. ---
+    const handleReactivateStaff = async () => {
         setIsSaving(true);
         setError('');
         try {
-            const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            let updateData = {};
-            let authDisabled = false;
-            if (newStatus === 'inactive') {
-                const todayStr = dateUtils.formatISODate(new Date());
-                const endDate = window.prompt(`To archive ${displayName}, enter their last day (YYYY-MM-DD):`, todayStr);
-                if (!endDate || !dateUtils.parseISODateString(endDate)) {
-                    if (endDate !== null) { alert("Invalid date format. Please use YYYY-MM-DD."); }
-                    setIsSaving(false); return;
-                }
-                updateData = { status: 'inactive', endDate: endDate };
-                authDisabled = true;
-            } else {
-                 if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
-                    setIsSaving(false); return;
-                 }
-                 updateData = { status: 'active', endDate: null };
-                 authDisabled = false;
+            if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
+                setIsSaving(false); return;
             }
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await Promise.all([
-                updateDoc(staffDocRef, updateData),
-                setStaffAuthStatus({ staffId: staff.id, disabled: authDisabled })
+                updateDoc(staffDocRef, { status: 'active', endDate: null }),
+                setStaffAuthStatus({ staffId: staff.id, disabled: false })
             ]);
             onClose();
         } catch (err) {
-            alert(`Failed to update status: ${err.message}`);
-            setError(`Failed to update status: ${err.message}`);
-            console.error("Archive/Activate Error:", err);
+            alert(`Failed to activate staff: ${err.message}`);
+            setError(`Failed to activate staff: ${err.message}`);
+            console.error("Activate Error:", err);
         } finally {
             setIsSaving(false);
         }
@@ -312,7 +299,28 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
     const isActive = staff.status === 'active' || staff.status === undefined || staff.status === null;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 relative">
+            
+            {/* --- NEW: The Offboarding Modal --- */}
+            {isOffboardingModalOpen && (
+                <OffboardingModal 
+                    db={db} 
+                    staff={staff} 
+                    companyConfig={companyConfig} 
+                    onClose={() => setIsOffboardingModalOpen(false)} 
+                    onSuccess={async () => {
+                        setIsOffboardingModalOpen(false);
+                        // Make sure we still disable their login!
+                        try {
+                            await setStaffAuthStatus({ staffId: staff.id, disabled: true });
+                        } catch(e) { 
+                            console.error("Failed to disable auth login", e); 
+                        }
+                        onClose(); // Close the main profile modal
+                    }} 
+                />
+            )}
+
             <div className="border-b border-gray-700">
                 <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>
@@ -350,7 +358,7 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                         jobHistory={staff.jobHistory}
                         departments={departments}
                         onAddNewJob={handleAddNewJob}
-                        onEditJob={handleEditJob} // <--- Passed here
+                        onEditJob={handleEditJob}
                         onDeleteJob={handleDeleteJob}
                     />
                 </div>
@@ -426,9 +434,11 @@ export default function StaffProfileModal({ staff, db, onClose, departments, use
                          <h4 className="text-base font-semibold text-white">Staff Actions</h4>
                          <div>
                             {isActive ? (
-                                <button onClick={() => handleArchiveStaff('inactive')} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button>
+                                /* --- MODIFIED: Triggers the new modal --- */
+                                <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button>
                             ) : (
-                                <button onClick={() => handleArchiveStaff('active')} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button>
+                                /* --- UNCHANGED: Triggers the reactivate function --- */
+                                <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button>
                             )}
                          </div>
                          <div>

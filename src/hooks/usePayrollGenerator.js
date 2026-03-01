@@ -162,35 +162,52 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                                                dateUtils.getMonth(staffEndDate) === payPeriod.month;
                                                
                     if (isLeavingThisMonth) {
-                        const hireDate = staffStartDate;
                         const dailyRateCalendar = salary / daysInMonth;
-                        
-                        let annualLeaveEntitlement = 0;
-                        if (hireDate) {
-                            const yearsOfService = dateUtils.differenceInYears(staffEndDate, hireDate);
-                            if (yearsOfService >= 1) { annualLeaveEntitlement = companyConfig.annualLeaveDays; }
-                            else if (dateUtils.getYear(hireDate) === payPeriod.year) {
-                                const monthsWorkedThisYear = dateUtils.getMonth(staffEndDate) - dateUtils.getMonth(hireDate) + 1;
-                                annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorkedThisYear);
+                        let annualDaysToPay = 0;
+                        let holidayCreditsToPay = 0;
+
+                        if (staff.offboardingSettings) {
+                            // --- NEW SYSTEM (With explicit manager toggles and snapshot balances) ---
+                            if (staff.offboardingSettings.payoutAnnualLeave) {
+                                annualDaysToPay = staff.offboardingSettings.finalBalances?.annual || 0;
                             }
+                            if (staff.offboardingSettings.payoutPublicHolidays) {
+                                holidayCreditsToPay = staff.offboardingSettings.finalBalances?.ph || 0;
+                            }
+                        } else {
+                            // --- LEGACY SYSTEM (Fallback for already archived staff like Ploy) ---
+                            const hireDate = staffStartDate;
+                            let annualLeaveEntitlement = 0;
+                            
+                            if (hireDate) {
+                                const yearsOfService = dateUtils.differenceInYears(staffEndDate, hireDate);
+                                if (yearsOfService >= 1) { 
+                                    annualLeaveEntitlement = companyConfig.annualLeaveDays; 
+                                } else if (dateUtils.getYear(hireDate) === payPeriod.year) {
+                                    const monthsWorkedThisYear = dateUtils.getMonth(staffEndDate) - dateUtils.getMonth(hireDate) + 1;
+                                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorkedThisYear);
+                                }
+                            }
+                            
+                            const pastHolidays = (companyConfig.publicHolidays || []).filter(h => {
+                                 const holidayDate = dateUtils.parseISODateString(h.date);
+                                 return holidayDate && holidayDate <= staffEndDate && dateUtils.getYear(holidayDate) === payPeriod.year;
+                            });
+                            
+                            const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap || 15);
+                            
+                            annualDaysToPay = Math.max(0, annualLeaveEntitlement);
+                            holidayCreditsToPay = Math.max(0, earnedCredits);
                         }
-                        const pastHolidays = companyConfig.publicHolidays.filter(h => {
-                             const holidayDate = dateUtils.parseISODateString(h.date);
-                             return holidayDate && holidayDate <= staffEndDate && dateUtils.getYear(holidayDate) === payPeriod.year;
-                        });
-                        const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-                        const usedAnnual = 0, usedPublicHoliday = 0; 
-                        
-                        const finalAnnualBalance = Math.max(0, annualLeaveEntitlement - usedAnnual);
-                        const finalHolidayCredit = Math.max(0, earnedCredits - usedPublicHoliday);
                         
                         leavePayout = { 
-                            annualDays: finalAnnualBalance, 
-                            holidayCredits: finalHolidayCredit, 
+                            annualDays: annualDaysToPay, 
+                            holidayCredits: holidayCreditsToPay, 
                             dailyRate: dailyRateCalendar, 
-                            total: (finalAnnualBalance + finalHolidayCredit) * dailyRateCalendar 
+                            total: (annualDaysToPay + holidayCreditsToPay) * dailyRateCalendar 
                         };
                     }
+                   
 
                     // --- C. Deductions ---
                     const dailyDeductionRate = salary / 30; // Rule of 30
