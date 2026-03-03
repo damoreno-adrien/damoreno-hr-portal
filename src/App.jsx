@@ -7,6 +7,7 @@ import useAuth from './hooks/useAuth';
 
 import useCompanyConfig from './hooks/useCompanyConfig';
 import useStaffList from './hooks/useStaffList';
+import { calculateStaffLeaveBalances } from './utils/leaveCalculator';
 
 import StaffManagementPage from './pages/StaffManagementPage';
 import PlanningPage from './pages/PlanningPage';
@@ -63,7 +64,6 @@ export default function App() {
         }
     }, [db, user, userRole]);
 
-
     useEffect(() => {
         if (!db) return;
         if (userRole === 'manager') {
@@ -92,72 +92,28 @@ export default function App() {
         }
     }, [userRole, db, user]);
 
-    // --- LEAVE BALANCE CALCULATION ---
+    // --- CLEANED UP: Single Source of Truth for Leave Balances ---
     useEffect(() => {
         if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
-            const currentYear = new Date().getFullYear();
             const q = query(
                 collection(db, 'leave_requests'), 
                 where('staffId', '==', user.uid), 
-                where('status', 'in', ['approved', 'pending']), 
-                where('startDate', '>=', `${currentYear}-01-01`)
+                where('status', 'in', ['approved', 'pending'])
             );
             
             const unsubscribe = onSnapshot(q, (snapshot) => {
-                const today = new Date();
+                const requests = snapshot.docs.map(doc => doc.data());
                 
-                // --- FIX: Robust Date Parsing for Start Date ---
-                let hireDate = new Date();
-                if (staffProfile.startDate) {
-                    if (staffProfile.startDate.toDate) {
-                        hireDate = staffProfile.startDate.toDate(); // Firestore Timestamp
-                    } else if (typeof staffProfile.startDate === 'string') {
-                        // Handle "DD/MM/YYYY" format explicitly
-                        if (staffProfile.startDate.includes('/')) {
-                            const parts = staffProfile.startDate.split('/');
-                            // Assume DD/MM/YYYY
-                            if (parts.length === 3) hireDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-                            else hireDate = new Date(staffProfile.startDate);
-                        } else {
-                            hireDate = new Date(staffProfile.startDate); // ISO String
-                        }
-                    }
+                // Use the master calculator utility
+                const balances = calculateStaffLeaveBalances(staffProfile, requests, companyConfig);
+                
+                if (balances) {
+                    setLeaveBalances({ 
+                        annual: balances.annual.remaining, 
+                        publicHoliday: balances.ph.remaining,
+                        personal: balances.personal.remaining
+                    });
                 }
-                // -----------------------------------------------
-
-                const yearsOfService = (today - hireDate) / (1000 * 60 * 60 * 24 * 365);
-                
-                // 1. Annual Leave
-                let annualLeaveEntitlement = 0;
-                if (yearsOfService >= 1) { 
-                    annualLeaveEntitlement = companyConfig.annualLeaveDays; 
-                } else if (hireDate.getFullYear() === currentYear) { 
-                    // Pro-rate for first year
-                    const monthsWorked = 12 - hireDate.getMonth(); 
-                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorked); 
-                }
-                
-                // 2. Public Holiday Credits
-                const pastHolidays = companyConfig.publicHolidays.filter(h => new Date(h.date) < today && new Date(h.date).getFullYear() === currentYear);
-                const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap);
-                
-                // 3. Personal Leave
-                const personalLeaveEntitlement = companyConfig.paidPersonalDays || 0;
-
-                let usedAnnual = 0, usedPublicHoliday = 0, usedPersonal = 0;
-                
-                snapshot.docs.forEach(doc => {
-                    const leave = doc.data();
-                    if (leave.leaveType === 'Annual Leave') usedAnnual += leave.totalDays;
-                    if (leave.leaveType === 'Public Holiday (In Lieu)') usedPublicHoliday += leave.totalDays;
-                    if (leave.leaveType === 'Personal Leave') usedPersonal += leave.totalDays;
-                });
-
-                setLeaveBalances({ 
-                    annual: Math.max(0, annualLeaveEntitlement - usedAnnual), 
-                    publicHoliday: Math.max(0, earnedCredits - usedPublicHoliday),
-                    personal: Math.max(0, personalLeaveEntitlement - usedPersonal)
-                });
             });
             return () => unsubscribe();
         } else { 

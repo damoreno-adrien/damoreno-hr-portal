@@ -50,7 +50,6 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
         return total;
     };
 
-    // --- NEW: Grouping and Sorting Logic ---
     const groupedStaff = useMemo(() => {
         const groups = {};
         
@@ -58,18 +57,22 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
             const dept = getStaffDepartment ? getStaffDepartment(staff) : 'Unassigned';
             if (!groups[dept]) groups[dept] = [];
             
-            const requests = allRequests.filter(r => r.staffId === staff.id && r.status === 'approved');
+            // --- FIX: Filter out Cash Outs so they don't appear as physical absences on the timeline ---
+            const requests = allRequests.filter(r => 
+                r.staffId === staff.id && 
+                r.status === 'approved' && 
+                r.leaveType !== 'Cash Out Holiday Credits'
+            );
+            
             groups[dept].push({ staff, requests, monthLeaveTotal: calculateMonthLeave(requests) });
         });
 
-        // Sort Departments
         const sortedDepts = Object.keys(groups).sort((a, b) => {
             if (a === 'Unassigned') return 1;
             if (b === 'Unassigned') return -1;
             return a.localeCompare(b);
         });
 
-        // Sort Staff within Departments alphabetically
         sortedDepts.forEach(dept => {
             groups[dept].sort((a, b) => {
                 const nameA = (a.staff.nickname || a.staff.firstName || '').toLowerCase();
@@ -104,8 +107,6 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
 
         if (scheds.length > 0) {
             const sched = scheds[0];
-            
-            // Stronger Day Off Detection
             if (sched.type === 'day_off' || sched.isDayOff || sched.status === 'day_off' || sched.shiftType === 'day_off' || !sched.startTime) {
                 return { type: 'day_off' };
             }
@@ -177,14 +178,11 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
                         ) : (
                             groupedStaff.sortedDepts.map(dept => (
                                 <React.Fragment key={dept}>
-                                    {/* --- DEPARTMENT HEADER ROW --- */}
                                     <tr className="bg-gray-900/40">
                                         <td colSpan={daysInMonth.length + 2} className="px-5 py-2 text-[11px] font-black uppercase tracking-[0.2em] border-y border-gray-700/50 text-indigo-400 sticky left-0 z-10 bg-gray-900/90 backdrop-blur">
                                             {dept}
                                         </td>
                                     </tr>
-                                    
-                                    {/* --- STAFF ROWS --- */}
                                     {groupedStaff.groups[dept].map(({ staff, requests, monthLeaveTotal }) => (
                                         <tr key={staff.id} className="border-b border-gray-700 hover:bg-gray-750 transition-colors">
                                             <td 

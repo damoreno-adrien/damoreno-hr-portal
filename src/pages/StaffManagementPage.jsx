@@ -9,7 +9,9 @@ import {
     fromFirestore, 
     differenceInCalendarMonths, 
     formatISODate, 
-    formatDisplayDate 
+    formatDisplayDate,
+    isStaffActiveOnDate, // <-- NEW
+    getDynamicStaffStatus // <-- NEW
 } from '../utils/dateUtils';
 import { app } from "../../firebase.js";
 import jsPDF from 'jspdf';
@@ -48,24 +50,11 @@ const getSeniority = (startDateInput) => {
 };
 
 // --- Helper: Status Badge ---
-const StatusBadge = ({ status }) => {
-    let statusText = 'Active';
-    let statusClasses = "bg-green-500/20 text-green-300";
-
-    if (status === 'inactive') {
-        statusText = 'Inactive';
-        statusClasses = "bg-red-500/20 text-red-300";
-    } else if (status === null || status === undefined) {
-        statusText = 'Active';
-        statusClasses = "bg-green-500/20 text-green-300";
-    } else if (status !== 'active') {
-         statusText = status;
-         statusClasses = "bg-gray-500/20 text-gray-300";
-    }
-
+const StatusBadge = ({ staff }) => {
+    const status = getDynamicStaffStatus(staff);
     return (
-        <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full capitalize ${statusClasses}`}>
-            {statusText}
+        <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${status.color}`}>
+            {status.label}
         </span>
     );
 };
@@ -124,10 +113,15 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         const normalizedQuery = searchQuery.toLowerCase().trim();
 
         const filteredList = staffList.filter(staff => {
-            const isArchived = staff.status === 'inactive';
-            if (!showArchived && isArchived) {
+            // --- NEW: Time-Aware Archive Check ---
+            // A staff member is only hidden if their end date has actually passed
+            const isHistoricallyArchived = !isStaffActiveOnDate(staff, new Date());
+            
+            if (!showArchived && isHistoricallyArchived) {
                 return false;
             }
+            
+            // --- Existing Search Logic ---
             if (normalizedQuery) {
                 const name = getDisplayName(staff).toLowerCase();
                 const nickname = (staff.nickname || '').toLowerCase();
@@ -495,7 +489,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                             </td>
 
                                             <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                <StatusBadge status={staff.status} />
+                                                <StatusBadge staff={staff} />
                                             </td>
                                         </tr>
                                     );

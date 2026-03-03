@@ -1,13 +1,13 @@
 /* src/pages/DashboardPage.jsx */
 
 import React, { useState, useEffect } from 'react';
-import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore'; 
-import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, Calendar, Slash, Flame } from 'lucide-react'; 
+import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
+import { Clock, Moon, AlertTriangle, CheckCircle, Award, LogIn, Calendar, Slash, Flame } from 'lucide-react';
 import { useMonthlyStats } from '../hooks/useMonthlyStats';
 import { DashboardCard } from '../components/Dashboard/DashboardCard';
 import { StatItem } from '../components/Dashboard/StatItem';
 import { DailySummary } from '../components/Dashboard/DailySummary';
-import { formatCustom, formatISODate, addDays, fromFirestore } from '../utils/dateUtils';
+import { formatCustom, formatISODate, addDays, fromFirestore, isStaffActiveOnDate } from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 
@@ -21,14 +21,18 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
     const [tomorrowsSchedule, setTomorrowsSchedule] = useState(null);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [upcomingLeave, setUpcomingLeave] = useState(null);
-    
+
     // Safety check for stats to prevent app crash or NaN display
     const rawStats = useMonthlyStats(db, user, companyConfig);
     const monthlyStats = rawStats.monthlyStats || { totalHoursWorked: "0h 0m", workedDays: 0, absences: 0, totalTimeLate: "0h 0m" };
     const bonusStatus = rawStats.bonusStatus || { notEligible: true };
 
     const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
-    const colleaguesWithBirthday = staffList.filter(s => s.id !== user.uid && checkBirthday(s.birthdate));
+    const colleaguesWithBirthday = staffList.filter(s =>
+        s.id !== user.uid &&
+        checkBirthday(s.birthdate) &&
+        isStaffActiveOnDate(s, new Date())
+    );
 
     function checkBirthday(birthdate) {
         if (!birthdate) return false;
@@ -47,7 +51,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
 
     useEffect(() => {
         if (!db || !user) return;
-        const docRef = getDocRef(); 
+        const docRef = getDocRef();
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
@@ -62,7 +66,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         });
         return () => unsubscribe();
     }, [db, user]);
-    
+
     useEffect(() => {
         if (!db || !user) return;
         const todayStr = formatISODate(new Date());
@@ -87,21 +91,21 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                     foundTomorrow = true;
                 }
             });
-            if (!foundToday) setTodaysSchedule(undefined); 
+            if (!foundToday) setTodaysSchedule(undefined);
             if (!foundTomorrow) setTomorrowsSchedule(undefined);
-        }, (error) => { 
+        }, (error) => {
             console.error("Error fetching schedules:", error);
         });
-        return () => unsubscribe(); 
-    }, [db, user]); 
+        return () => unsubscribe();
+    }, [db, user]);
 
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = formatISODate(new Date()); 
+        const todayStr = formatISODate(new Date());
         const q = query(
-            collection(db, 'leave_requests'), 
-            where('staffId', '==', user.uid), 
-            where('status', '==', 'approved'), 
+            collection(db, 'leave_requests'),
+            where('staffId', '==', user.uid),
+            where('status', '==', 'approved'),
             where('startDate', '>=', todayStr),
             orderBy('startDate', 'asc'),
             limit(1)
@@ -118,7 +122,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             }
         });
     }, [db, user]);
-    
+
     useEffect(() => {
         if (!companyConfig?.geofence) {
             setLocationError("Geofence settings are not configured.");
@@ -160,29 +164,29 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     };
-    
+
     const handleCheckIn = async () => {
         const localDateString = formatISODate(new Date());
-        await setDoc(getDocRef(), { 
-            staffId: user.uid, 
-            staffName: user.displayName || user.email, 
-            date: localDateString, 
-            checkInTime: serverTimestamp(), 
+        await setDoc(getDocRef(), {
+            staffId: user.uid,
+            staffName: user.displayName || user.email,
+            date: localDateString,
+            checkInTime: serverTimestamp(),
             checkOutTime: null,
             // Automatically set includesBreak from schedule preference
-            includesBreak: todaysSchedule?.includesBreak !== false 
+            includesBreak: todaysSchedule?.includesBreak !== false
         });
     };
 
     const handleToggleBreak = async () => await updateDoc(getDocRef(), status === 'on-break' ? { breakEnd: serverTimestamp() } : { breakStart: serverTimestamp() });
-    
+
     const handleCheckOut = async () => {
         const now = new Date();
-        let proceedCheckout = true; 
+        let proceedCheckout = true;
         if (todaysSchedule && todaysSchedule.endTime) {
             try {
                 const [endHours, endMinutes] = todaysSchedule.endTime.split(':');
-                const scheduledEndTime = new Date(now); 
+                const scheduledEndTime = new Date(now);
                 scheduledEndTime.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10), 0, 0);
                 if (now < scheduledEndTime) {
                     proceedCheckout = window.confirm("Checking out early?");
@@ -190,23 +194,23 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
             } catch (e) { console.error("Error parsing time", e); }
         }
         if (proceedCheckout) await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
-     };
+    };
 
     // --- FIX: Dynamic Buttons based on Shift Type ---
     const renderButtons = () => {
         if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">On Leave. Clock disabled.</p>;
         const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
-        
+
         // Detect Continuous Shift (No Break)
         const isContinuousShift = todaysSchedule && todaysSchedule.includesBreak === false;
 
         switch (status) {
-            case 'checked-out': 
+            case 'checked-out':
                 return <button onClick={handleCheckIn} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-green-600 hover:bg-green-700`}>Check-In</button>;
-            
+
             case 'checked-in':
                 if (todaysAttendance?.breakEnd) return <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-red-600 hover:bg-red-700`}>Check-Out</button>;
-                
+
                 // If Continuous Shift, HIDE Start Break button
                 if (isContinuousShift) {
                     return (
@@ -268,7 +272,7 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
         <div>
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday! 🎂</div>}
             {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p>🎈 It's {colleaguesWithBirthday.map(getDisplayName).join(', ')}'s Birthday!</p></div>}
-            
+
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
@@ -286,17 +290,17 @@ export default function DashboardPage({ db, user, companyConfig, leaveBalances, 
                 </div>
                 <div className="space-y-8">
                     <DashboardCard title="Bonus Status">
-                         <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>{bonusContent}</div>
+                        <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>{bonusContent}</div>
                     </DashboardCard>
                     <UpcomingShiftsCard todaysSchedule={todaysSchedule} tomorrowsSchedule={tomorrowsSchedule} />
                     <QuickActionsCard setCurrentPage={setCurrentPage} />
                     <DashboardCard title="This Month's Summary">
                         <div className="space-y-4">
-                           <StatItem icon={Clock} label="Total Hours Worked" value={sanitizeTime(monthlyStats.totalHoursWorked)} colorClass="blue" caption={`Target: ${sanitizeTime(monthlyStats.totalHoursScheduled)}`} />
-                           <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays || 0} colorClass="green" />
-                           <StatItem icon={Moon} label="Absences" value={monthlyStats.absences || 0} colorClass="red" />
-                           {/* --- FIX: Safely display Late Time --- */}
-                           <StatItem icon={AlertTriangle} label="Total Time Late" value={sanitizeTime(monthlyStats.totalTimeLate)} colorClass="yellow" />
+                            <StatItem icon={Clock} label="Total Hours Worked" value={sanitizeTime(monthlyStats.totalHoursWorked)} colorClass="blue" caption={`Target: ${sanitizeTime(monthlyStats.totalHoursScheduled)}`} />
+                            <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays || 0} colorClass="green" />
+                            <StatItem icon={Moon} label="Absences" value={monthlyStats.absences || 0} colorClass="red" />
+                            {/* --- FIX: Safely display Late Time --- */}
+                            <StatItem icon={AlertTriangle} label="Total Time Late" value={sanitizeTime(monthlyStats.totalTimeLate)} colorClass="yellow" />
                         </div>
                     </DashboardCard>
                     <DashboardCard title="Leave Balance">

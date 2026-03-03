@@ -77,7 +77,10 @@ export default function TeamSchedulePage({ db, user }) {
 
         const departmentStaff = staffList.filter(staff => {
             const currentJob = getStaffCurrentJob(staff);
-            const isActive = staff.status === undefined || staff.status === null || staff.status === 'active';
+            // --- NEW: Time-Aware Archive Check ---
+            // Checks if they are active on the start date of the currently viewed week
+            const isActive = dateUtils.isStaffActiveOnDate(staff, startOfWeek);
+            
             return currentJob?.department === myDepartment && isActive;
         });
 

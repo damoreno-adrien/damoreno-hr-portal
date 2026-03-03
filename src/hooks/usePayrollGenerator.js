@@ -20,22 +20,17 @@ const getCurrentJob = (staff) => {
         return dateA - dateB;
     })[0];
 
-    // --- FIX 1: Robust PayType Normalization (Handle 'salary', 'Monthly', etc.) ---
     let type = latestJob.payType || 'Salary';
     const lowerType = type.toLowerCase().trim();
-    if (lowerType === 'monthly' || lowerType === 'salary') {
-        type = 'Salary';
-    }
+    if (lowerType === 'monthly' || lowerType === 'salary') type = 'Salary';
 
     return {
-        ...latestJob,
-        payType: type,
+        ...latestJob, payType: type,
         baseSalary: latestJob.baseSalary ?? (type === 'Salary' ? latestJob.rate : 0),
         hourlyRate: latestJob.hourlyRate ?? (type === 'Hourly' ? latestJob.rate : 0),
         standardDayHours: latestJob.standardDayHours || 8
     };
 };
-
 
 export default function usePayrollGenerator(db, staffList, companyConfig, payPeriod) {
     const [payrollData, setPayrollData] = useState([]);
@@ -50,13 +45,9 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         const currentYear = dateUtils.getYear(now);
         const currentMonth = dateUtils.getMonth(now);
         const payPeriodDate = dateUtils.parseISODateString(`${payPeriod.year}-${String(payPeriod.month).padStart(2, '0')}-01`);
+        
         if (payPeriod.year > currentYear || (payPeriod.year === currentYear && payPeriod.month > currentMonth)) {
             setError("Cannot generate payroll for a future period.");
-            setPayrollData([]); setIsMonthFullyFinalized(false); return;
-        }
-        const earliestAllowedDate = dateUtils.parseISODateString('2025-10-01');
-        if (!payPeriodDate || payPeriodDate < earliestAllowedDate) {
-            setError(`Cannot generate payroll for periods before October 2025.`);
             setPayrollData([]); setIsMonthFullyFinalized(false); return;
         }
         if (!companyConfig) { setError("Company settings are not loaded yet."); return; }
@@ -65,7 +56,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         setIsLoading(true); setError(''); setIsMonthFullyFinalized(false);
 
         try {
-            // --- DATE BOUNDARIES ---
             const startOfMonth = dateUtils.startOfMonth(payPeriodDate);
             const endOfMonth = dateUtils.endOfMonth(payPeriodDate);
             const startDateStr = dateUtils.formatISODate(startOfMonth);
@@ -75,13 +65,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
 
-            // --- FILTER STAFF ---
             const staffToProcess = staffList.filter(staff => {
                 const isAlreadyFinalized = finalizedStaffIds.has(staff.id);
                 const staffStartDate = dateUtils.fromFirestore(staff.startDate);
                 const staffEndDate = dateUtils.fromFirestore(staff.endDate);
                 if (!staffStartDate) return false;
-                
                 const isActiveInPeriod = staffStartDate <= endOfMonth && (!staffEndDate || staffEndDate >= startOfMonth);
                 return !isAlreadyFinalized && isActiveInPeriod;
             });
@@ -101,12 +89,16 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
             const staffWithJobs = staffToProcess.map(staff => ({ ...staff, currentJob: getCurrentJob(staff) }));
 
-            // --- 1. FETCH DATA ---
-            const [advancesSnap, loansSnap, adjustmentsSnap, approvedOtSnap, allStaffStats] = await Promise.all([
+            const [advancesSnap, loansSnap, adjustmentsSnap, approvedOtSnap, attendanceSnap, cashOutsSnap, allStaffStats] = await Promise.all([
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month), where("status", "==", "approved"))),
-                getDocs(query(collection(db, "loans"), where("isActive", "==", true))),
+                
+                // --- FIX 1: Removed strict isActive boolean query. Fetch all loans and filter safely in memory ---
+                getDocs(collection(db, "loans")), 
+                
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr), where("otStatus", "==", "approved"))),
+                getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr))),
+                getDocs(query(collection(db, "leave_requests"), where("leaveType", "==", "Cash Out Holiday Credits"), where("status", "==", "approved"), where("startDate", ">=", startDateStr), where("startDate", "<=", endDateStr))),
                 Promise.all(staffWithJobs.map(staff => calculateMonthlyStats(db, staff, payPeriod, companyConfig, staff.currentJob).then(stats => ({ staffId: staff.id, ...stats }))))
             ]);
 
@@ -114,29 +106,25 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const loansData = loansSnap.docs.map(doc => doc.data());
             const adjustmentsData = adjustmentsSnap.docs.map(doc => doc.data());
             const approvedOtData = approvedOtSnap.docs.map(doc => doc.data());
+            const attendanceData = attendanceSnap.docs.map(doc => doc.data());
+            const cashOutsData = cashOutsSnap.docs.map(doc => doc.data());
             const statsMap = new Map(allStaffStats.map(res => [res.staffId, res]));
             const overtimeRateMultiplier = companyConfig.overtimeRate || 1.5;
 
-            // --- 2. CALCULATE PAYROLL ---
             const data = staffWithJobs.map(staff => {
                 const currentJob = staff.currentJob;
                 const stats = statsMap.get(staff.id) || { totalAbsencesCount: 0, daysToDeduct: 0, totalActualMillis: 0 };
                 const displayName = `${staff.nickname || staff.firstName} (${currentJob.department || 'N/A'})`;
 
-                let basePay = 0;
-                let autoDeductions = 0;
-                let hourlyRateForOT = 0; 
-                let leavePayout = null;
+                let basePay = 0; let autoDeductions = 0; let hourlyRateForOT = 0; let leavePayout = null;
 
                 const staffStartDate = dateUtils.fromFirestore(staff.startDate);
                 const staffEndDate = dateUtils.fromFirestore(staff.endDate);
 
-                // === 3. SALARY vs HOURLY LOGIC ===
                 if (currentJob.payType === 'Salary') {
                     const salary = currentJob.baseSalary || 0;
                     const standardHours = currentJob.standardDayHours || 8;
 
-                    // --- A. Pro-Rata Calculation ---
                     let effectiveStart = startOfMonth;
                     if (staffStartDate && staffStartDate > startOfMonth) effectiveStart = staffStartDate;
 
@@ -145,140 +133,124 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                     const isFullMonth = effectiveStart.getTime() === startOfMonth.getTime() && effectiveEnd.getTime() === endOfMonth.getTime();
 
-                    if (isFullMonth) {
-                        basePay = salary;
-                    } else {
-                        const daysActive = dateUtils.differenceInCalendarDays(
-                            dateUtils.formatISODate(effectiveEnd), 
-                            dateUtils.formatISODate(effectiveStart)
-                        );
+                    if (isFullMonth) { basePay = salary; } 
+                    else {
+                        const daysActive = dateUtils.differenceInCalendarDays(dateUtils.formatISODate(effectiveEnd), dateUtils.formatISODate(effectiveStart));
                         const dailyRateCalendar = salary / daysInMonth; 
                         basePay = dailyRateCalendar * daysActive;
                     }
 
-                    // --- B. Leave Payout ---
-                    const isLeavingThisMonth = staffEndDate && 
-                                               dateUtils.getYear(staffEndDate) === payPeriod.year && 
-                                               dateUtils.getMonth(staffEndDate) === payPeriod.month;
+                    const isLeavingThisMonth = staffEndDate && dateUtils.getYear(staffEndDate) === payPeriod.year && dateUtils.getMonth(staffEndDate) === payPeriod.month;
                                                
                     if (isLeavingThisMonth) {
                         const dailyRateCalendar = salary / daysInMonth;
-                        let annualDaysToPay = 0;
-                        let holidayCreditsToPay = 0;
+                        let annualDaysToPay = 0; let holidayCreditsToPay = 0;
 
                         if (staff.offboardingSettings) {
-                            // --- NEW SYSTEM (With explicit manager toggles and snapshot balances) ---
-                            if (staff.offboardingSettings.payoutAnnualLeave) {
-                                annualDaysToPay = staff.offboardingSettings.finalBalances?.annual || 0;
-                            }
-                            if (staff.offboardingSettings.payoutPublicHolidays) {
-                                holidayCreditsToPay = staff.offboardingSettings.finalBalances?.ph || 0;
-                            }
-                        } else {
-                            // --- LEGACY SYSTEM (Fallback for already archived staff like Ploy) ---
-                            const hireDate = staffStartDate;
-                            let annualLeaveEntitlement = 0;
-                            
-                            if (hireDate) {
-                                const yearsOfService = dateUtils.differenceInYears(staffEndDate, hireDate);
-                                if (yearsOfService >= 1) { 
-                                    annualLeaveEntitlement = companyConfig.annualLeaveDays; 
-                                } else if (dateUtils.getYear(hireDate) === payPeriod.year) {
-                                    const monthsWorkedThisYear = dateUtils.getMonth(staffEndDate) - dateUtils.getMonth(hireDate) + 1;
-                                    annualLeaveEntitlement = Math.floor((companyConfig.annualLeaveDays / 12) * monthsWorkedThisYear);
-                                }
-                            }
-                            
-                            const pastHolidays = (companyConfig.publicHolidays || []).filter(h => {
-                                 const holidayDate = dateUtils.parseISODateString(h.date);
-                                 return holidayDate && holidayDate <= staffEndDate && dateUtils.getYear(holidayDate) === payPeriod.year;
-                            });
-                            
-                            const earnedCredits = Math.min(pastHolidays.length, companyConfig.publicHolidayCreditCap || 15);
-                            
-                            annualDaysToPay = Math.max(0, annualLeaveEntitlement);
-                            holidayCreditsToPay = Math.max(0, earnedCredits);
+                            if (staff.offboardingSettings.payoutAnnualLeave) annualDaysToPay = staff.offboardingSettings.finalBalances?.annual || 0;
+                            if (staff.offboardingSettings.payoutPublicHolidays) holidayCreditsToPay = staff.offboardingSettings.finalBalances?.ph || 0;
                         }
                         
-                        leavePayout = { 
-                            annualDays: annualDaysToPay, 
-                            holidayCredits: holidayCreditsToPay, 
-                            dailyRate: dailyRateCalendar, 
-                            total: (annualDaysToPay + holidayCreditsToPay) * dailyRateCalendar 
-                        };
+                        leavePayout = { annualDays: annualDaysToPay, holidayCredits: holidayCreditsToPay, dailyRate: dailyRateCalendar, total: (annualDaysToPay + holidayCreditsToPay) * dailyRateCalendar };
                     }
-                   
 
-                    // --- C. Deductions ---
-                    const dailyDeductionRate = salary / 30; // Rule of 30
-                    
-                    const sickLeaveCost = dailyDeductionRate * (stats.daysToDeduct || 0);
-                    const absenceCost = dailyDeductionRate * (stats.totalAbsencesCount || 0);
-                    
-                    autoDeductions = sickLeaveCost + absenceCost;
-
-                    // --- D. OT Rate (Rule of 30) ---
+                    const dailyDeductionRate = salary / 30;
+                    autoDeductions = (dailyDeductionRate * (stats.daysToDeduct || 0)) + (dailyDeductionRate * (stats.totalAbsencesCount || 0));
                     hourlyRateForOT = dailyDeductionRate / standardHours;
 
                 } else {
-                    // --- HOURLY STAFF ---
                     const rate = currentJob.hourlyRate || 0;
-                    const totalHoursWorked = (stats.totalActualMillis / (1000 * 60 * 60));
-                    basePay = totalHoursWorked * rate;
-                    autoDeductions = 0;
-                    hourlyRateForOT = rate; 
+                    basePay = (stats.totalActualMillis / (1000 * 60 * 60)) * rate;
+                    autoDeductions = 0; hourlyRateForOT = rate; 
                 }
 
-                // --- 4. ADD OVERTIME ---
                 const staffApprovedOT = approvedOtData.filter(ot => ot.staffId === staff.id);
                 const totalOtMinutes = staffApprovedOT.reduce((sum, ot) => sum + (ot.otApprovedMinutes || 0), 0);
                 const overtimePay = (totalOtMinutes / 60) * hourlyRateForOT * overtimeRateMultiplier;
 
-                // --- 5. FINAL TOTALS ---
+                // Holiday Bonus & Cash Outs
+                let holidayPayBonus = 0; let cashOutPay = 0;
+                const staffProfileHolidayPolicy = staff.holidayPolicy || 'in_lieu';
+                const dailyDeductionRate = currentJob.payType === 'Salary' ? (currentJob.baseSalary || 0) / 30 : (currentJob.hourlyRate || 0) * (currentJob.standardDayHours || 8);
+
+                // Auto-Pay for worked holidays
+                if (staffProfileHolidayPolicy === 'paid') {
+                    const periodHolidays = (companyConfig.publicHolidays || []).filter(h => {
+                         const hDate = dateUtils.parseISODateString(h.date);
+                         return hDate && hDate >= startOfMonth && hDate <= endOfMonth;
+                    }).map(h => h.date);
+
+                    const staffAttendance = attendanceData.filter(a => a.staffId === staff.id);
+                    const holidaysWorked = periodHolidays.filter(hDate => staffAttendance.some(a => a.date === hDate)).length;
+
+                    if (holidaysWorked > 0) {
+                        const multiplier = companyConfig.holidayPayMultiplier ?? 1.0;
+                        holidayPayBonus = holidaysWorked * dailyDeductionRate * multiplier;
+                    }
+                }
+
+                // Process requested Cash Outs
+                const staffCashOuts = cashOutsData.filter(c => c.staffId === staff.id);
+                const cashOutCredits = staffCashOuts.reduce((sum, c) => sum + (c.totalDays || 0), 0);
+
+                if (cashOutCredits > 0) {
+                    cashOutPay = cashOutCredits * dailyDeductionRate;
+                }
+
+                // Compile Other Earnings array cleanly
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
-                const otherEarnings = staffAdjustments.filter(a => a.type === 'Earning').reduce((sum, i) => sum + i.amount, 0);
+                
+                const safeOtherEarningsArray = staffAdjustments
+                    .filter(a => a.type === 'Earning')
+                    .map(a => ({ description: a.description, amount: a.amount }));
+                
+                if (cashOutPay > 0) {
+                    safeOtherEarningsArray.push({ description: `Holiday Credits Cashed Out (${cashOutCredits})`, amount: cashOutPay });
+                }
+                if (holidayPayBonus > 0) {
+                    safeOtherEarningsArray.push({ description: 'Holiday Pay (Worked)', amount: holidayPayBonus });
+                }
+
+                const otherEarningsTotal = safeOtherEarningsArray.reduce((sum, i) => sum + i.amount, 0);
                 const otherDeductions = staffAdjustments.filter(a => a.type === 'Deduction').reduce((sum, i) => sum + i.amount, 0);
                 
                 const isLeavingThisMonth = staffEndDate && dateUtils.getYear(staffEndDate) === payPeriod.year && dateUtils.getMonth(staffEndDate) === payPeriod.month;
                 const attendanceBonus = isLeavingThisMonth ? 0 : stats.bonusAmount;
-                const bonusInfo = { newStreak: isLeavingThisMonth ? staff.bonusStreak : stats.newStreak };
-
+                const bonusInfo = { newStreak: isLeavingThisMonth ? (staff.bonusStreak || 0) : (stats.newStreak || 0) };
                 const leavePayoutTotal = leavePayout ? leavePayout.total : 0;
                 
-                // SSO Calculation
+                const preSsoEarnings = basePay + attendanceBonus + otherEarningsTotal + leavePayoutTotal + overtimePay;
+                
                 const ssoRate = (companyConfig.ssoRate || 5) / 100;
                 const ssoCap = companyConfig.ssoCap || 750;
-                const preSsoEarnings = basePay + attendanceBonus + otherEarnings + leavePayoutTotal + overtimePay;
                 const ssoBase = Math.max(1650, preSsoEarnings); 
                 const ssoDeduction = Math.min(ssoBase * ssoRate, ssoCap);
                 const ssoAllowance = ssoDeduction; 
                 
                 const totalEarnings = preSsoEarnings + ssoAllowance;
-                
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 
-                // --- NEW: Using Math.min to prevent overcharging on the final loan payment ---
-                const loanDeduction = loansData.filter(l => l.staffId === staff.id).reduce((sum, item) => sum + Math.min(item.monthlyRepayment, item.remainingBalance), 0);
+                // --- FIX 2: Robust Memory Filtering & Safe Number Parsing for Loans ---
+                const loanDeduction = loansData
+                    .filter(l => l.staffId === staff.id && Number(l.remainingBalance) > 0)
+                    .reduce((sum, item) => {
+                        const monthly = Number(item.monthlyRepayment || item.monthlyAmount || item.monthlyPayment || 0);
+                        const remaining = Number(item.remainingBalance || 0);
+                        return sum + Math.min(monthly, remaining);
+                    }, 0);
                 
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
 
                 return { 
-                    id: staff.id, 
-                    name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, 
-                    displayName,
-                    position: currentJob.position, 
-                    payType: currentJob.payType,
-                    totalEarnings, totalDeductions, netPay, 
-                    bonusInfo,
+                    id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, displayName,
+                    position: currentJob.position, payType: currentJob.payType,
+                    totalEarnings, totalDeductions, netPay, bonusInfo,
                     earnings: { 
-                        basePay, 
-                        overtimePay, 
-                        attendanceBonus, 
-                        ssoAllowance, 
+                        basePay, overtimePay, attendanceBonus, ssoAllowance, 
                         leavePayout: leavePayoutTotal, 
                         leavePayoutDetails: leavePayout, 
-                        others: staffAdjustments.filter(a => a.type === 'Earning') 
+                        others: safeOtherEarningsArray 
                     }, 
                     deductions: { 
                         absences: autoDeductions, 
@@ -287,9 +259,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                             ...(stats.daysToDeduct > 0 ? [{ date: `${stats.daysToDeduct} Sick Leave Overage`, hours: stats.daysToDeduct * (currentJob.standardDayHours || 8), amount: (basePay/30 * stats.daysToDeduct) }] : [])
                         ],
                         totalAbsenceHours: (stats.totalAbsencesCount + stats.daysToDeduct) * (currentJob.standardDayHours || 8), 
-                        sso: ssoDeduction, 
-                        advance: advanceDeduction, 
-                        loan: loanDeduction, 
+                        sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, 
                         others: staffAdjustments.filter(a => a.type === 'Deduction') 
                     }
                 };
@@ -312,11 +282,24 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
         if (!window.confirm(`Are you sure you want to finalize payroll for ${dataToFinalize.length} employee(s) for ${monthName} ${payPeriod.year}?`)) { return; }
         setIsFinalizing(true);
         try {
-            await finalizeAndStorePayslips({ payrollData: dataToFinalize, payPeriod });
+            const result = await finalizeAndStorePayslips({ payrollData: dataToFinalize, payPeriod });
+            
+            if (result?.data?.error) { throw new Error(result.data.error); }
+            if (result?.data?.success === false) { throw new Error(result.data.message || "Backend rejected payload"); }
+
             alert("Payroll finalized and payslips stored successfully!");
-            handleGeneratePayroll();
-        } catch (error) { console.error("Error finalizing payroll:", error); alert(`Failed to finalize payroll: ${error.message}`);
-        } finally { setIsFinalizing(false); }
+            
+            setPayrollData(prev => prev.filter(p => !selectedForPayroll.has(p.id)));
+            setSelectedForPayroll(new Set());
+
+            setTimeout(() => { handleGeneratePayroll(); }, 1500);
+
+        } catch (error) { 
+            console.error("Error finalizing payroll:", error); 
+            alert(`Failed to finalize payroll: ${error.message}`); 
+        } finally { 
+            setIsFinalizing(false); 
+        }
     };
 
     const handleSelectOne = (staffId) => {

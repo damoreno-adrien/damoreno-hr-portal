@@ -321,3 +321,38 @@ export const differenceInCalendarMonths = (dateLeft, dateRight) => {
   if (!d1 || !d2) return 0;
   return (d1.getFullYear() - d2.getFullYear()) * 12 + (d1.getMonth() - d2.getMonth());
 };
+
+// --- NEW: Time-Aware Staff Status Helpers ---
+
+// Checks if a staff member should be visible for daily operations on a specific date
+export const isStaffActiveOnDate = (staff, targetDate = new Date()) => {
+    // If they have no end date, they are fully active
+    if (!staff.endDate) return true;
+    
+    // If they have an end date, compare it to the target date
+    const endDateObj = typeof staff.endDate === 'string' 
+        ? new Date(staff.endDate) 
+        : (staff.endDate.toDate ? staff.endDate.toDate() : new Date(staff.endDate));
+        
+    // Reset times to midnight for a fair day-to-day comparison
+    const target = new Date(targetDate);
+    target.setHours(0, 0, 0, 0);
+    const end = new Date(endDateObj);
+    end.setHours(0, 0, 0, 0);
+
+    return target <= end;
+};
+
+// Returns a rich status object for UI badges
+export const getDynamicStaffStatus = (staff) => {
+    if (!staff.endDate && staff.status !== 'inactive') return { state: 'active', label: 'Active', color: 'bg-green-500/20 text-green-300' };
+    
+    if (staff.endDate) {
+        const isActiveToday = isStaffActiveOnDate(staff, new Date());
+        if (isActiveToday) {
+            return { state: 'notice', label: 'Leaving Soon', color: 'bg-amber-500/20 text-amber-300' };
+        }
+    }
+    
+    return { state: 'archived', label: 'Archived', color: 'bg-red-500/20 text-red-300' };
+};

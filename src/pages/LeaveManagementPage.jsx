@@ -7,13 +7,8 @@ import { Search, Plus, List, Calendar as CalendarIcon, Filter, ChevronLeft, Chev
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
 import { LeaveTimeline } from '../components/LeaveManagement/LeaveTimeline'; 
 import * as dateUtils from '../utils/dateUtils';
-
-const getDisplayName = (staff) => {
-    if (staff && staff.nickname) return staff.nickname;
-    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
-    if (staff && staff.fullName) return staff.fullName;
-    return 'Unknown Staff';
-};
+import { getDisplayName } from '../utils/staffUtils';
+import { calculateStaffLeaveBalances } from '../utils/leaveCalculator';
 
 const getStaffDepartment = (staff) => {
     if (!staff) return 'Unassigned';
@@ -29,79 +24,11 @@ const getStaffDepartment = (staff) => {
     return 'Unassigned';
 };
 
-// --- NEW: Helper to calculate balances for ANY staff member dynamically ---
-const getStaffBalances = (staff, existingRequests, companyConfig) => {
-    if (!staff || !companyConfig) return null;
-    const currentYear = new Date().getFullYear();
-    const today = new Date(); // Declared ONCE at the top
-    
-    let hireDate = new Date();
-    if (staff.startDate) {
-        if (staff.startDate.toDate) hireDate = staff.startDate.toDate();
-        else if (typeof staff.startDate === 'string') hireDate = dateUtils.parseISODateString(staff.startDate) || new Date(staff.startDate);
-    }
-    
-    // --- 1. ANNUAL LEAVE ACCRUAL (The 1-Year Cliff) ---
-    const monthsOfService = (today.getFullYear() - hireDate.getFullYear()) * 12 + (today.getMonth() - hireDate.getMonth());
-    
-    let availableAnnualQuota = 0;
-    let accruedAnnual = 0;
-
-    if (monthsOfService >= 12) { 
-        // Over 1 year: Fully unlocked
-        availableAnnualQuota = Number(companyConfig.annualLeaveDays) || 0; 
-        accruedAnnual = availableAnnualQuota;
-    } else if (monthsOfService > 0) {
-        // Under 1 year: Accruing, but locked (Quota = 0)
-        accruedAnnual = Math.floor((Number(companyConfig.annualLeaveDays) / 12) * monthsOfService);
-        availableAnnualQuota = 0; 
-    }
-
-    const sickQuota = Number(companyConfig.paidSickDays) || 30;
-    const personalQuota = Number(companyConfig.paidPersonalDays) || 0;
-    
-    // --- 2. PUBLIC HOLIDAY CREDITS ---
-    const pastHolidays = (companyConfig.publicHolidays || []).filter(h => {
-        const d = dateUtils.parseISODateString(h.date);
-        return d && d <= today && d >= hireDate && d.getFullYear() === currentYear;
-    });
-    const phQuota = Math.min(pastHolidays.length, Number(companyConfig.publicHolidayCreditCap) || 15);
-
-    let used = { annual: 0, sick: 0, personal: 0, ph: 0 };
-    
-    existingRequests.forEach(req => {
-        if (req.staffId !== staff.id) return;
-        if (req.status === 'rejected') return; 
-        const reqDate = dateUtils.parseISODateString(req.startDate);
-        if (!reqDate || reqDate.getFullYear() !== currentYear) return;
-
-        if (req.leaveType === 'Annual Leave') used.annual += req.totalDays;
-        if (req.leaveType === 'Sick Leave') used.sick += req.totalDays;
-        if (req.leaveType === 'Personal Leave') used.personal += req.totalDays;
-        if (req.leaveType === 'Public Holiday (In Lieu)') used.ph += req.totalDays;
-    });
-
-    return {
-        // NEW: Passing 'accrued' and 'isLocked' to the UI
-        annual: { 
-            total: availableAnnualQuota, 
-            used: used.annual, 
-            remaining: Math.max(0, availableAnnualQuota - used.annual),
-            accrued: accruedAnnual,
-            isLocked: monthsOfService < 12 
-        },
-        sick: { total: sickQuota, used: used.sick, remaining: Math.max(0, sickQuota - used.sick) },
-        personal: { total: personalQuota, used: used.personal, remaining: Math.max(0, personalQuota - used.personal) },
-        ph: { total: phQuota, used: used.ph, remaining: Math.max(0, phQuota - used.ph) }
-    };
-};
-
-// --- NEW: Staff Summary Modal Component ---
 const StaffSummaryModal = ({ staff, allRequests, companyConfig }) => {
-    const balances = useMemo(() => getStaffBalances(staff, allRequests, companyConfig), [staff, allRequests, companyConfig]);
+    const balances = useMemo(() => calculateStaffLeaveBalances(staff, allRequests, companyConfig), [staff, allRequests, companyConfig]);
     if (!balances) return <p className="text-gray-400 p-4">Loading data...</p>;
 
-    const StatCard = ({ title, data, color }) => (
+    const StatCard = ({ title, data, color, isPH }) => (
         <div className={`p-5 rounded-xl border bg-gray-800 shadow-md ${color.border}`}>
             <h4 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-3">{title}</h4>
             <div className="flex justify-between items-end">
@@ -110,11 +37,15 @@ const StaffSummaryModal = ({ staff, allRequests, companyConfig }) => {
                     <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mt-1">Remaining</p>
                 </div>
                 <div className="text-right">
-                    {/* NEW: Display logic for Locked Annual Leave */}
                     {data.isLocked ? (
                         <div className="flex flex-col items-end">
                             <span className="text-amber-500 text-[11px] font-bold bg-amber-500/10 px-2 py-1 rounded">🔒 Locked (&lt; 1 Yr)</span>
                             <span className="text-gray-400 text-[10px] mt-1 font-medium">{data.accrued} Days Accrued</span>
+                        </div>
+                    ) : isPH ? (
+                        <div className="flex flex-col items-end">
+                            <span className="text-green-400 font-bold text-sm">{data.cashable} Cashable</span>
+                            <p className="text-xs text-gray-500 mt-0.5">{data.used} Used Lifetime</p>
                         </div>
                     ) : (
                         <>
@@ -133,11 +64,8 @@ const StaffSummaryModal = ({ staff, allRequests, companyConfig }) => {
                 <StatCard title="Annual Leave" data={balances.annual} color={{ border: 'border-amber-500/40' }} />
                 <StatCard title="Paid Sick Leave" data={balances.sick} color={{ border: 'border-red-500/40' }} />
                 <StatCard title="Personal Leave" data={balances.personal} color={{ border: 'border-purple-500/40' }} />
-                <StatCard title="Public Holiday Credits" data={balances.ph} color={{ border: 'border-blue-500/40' }} />
+                <StatCard title="Public Holiday Credits" data={balances.ph} color={{ border: 'border-blue-500/40' }} isPH={true} />
             </div>
-            <p className="text-xs text-gray-500 text-center mt-6 uppercase tracking-wider font-semibold">
-                Calculated based on {new Date().getFullYear()} quota policies.
-            </p>
         </div>
     );
 };
@@ -149,16 +77,13 @@ const StatusBadge = ({ status }) => {
     return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
 };
 
-// --- UPDATED: Staff Balance Card (For Staff View) ---
-// --- UPDATED: Staff Balance Card (With Personal Leave) ---
 const StaffBalanceCard = ({ staff, allRequests, companyConfig }) => {
-    const balances = useMemo(() => getStaffBalances(staff, allRequests, companyConfig), [staff, allRequests, companyConfig]);
+    const balances = useMemo(() => calculateStaffLeaveBalances(staff, allRequests, companyConfig), [staff, allRequests, companyConfig]);
 
     if (!balances) return <p className="text-gray-400 mb-8">Loading balances...</p>;
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {/* Annual Leave Card */}
             <div className={`p-5 rounded-lg border bg-gray-800 shadow-sm flex flex-col justify-between ${balances.annual.isLocked ? 'border-amber-500/20' : 'border-gray-700'}`}>
                 <p className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">Annual Leave</p>
                 {balances.annual.isLocked ? (
@@ -177,7 +102,6 @@ const StaffBalanceCard = ({ staff, allRequests, companyConfig }) => {
                 )}
             </div>
 
-            {/* Sick Leave Card */}
             <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-sm flex flex-col justify-between">
                 <p className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">Paid Sick Leave</p>
                 <div>
@@ -186,7 +110,6 @@ const StaffBalanceCard = ({ staff, allRequests, companyConfig }) => {
                 </div>
             </div>
 
-            {/* NEW: Personal Leave Card */}
             <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-sm flex flex-col justify-between">
                 <p className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">Personal Leave</p>
                 <div>
@@ -195,12 +118,14 @@ const StaffBalanceCard = ({ staff, allRequests, companyConfig }) => {
                 </div>
             </div>
 
-            {/* Public Holiday Card */}
             <div className="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-sm flex flex-col justify-between">
                 <p className="text-gray-400 text-xs uppercase font-bold tracking-wider mb-2">Public Holiday Credits</p>
                 <div>
-                    <p className="text-3xl font-bold text-blue-400 mt-1">{balances.ph.remaining} <span className="text-sm text-gray-400 font-normal">Remaining</span></p>
-                    <p className="text-xs text-gray-500 mt-2">{balances.ph.used} Used / {balances.ph.total} Total</p>
+                    <p className="text-3xl font-bold text-blue-400 mt-1">{balances.ph.remaining} <span className="text-sm text-gray-400 font-normal">Total Remaining</span></p>
+                    <div className="mt-2 flex items-center justify-between text-xs">
+                        <span className="text-green-400 font-semibold">{balances.ph.cashable} Cashable</span>
+                        <span className="text-gray-500">{balances.ph.used} Used</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -240,11 +165,10 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFilter, setDateFilter] = useState('thisMonth');
     
-    // Modals state
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
     const [timelinePrefill, setTimelinePrefill] = useState(null);
-    const [summaryStaff, setSummaryStaff] = useState(null); // --- NEW ---
+    const [summaryStaff, setSummaryStaff] = useState(null);
 
     const handlePrevMonth = () => { setTimelineDate(prev => { const d = new Date(prev); d.setMonth(d.getMonth() - 1); return d; }); };
     const handleNextMonth = () => { setTimelineDate(prev => { const d = new Date(prev); d.setMonth(d.getMonth() + 1); return d; }); };
@@ -358,7 +282,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
     if (userRole === 'manager') {
         return (
             <div>
-                {/* --- NEW: Staff Leave Summary Modal --- */}
                 {summaryStaff && (
                     <Modal isOpen={true} onClose={() => setSummaryStaff(null)} title={`${getDisplayName(summaryStaff)} - Leave Overview`}>
                         <StaffSummaryModal staff={summaryStaff} allRequests={allLeaveRequests} companyConfig={companyConfig} />
@@ -430,7 +353,7 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                         staffList={filteredTimelineStaff} 
                         currentMonth={timelineDate} 
                         onCellClick={handleTimelineCellClick}
-                        onStaffClick={(staff) => setSummaryStaff(staff)} // --- NEW PROPS ---
+                        onStaffClick={(staff) => setSummaryStaff(staff)}
                         getStaffDepartment={getStaffDepartment}
                     />
                 ) : (
@@ -451,7 +374,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
         );
     }
 
-    // STAFF VIEW
     return (
         <div>
             <Modal isOpen={isModalOpen} onClose={closeModal} title="Request Time Off">
@@ -459,7 +381,6 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
             </Modal>
             
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">My Leave</h2>
-            {/* Find the current user's profile from the staff list */}
             {(() => {
                 const currentStaffProfile = activeStaffList.find(s => s.id === user.uid);
                 return <StaffBalanceCard staff={currentStaffProfile} allRequests={allLeaveRequests} companyConfig={companyConfig} />
@@ -472,8 +393,23 @@ export default function LeaveManagementPage({ db, user, userRole, staffList, com
                 <div className="divide-y divide-gray-700">
                     {filteredLeaveRequests.length > 0 ? filteredLeaveRequests.map(req => (
                         <div key={req.id} className="p-4 flex flex-wrap justify-between items-center gap-4">
-                            <div><p className="font-bold text-white">{req.leaveType}</p><p className="text-sm text-gray-400">Requested on: {dateUtils.formatDisplayDate(req.requestedAt)}</p></div>
-                            <div><p className="font-medium text-white">{dateUtils.formatDisplayDate(req.startDate)} to {dateUtils.formatDisplayDate(req.endDate)} ({req.totalDays} days)</p></div>
+                            <div>
+                                <p className="font-bold text-white">{req.leaveType}</p>
+                                <p className="text-sm text-gray-400">Requested on: {dateUtils.formatDisplayDate(req.requestedAt)}</p>
+                            </div>
+                            
+                            {/* FIX: Improved UI for Cash Outs in Staff View */}
+                            {req.leaveType === 'Cash Out Holiday Credits' ? (
+                                <div className="text-center bg-green-900/30 px-4 py-2 rounded-lg border border-green-700">
+                                    <p className="font-bold text-green-400">{req.totalDays} Credits</p>
+                                    <p className="text-[10px] text-green-500/70 uppercase font-bold tracking-wider">Payout Request</p>
+                                </div>
+                            ) : (
+                                <div>
+                                    <p className="font-medium text-white">{dateUtils.formatDisplayDate(req.startDate)} to {dateUtils.formatDisplayDate(req.endDate)} ({req.totalDays} days)</p>
+                                </div>
+                            )}
+                            
                             <StatusBadge status={req.status} />
                         </div>
                     )) : (<p className="text-center py-10 text-gray-400">You have not made any leave requests.</p>)}

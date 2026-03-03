@@ -111,8 +111,11 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
 
     // --- DYNAMIC GROUPING ---
     const groupedAndSortedStaff = useMemo(() => {
-        if (!staffList) return {};
-        const activeStaff = staffList.filter(s => s.status !== 'inactive');
+        if (!staffList || !weekDates || weekDates.length === 0) return {};
+        
+        // --- NEW: Time-Aware Archive Check ---
+        // Checks if they are active on the Monday of the currently viewed week
+        const activeStaff = staffList.filter(s => dateUtils.isStaffActiveOnDate(s, weekDates[0].dateObject));
         
         const groups = activeStaff.reduce((acc, staff) => {
             const job = getCurrentJob(staff);
@@ -131,7 +134,7 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
             });
         });
         return groups;
-    }, [staffList, sortOrder]);
+    }, [staffList, sortOrder, weekDates]); // <-- Added weekDates to dependencies
 
     const categories = useMemo(() => {
         const configDepts = companyConfig?.departments || [];

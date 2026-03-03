@@ -15,12 +15,15 @@ export default function AddStaffForm({ auth, onClose, departments }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     
-    // NEW STATE for Pay Rules
+    // PAY RULES STATE
     const [payType, setPayType] = useState('Salary');
     const [baseSalary, setBaseSalary] = useState('');
     const [hourlyRate, setHourlyRate] = useState('');
     const [standardDayHours, setStandardDayHours] = useState('8');
     const [isSsoRegistered, setIsSsoRegistered] = useState(true);
+    
+    // --- NEW: Holiday Policy State ---
+    const [holidayPolicy, setHolidayPolicy] = useState('in_lieu');
 
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -45,15 +48,13 @@ export default function AddStaffForm({ auth, onClose, departments }) {
         setSuccess('');
 
         try {
-            // Prepare payload matching new structure
             const userData = {
                 email, password, firstName, lastName, nickname, position, department, startDate, payType,
                 isSsoRegistered,
+                holidayPolicy, // <-- NEW: Send policy to database
                 baseSalary: payType === 'Salary' ? parseInt(baseSalary, 10) : null,
                 standardDayHours: payType === 'Salary' ? parseInt(standardDayHours, 10) : null,
                 hourlyRate: payType === 'Hourly' ? parseInt(hourlyRate, 10) : null,
-                
-                // Legacy 'rate' field for safety/backwards compatibility if needed by backend logic immediately
                 rate: payType === 'Salary' ? parseInt(baseSalary, 10) : parseInt(hourlyRate, 10) 
             };
 
@@ -121,7 +122,6 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                 </div>
             </div>
 
-            {/* CONDITIONAL PAY INPUTS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
                  {payType === 'Salary' ? (
                     <>
@@ -142,7 +142,9 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                     </div>
                  )}
             </div>
-            <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+
+            {/* --- NEW: Compliance & Payroll Settings Block --- */}
+            <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-4">
                 <label className="flex items-center space-x-3 cursor-pointer">
                     <input 
                         type="checkbox" 
@@ -155,9 +157,21 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                         <p className="text-xs text-gray-400 mt-0.5">Calculates the 5% SSO deduction & allowance in payroll.</p>
                     </div>
                 </label>
+                
+                <div className="border-t border-gray-700 pt-4">
+                    <label className="block text-sm font-bold text-indigo-400 mb-1">Public Holiday Policy</label>
+                    <select 
+                        value={holidayPolicy} 
+                        onChange={(e) => setHolidayPolicy(e.target.value)} 
+                        className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:border-indigo-500 outline-none" 
+                        required
+                    >
+                        <option value="in_lieu">In Lieu (Accrue substitute days off)</option>
+                        <option value="paid">Paid (Cash payout on holiday)</option>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1.5">Determines if they earn days off or receive extra cash when working holidays.</p>
+                </div>
             </div>
-
-            <div className="border-t border-gray-700 pt-6"></div>
 
             <div className="border-t border-gray-700 pt-6">
                  <p className="text-sm text-gray-400 mb-4">Create Login Credentials:</p>
@@ -178,4 +192,4 @@ export default function AddStaffForm({ auth, onClose, departments }) {
             </div>
         </form>
     );
-};
+}

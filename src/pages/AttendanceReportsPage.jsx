@@ -1,6 +1,6 @@
 /* src/pages/AttendanceReportsPage.jsx */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
@@ -72,6 +72,40 @@ export default function AttendanceReportsPage({ db, staffList }) {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    // --- NEW: Time-Aware Staff Filter for Reports ---
+    const relevantStaffList = useMemo(() => {
+        if (!staffList || !startDate || !endDate) return [];
+        
+        const reportStart = new Date(startDate);
+        reportStart.setHours(0, 0, 0, 0);
+        
+        const reportEnd = new Date(endDate);
+        reportEnd.setHours(23, 59, 59, 999);
+
+        return staffList.filter(staff => {
+            let sStart = new Date(0);
+            if (staff.startDate) {
+                sStart = staff.startDate.toDate ? staff.startDate.toDate() : new Date(staff.startDate);
+            }
+            
+            let sEnd = null;
+            if (staff.endDate) {
+                sEnd = staff.endDate.toDate ? staff.endDate.toDate() : new Date(staff.endDate);
+            }
+
+            sStart.setHours(0, 0, 0, 0);
+            if (sEnd) sEnd.setHours(23, 59, 59, 999);
+
+            // They started after the report window ended
+            if (sStart > reportEnd) return false;
+            
+            // They left before the report window started
+            if (sEnd && sEnd < reportStart) return false;
+
+            return true;
+        });
+    }, [staffList, startDate, endDate]);
+
     const handleToggleStaff = (staffId) => {
         setSelectedStaffIds(prev => {
             if (prev.includes(staffId)) return prev.filter(id => id !== staffId);
@@ -80,11 +114,11 @@ export default function AttendanceReportsPage({ db, staffList }) {
     };
 
     const handleSelectAllStaff = () => {
-        const activeStaffIds = staffList.filter(s => s.status !== 'inactive').map(s => s.id);
-        if (selectedStaffIds.length === activeStaffIds.length) {
+        const relevantIds = relevantStaffList.map(s => s.id);
+        if (selectedStaffIds.length === relevantIds.length) {
             setSelectedStaffIds([]);
         } else {
-            setSelectedStaffIds(activeStaffIds);
+            setSelectedStaffIds(relevantIds);
         }
     };
 
@@ -95,8 +129,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
         setCleanupResult(null);
 
         try {
-            console.log(`Generating report for ${startDate} to ${endDate}`);
-            
             const [schedulesSnapshot, attendanceSnapshot, leaveSnapshot] = await Promise.all([
                 getDocs(query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate))),
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDate), where("date", "<=", endDate))),
@@ -129,16 +161,28 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 }
             });
 
-            const activeStaff = staffList.filter(s => s.status !== 'inactive');
+            // Use the dynamically filtered staff list
             const staffToReport = selectedStaffIds.length === 0
-                ? activeStaff 
-                : activeStaff.filter(s => selectedStaffIds.includes(s.id));
+                ? relevantStaffList 
+                : relevantStaffList.filter(s => selectedStaffIds.includes(s.id));
 
             const generatedData = [];
             const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
 
             for (const staff of staffToReport) {
+                // Calculate their exact employment dates
+                let sStart = new Date(0);
+                if (staff.startDate) sStart = staff.startDate.toDate ? staff.startDate.toDate() : new Date(staff.startDate);
+                let sEnd = null;
+                if (staff.endDate) sEnd = staff.endDate.toDate ? staff.endDate.toDate() : new Date(staff.endDate);
+                
+                sStart.setHours(0,0,0,0);
+                if (sEnd) sEnd.setHours(23,59,59,999);
+
                 for (const day of dateInterval) {
+                    // --- NEW: Stop generating rows for days outside their employment ---
+                    if (day < sStart || (sEnd && day > sEnd)) continue;
+
                     const dateStr = dateUtils.formatISODate(day);
                     const key = `${staff.id}_${dateStr}`;
 
@@ -146,7 +190,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key);
 
-                    // --- KEY FIX: Rely on statusUtils for the correct status ---
                     const { status, isLate, lateMinutes, otMinutes, checkInTime, checkOutTime } = calculateAttendanceStatus(
                         schedule, 
                         attendance, 
@@ -164,7 +207,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                          const m = otMinutes % 60;
                          displayStatus = `Overtime (+${h}h ${m}m)`;
                     } else if (status === 'Present') {
-                        // Sometimes 'Present' can happen for Extra Shift
                         if (!schedule) displayStatus = 'Extra Shift';
                         else displayStatus = 'Completed';
                     }
@@ -339,7 +381,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                      <div className="flex-grow relative" ref={dropdownRef}>
                         <label className="block text-sm font-medium text-gray-300 mb-1">Staff Selection</label>
                         <button onClick={() => setIsStaffDropdownOpen(!isStaffDropdownOpen)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 flex justify-between items-center">
-                            <span>{selectedStaffIds.length === 0 ? "All Active Staff" : `${selectedStaffIds.length} Selected`}</span>
+                            <span>{selectedStaffIds.length === 0 ? "All Staff in Period" : `${selectedStaffIds.length} Selected`}</span>
                             <ChevronDown className="h-4 w-4" />
                         </button>
                         
@@ -351,7 +393,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                     </div>
                                     <span className="text-sm text-white font-bold">Select All / None</span>
                                 </div>
-                                {staffList.filter(s => s.status !== 'inactive').sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => {
+                                {relevantStaffList.sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => {
                                         const isSelected = selectedStaffIds.includes(staff.id);
                                         return (
                                             <div key={staff.id} className="px-4 py-2 hover:bg-gray-600 cursor-pointer flex items-center" onClick={() => handleToggleStaff(staff.id)}>

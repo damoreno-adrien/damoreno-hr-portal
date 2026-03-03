@@ -18,7 +18,6 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
         throw new HttpsError("invalid-argument", "Missing required payroll data or pay period.");
     }
 
-    // Authorization: Check if user is a manager
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
     if (!callerDoc.exists || callerDoc.data().role !== 'manager') {
         throw new HttpsError("permission-denied", "Only managers can finalize payroll.");
@@ -26,14 +25,17 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
     const batch = db.batch();
 
-    // --- NEW: Mapped as an array of Promises to allow async lookups for loans and advances ---
     const processPayslips = payrollData.map(async (payslip) => {
         const payslipId = `${payslip.id}_${year}_${month}`;
         const payslipRef = db.collection("payslips").doc(payslipId);
 
+        // --- CRITICAL FIX: Flattened payPeriodYear/Month so the frontend queries actually work! ---
         const payslipToSave = {
             ...payslip,
-            payPeriod: { year, month },
+            staffId: payslip.id, // Ensure staffId is explicitly defined
+            payPeriodYear: year,
+            payPeriodMonth: month,
+            generatedAt: admin.firestore.FieldValue.serverTimestamp(), // Matches History query
             finalizedAt: admin.firestore.FieldValue.serverTimestamp(),
             finalizedBy: request.auth.uid,
             status: 'finalized'
@@ -41,35 +43,28 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
         batch.set(payslipRef, payslipToSave);
 
-        // Update the staff profile with their new bonus streak
+        // 1. Update Bonus Streak
         const staffRef = db.collection("staff_profiles").doc(payslip.id);
         const newStreak = payslip.bonusInfo?.newStreak ?? 0;
         batch.update(staffRef, { bonusStreak: newStreak });
 
-        // --- NEW: Handle Loan Deductions ---
+        // 2. Handle Loan Deductions
         const loanDeductionAmount = payslip.deductions?.loan || 0;
-        
         if (loanDeductionAmount > 0) {
-            const loansSnapshot = await db.collection("loans")
-                .where("staffId", "==", payslip.id)
-                .where("isActive", "==", true)
-                .get();
-
+            const loansSnapshot = await db.collection("loans").where("staffId", "==", payslip.id).where("isActive", "==", true).get();
             if (!loansSnapshot.empty) {
                 const loanDoc = loansSnapshot.docs[0]; 
                 const loanData = loanDoc.data();
                 const newBalance = (loanData.remainingBalance || 0) - loanDeductionAmount;
-                
                 batch.update(loanDoc.ref, {
                     remainingBalance: newBalance > 0 ? newBalance : 0,
-                    isActive: newBalance > 0 // Close the loan if paid off
+                    isActive: newBalance > 0 
                 });
             }
         }
 
-        // --- NEW: Handle Salary Advance Status Updates ---
+        // 3. Handle Salary Advance Deductions
         const advanceDeductionAmount = payslip.deductions?.advance || 0;
-        
         if (advanceDeductionAmount > 0) {
             const advancesSnapshot = await db.collection("salary_advances")
                 .where("staffId", "==", payslip.id)
@@ -88,9 +83,7 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
     });
 
     try {
-        // --- NEW: Wait for all async lookups to finish before committing ---
         await Promise.all(processPayslips);
-        
         await batch.commit();
         return { result: `Successfully stored ${payrollData.length} payslips for ${month}/${year}.` };
     } catch (error) {
