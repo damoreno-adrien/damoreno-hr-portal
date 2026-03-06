@@ -2,45 +2,12 @@ const { HttpsError, https } = require("firebase-functions/v2");
 const { onCall } = require("firebase-functions/v2/https"); // Import onCall
 const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https"); // Import HttpsError for onCall
 const { getFirestore } = require('firebase-admin/firestore');
+const { DateTime, parseISO, isValid, timeZone, safeToDate } = require('../utils/dateHelpers');
 
-// *** Use Luxon for Timezone Handling ***
-console.log("calculateAdvanceEligibility: Attempting to require luxon...");
-let DateTime;
-try {
-    const luxon = require('luxon');
-    DateTime = luxon.DateTime;
-    console.log("calculateAdvanceEligibility: Successfully required luxon.");
-} catch(e) {
-    console.error("calculateAdvanceEligibility: FAILED to require luxon:", e);
-    throw new Error("Critical dependency luxon failed to load.");
-}
-// *** End Luxon Block ***
-
-// *** Require date-fns for non-timezone parts ***
-console.log("calculateAdvanceEligibility: Attempting to require date-fns...");
-let getYear, getMonth, getDate, getDaysInMonth, startOfMonth, parseISO, isValid;
-try {
-    const dfns = require('date-fns');
-    getYear = dfns.getYear;       // Still useful for year number from Luxon object if needed
-    getMonth = dfns.getMonth;     // Still useful for month index from Luxon object if needed
-    getDate = dfns.getDate;       // Still useful for day number from Luxon object if needed
-    getDaysInMonth = dfns.getDaysInMonth; // Still useful if needed with JS Date
-    startOfMonth = dfns.startOfMonth;   // Still useful if needed with JS Date
-    parseISO = dfns.parseISO;
-    isValid = dfns.isValid;
-    console.log("calculateAdvanceEligibility: Successfully required date-fns.");
-} catch (e) {
-    console.error("calculateAdvanceEligibility: FAILED to require date-fns:", e);
-    throw new Error("Critical dependency date-fns failed to load.");
-}
-// *** End date-fns Block ***
 
 
 // Initialize Firestore Admin SDK
 const db = getFirestore();
-
-// Define the target timezone
-const timeZone = "Asia/Bangkok"; // IANA timezone string for Luxon
 
 exports.calculateAdvanceEligibilityHandler = onCall({ region: "asia-southeast1" }, async (request) => { // Use onCall
     console.log("calculateAdvanceEligibilityHandler: Function execution started.");

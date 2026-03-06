@@ -7,18 +7,7 @@ const admin = require("firebase-admin");
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { Parser } = require('json2csv');
 
-// Require date-fns
-console.log("exportStaffData: Attempting to require date-fns...");
-let isValid, format;
-try {
-    const dfns = require('date-fns');
-    isValid = dfns.isValid;
-    format = dfns.format;
-    console.log("exportStaffData: Successfully required date-fns.");
-} catch (e) {
-    console.error("exportStaffData: FAILED to require date-fns:", e);
-}
-// End date-fns Block
+const { DateTime, parseISO, isValid, timeZone, safeToDate } = require('../utils/dateHelpers');
 
 const db = getFirestore();
 
