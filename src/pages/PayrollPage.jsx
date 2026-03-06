@@ -64,6 +64,7 @@ export default function PayrollPage({ db, staffList, companyConfig }) {
                 db={db} 
                 staffList={staffList}
                 onViewHistoryDetails={handleViewHistoryDetails}
+                companyConfig={companyConfig}
             />
         </div>
     );

@@ -1,32 +1,28 @@
 import React, { useMemo } from 'react';
-import * as dateUtils from '../../utils/dateUtils'; 
+import * as dateUtils from '../../utils/dateUtils';
 import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator';
 import { Briefcase, Trash2, AlertTriangle, Users, Banknote } from 'lucide-react';
 
-const StatusBadge = ({ status }) => {
-    const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
-    if (status === 'approved') return <span className={`${baseClasses} bg-green-600 text-green-100`}>Approved</span>;
-    if (status === 'rejected') return <span className={`${baseClasses} bg-red-600 text-red-100`}>Rejected</span>;
-    return <span className={`${baseClasses} bg-yellow-600 text-yellow-100`}>Pending</span>;
-};
+
+import StatusBadge from '../common/StatusBadge';
 
 export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList }) => {
-    
+
     // 1. Conflict Detection Logic (Ignores Cash Outs)
     const conflicts = useMemo(() => {
         if (!allRequests || req.status !== 'pending' || req.leaveType === 'Cash Out Holiday Credits') return [];
-        
+
         const thisStart = dateUtils.parseISODateString(req.startDate);
         const thisEnd = dateUtils.parseISODateString(req.endDate);
-        
+
         return allRequests.filter(other => {
-            if (other.id === req.id) return false; 
-            if (other.status !== 'approved') return false; 
-            if (other.staffId === req.staffId) return false; 
-            if (other.leaveType === 'Cash Out Holiday Credits') return false; 
+            if (other.id === req.id) return false;
+            if (other.status !== 'approved') return false;
+            if (other.staffId === req.staffId) return false;
+            if (other.leaveType === 'Cash Out Holiday Credits') return false;
 
             if (req.staffDepartment && other.staffDepartment && req.staffDepartment !== other.staffDepartment) {
-                return false; 
+                return false;
             }
 
             const otherStart = dateUtils.parseISODateString(other.startDate);
@@ -38,7 +34,7 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
     // 2. Balance Calculation Logic (Using Single Source of Truth)
     const balanceContext = useMemo(() => {
         if (!companyConfig || !allRequests || !staffList) return null;
-        
+
         const staff = staffList.find(s => s.id === req.staffId);
         if (!staff) return null;
 
@@ -82,7 +78,15 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
             <div className="flex flex-wrap justify-between items-center gap-4">
                 <div className="flex-grow min-w-[200px]">
                     <div className="flex items-center gap-2">
-                        <p className="font-bold text-white text-lg">{req.displayStaffName}</p>
+                        <div className="flex items-center gap-2">
+                            <p className="font-bold text-white text-lg">{req.displayStaffName}</p>
+                            {(req.leaveType === 'Public Holiday (In Lieu)' || req.leaveType === 'Cash Out Holiday Credits') && (
+                                <span className="bg-blue-500/20 border border-blue-500 text-blue-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full flex items-center">
+                                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5 animate-pulse"></span>
+                                    Holiday Credit
+                                </span>
+                            )}
+                        </div>
                         {req.staffDepartment && <span className="text-xs bg-gray-700 px-2 py-0.5 rounded text-gray-300">{req.staffDepartment}</span>}
                     </div>
                     <p className="text-sm text-gray-400 mt-1">
@@ -108,9 +112,9 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
 
                 <div className="flex items-center space-x-2 flex-shrink-0">
                     <StatusBadge status={req.status} />
-                    <button onClick={() => onEditRequest(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><Briefcase className="h-4 w-4"/></button>
-                    <button onClick={() => onDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-900/50 hover:bg-red-800 text-red-200" title="Delete Request"><Trash2 className="h-4 w-4"/></button>
-                    
+                    <button onClick={() => onEditRequest(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><Briefcase className="h-4 w-4" /></button>
+                    <button onClick={() => onDeleteRequest(req.id)} className="p-2 rounded-lg bg-red-900/50 hover:bg-red-800 text-red-200" title="Delete Request"><Trash2 className="h-4 w-4" /></button>
+
                     {req.status === 'pending' && (
                         <div className="flex gap-2 ml-4 pl-4 border-l border-gray-600">
                             <button onClick={() => onUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white">Reject</button>
@@ -142,13 +146,13 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
             {req.status === 'pending' && balanceContext && (
                 <div className="mt-2 text-xs flex items-center gap-2 text-gray-400 bg-gray-700/30 p-2 rounded inline-block">
                     <span className="font-semibold text-gray-300">{balanceContext.limitType} Balance Check:</span>
-                    
+
                     {req.leaveType === 'Cash Out Holiday Credits' || req.leaveType === 'Public Holiday (In Lieu)' ? (
                         <span>{balanceContext.remaining} Credits Available</span>
                     ) : (
                         <span>Used {balanceContext.used} of {balanceContext.total} days</span>
                     )}
-                    
+
                     {req.totalDays > balanceContext.remaining && (
                         <span className="text-red-400 font-bold ml-1">
                             (Exceeds balance by {req.totalDays - balanceContext.remaining})
@@ -158,7 +162,7 @@ export const LeaveRequestItem = ({ req, onUpdateRequest, onDeleteRequest, onEdit
             )}
 
             {req.reason && (<p className="mt-3 text-sm text-gray-300 bg-gray-700/50 p-3 rounded-md border-l-4 border-amber-500"><span className="font-semibold text-amber-500 block text-xs uppercase mb-1">Reason provided</span>{req.reason}</p>)}
-            
+
             {req.leaveType === 'Sick Leave' && (
                 <div className="mt-3 pt-3 border-t border-gray-700 space-y-3">
                     <label className="flex items-center space-x-2 cursor-pointer">

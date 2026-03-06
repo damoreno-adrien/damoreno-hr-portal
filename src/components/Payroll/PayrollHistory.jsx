@@ -1,21 +1,19 @@
 import React, { useState } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../../firebase.js" // Adjusted import path
+import { app } from "../../../firebase.js" 
 import usePayrollHistory from '../../hooks/usePayrollHistory';
 import { Trash2 } from 'lucide-react';
-import * as dateUtils from '../../utils/dateUtils.js'; // Use new standard
+import * as dateUtils from '../../utils/dateUtils.js'; 
 
-// *** FIX 1: Point to the correct region ***
+// --- NEW: Import the Emergency Bulk Generator ---
+import BulkPayslipGenerator from './BulkPayslipGenerator';
+
 const functions = getFunctions(app, "asia-southeast1"); 
-
-// *** FIX 2: Use the correct exported function name ***
 const deletePayrollRun = httpsCallable(functions, 'deletePayrollRun');
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
-// Use standard date utils for safe sorting
 const getCurrentJob = (staff) => {
-    // ... (getCurrentJob function remains the same as the last version) ...
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
         return { department: 'N/A' };
     }
@@ -26,10 +24,14 @@ const getCurrentJob = (staff) => {
     })[0];
 };
 
-export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) {
+// --- FIX: Added companyConfig to the props so the logo works! ---
+export default function PayrollHistory({ db, staffList, companyConfig, onViewHistoryDetails }) {
     const { history, isLoadingHistory } = usePayrollHistory(db);
     const [expandedRunId, setExpandedRunId] = useState(null);
     const [isDeleting, setIsDeleting] = useState(null);
+    
+    // --- NEW: State to control the emergency modal ---
+    const [isBulkGeneratorOpen, setIsBulkGeneratorOpen] = useState(false);
 
     const handleToggleExpand = (runId) => {
         setExpandedRunId(prevId => (prevId === runId ? null : runId));
@@ -42,10 +44,8 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
 
         setIsDeleting(run.id);
         try {
-            // This call will now work correctly
             const result = await deletePayrollRun({ payPeriod: { year: run.year, month: run.month } });
             alert(result.data.result);
-            // The hook should automatically update the history list via the listener
         } catch (error) {
             console.error("Error deleting payroll run:", error);
             alert(`Failed to delete payroll run: ${error.message}`);
@@ -56,7 +56,25 @@ export default function PayrollHistory({ db, staffList, onViewHistoryDetails }) 
 
     return (
         <section>
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Finalized Payroll History</h2>
+            {/* --- NEW: Clean Header with the Emergency Button --- */}
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 gap-4">
+                <h2 className="text-2xl md:text-3xl font-bold text-white">Finalized Payroll History</h2>
+                <button 
+                    onClick={() => setIsBulkGeneratorOpen(true)}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold text-sm shadow-lg transition-colors flex-shrink-0"
+                >
+                    + Emergency Bulk Creator
+                </button>
+            </div>
+
+            {/* --- NEW: The Hidden Modal Component --- */}
+            <BulkPayslipGenerator 
+                isOpen={isBulkGeneratorOpen} 
+                onClose={() => setIsBulkGeneratorOpen(false)} 
+                staffList={staffList} 
+                companyConfig={companyConfig} 
+            />
+
             <div className="space-y-4">
                 {isLoadingHistory ? (
                     <p className="text-center text-gray-500">Loading history...</p>

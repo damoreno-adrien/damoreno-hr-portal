@@ -26,12 +26,30 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
     const sickQuota = Number(companyConfig.paidSickDays) || 30;
     const personalQuota = Number(companyConfig.paidPersonalDays) || 0;
     
-    const pastHolidays = (companyConfig.publicHolidays || [])
+    // 1. Fetch all holidays that have passed since hire date
+    const allPassedHolidays = (companyConfig.publicHolidays || [])
         .filter(h => {
             const d = dateUtils.parseISODateString(h.date);
             return d && d <= today && d >= hireDate; 
-        })
-        .sort((a, b) => dateUtils.parseISODateString(a.date) - dateUtils.parseISODateString(b.date));
+        });
+
+    // 2. Group them by Year
+    const holidaysByYear = {};
+    allPassedHolidays.forEach(h => {
+        const hYear = dateUtils.parseISODateString(h.date).getFullYear();
+        if (!holidaysByYear[hYear]) holidaysByYear[hYear] = [];
+        holidaysByYear[hYear].push(h);
+    });
+
+    // 3. Apply the 13-Day Max Cap per year (Your Logic)
+    let cappedPastHolidays = [];
+    Object.keys(holidaysByYear).sort().forEach(year => {
+        // Sort the holidays chronologically within that year
+        const yearHolidays = holidaysByYear[year].sort((a, b) => dateUtils.parseISODateString(a.date) - dateUtils.parseISODateString(b.date));
+        
+        // Take a maximum of 13 holidays from this year
+        cappedPastHolidays.push(...yearHolidays.slice(0, 13));
+    });
 
     // --- FIX: Split the trackers for Days Off vs Cash Outs ---
     let used = { annual: 0, sick: 0, personal: 0, phDaysOff: 0, phCashOuts: 0 };
@@ -54,13 +72,13 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
     });
 
     // 1. Remove Days Off from the oldest banked holidays (Standard FIFO)
-    const remainingAfterDaysOff = pastHolidays.slice(used.phDaysOff);
+    const remainingAfterDaysOff = cappedPastHolidays.slice(used.phDaysOff);
     
     // 2. Apply Max Cap
     const maxCap = companyConfig.maxHolidayBalance ?? companyConfig.publicHolidayCreditCap ?? 15;
     const bankedHolidays = remainingAfterDaysOff.slice(-maxCap);
 
-    // 3. Find how many banked holidays are within the cash-out window
+// 3. Find how many banked holidays are within the cash-out window
     const cashOutWindowDays = companyConfig.cashOutWindowDays ?? 60;
     const cutoffDate = new Date(today);
     cutoffDate.setDate(cutoffDate.getDate() - cashOutWindowDays);
@@ -69,6 +87,18 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
     const cashableHolidays = bankedHolidays.filter(h => {
         const hDate = dateUtils.parseISODateString(h.date);
         return hDate >= cutoffDate;
+    });
+
+    // --- NEW: Create a year-by-year breakdown of the REMAINING credits ---
+    const phBreakdown = {};
+    const availableHolidays = bankedHolidays.slice(used.phCashOuts || 0); // Only look at what's left!
+
+    availableHolidays.forEach(holiday => {
+        const hDate = dateUtils.parseISODateString(holiday.date);
+        if (hDate) {
+            const year = hDate.getFullYear();
+            phBreakdown[year] = (phBreakdown[year] || 0) + 1;
+        }
     });
 
     // --- FIX 4: Deduct Cash Outs directly from the Cashable pool ---
@@ -81,6 +111,7 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
         annual: { total: availableAnnualQuota, used: used.annual, remaining: Math.max(0, availableAnnualQuota - used.annual), accrued: accruedAnnual, isLocked: monthsOfService < 12 },
         sick: { total: sickQuota, used: used.sick, remaining: Math.max(0, sickQuota - used.sick) },
         personal: { total: personalQuota, used: used.personal, remaining: Math.max(0, personalQuota - used.personal) },
-        ph: { total: maxCap, used: totalPhUsed, remaining: finalPhRemaining, cashable: finalCashable }
+        // --- ADDED the breakdown object below ---
+        ph: { total: maxCap, used: totalPhUsed, remaining: finalPhRemaining, cashable: finalCashable, breakdown: phBreakdown } 
     };
 };

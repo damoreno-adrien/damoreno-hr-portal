@@ -13,6 +13,10 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     const [reason, setReason] = useState('');
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [cashOutDays, setCashOutDays] = useState(1);
+    
+    // --- NEW: State for manual day deduction ---
+    const [manualLeaveDays, setManualLeaveDays] = useState(0); 
+    
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
 
@@ -34,13 +38,18 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             setEndDate(existingRequest.endDate);
             setReason(existingRequest.reason || '');
             setSelectedStaffId(existingRequest.staffId);
-            if (existingRequest.leaveType === 'Cash Out Holiday Credits') setCashOutDays(existingRequest.totalDays);
+            if (existingRequest.leaveType === 'Cash Out Holiday Credits') {
+                setCashOutDays(existingRequest.totalDays);
+            } else {
+                setManualLeaveDays(existingRequest.totalDays);
+            }
         } else if (initialData) {
             setLeaveType('Annual Leave');
             setStartDate(initialData.startDate || '');
             setEndDate(initialData.endDate || '');
             setReason('');
             setSelectedStaffId(initialData.staffId || '');
+            setManualLeaveDays(1);
         } else {
             setLeaveType('Annual Leave');
             setStartDate('');
@@ -48,6 +57,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
             setReason('');
             setSelectedStaffId('');
             setCashOutDays(1);
+            setManualLeaveDays(0);
         }
     }, [existingRequest, initialData, isModalOpen]);
 
@@ -55,9 +65,20 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         const start = dateUtils.parseISODateString(startDate);
         const end = dateUtils.parseISODateString(endDate);
         if (start && end && end < start) setEndDate(startDate);
-    }, [startDate, endDate]);
+        
+        // --- NEW: Auto-calculate initial days when dates change (if not editing an existing request) ---
+        if (start && end && end >= start) {
+            if (!existingRequest) {
+                const diff = dateUtils.differenceInCalendarDays(endDate, startDate);
+                setManualLeaveDays(diff);
+            }
+        } else {
+            if (!existingRequest) setManualLeaveDays(0);
+        }
+    }, [startDate, endDate, existingRequest]);
 
-    const totalDays = leaveType === 'Cash Out Holiday Credits' ? cashOutDays : dateUtils.differenceInCalendarDays(endDate, startDate);
+    // --- NEW: Use manualLeaveDays for standard leaves ---
+    const totalDays = leaveType === 'Cash Out Holiday Credits' ? cashOutDays : manualLeaveDays;
 
     const handleCashOutChange = (e) => {
         let val = parseInt(e.target.value, 10);
@@ -128,6 +149,9 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
     };
 
     const minStartDate = userRole === 'manager' ? null : dateUtils.formatISODate(dateUtils.addDays(new Date(), 1));
+
+    // Calculate calendar days for the UI display
+    const calendarDays = (startDate && endDate) ? dateUtils.differenceInCalendarDays(endDate, startDate) : 0;
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -211,8 +235,31 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 </div>
             )}
             
-            {leaveType !== 'Cash Out Holiday Credits' && (
-                <p className="text-sm text-gray-400 text-right mt-1">Total: <span className="font-bold text-white text-lg">{totalDays > 0 ? totalDays : 0}</span> Days</p>
+            {/* --- NEW: Editable Credits Box replacing the old 'Total Days' text --- */}
+            {leaveType !== 'Cash Out Holiday Credits' && startDate && endDate && (
+                <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-lg mt-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <p className="text-blue-400 font-bold text-sm">Calendar Duration: {calendarDays} Days</p>
+                            {userRole === 'manager' && (
+                                <p className="text-xs text-gray-300 mt-1">
+                                    <span className="font-bold text-amber-400">Manager Reminder:</span> Do not charge staff for their regular weekly days off.
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex-shrink-0">
+                            <label className="block text-xs font-medium text-gray-300 mb-1">Credits to Deduct</label>
+                            <input 
+                                type="number" 
+                                min="0"
+                                step="0.5"
+                                value={manualLeaveDays} 
+                                onChange={(e) => setManualLeaveDays(Number(e.target.value))}
+                                className="w-24 p-2 bg-gray-900 rounded-md text-white border border-blue-500 focus:border-amber-500 outline-none text-center font-bold text-lg"
+                            />
+                        </div>
+                    </div>
+                </div>
             )}
 
             <div>
