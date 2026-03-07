@@ -35,7 +35,6 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
     const endStr = endOfMonth.toISODate();
 
     try {
-        // --- BULLETPROOF QUERIES: Fetch by staffId only, filter by date/status in memory to prevent crashes ---
         const [staffProfileRes, configRes, attendanceRes, leaveRes, schedulesRes, advancesRes, loansRes] = await Promise.all([
             db.collection("staff_profiles").doc(staffId).get(),
             db.collection("settings").doc("company_config").get(),
@@ -56,10 +55,10 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         const payType = (job.payType || '').trim().toLowerCase();
         const isMonthly = (payType === 'salary' || payType === 'monthly');
         const baseSalary = Number(job.baseSalary) || 0;
+        const standardHours = Number(job.standardDayHours) || 9; 
         
         let hourlyRate = 0;
         if (isMonthly) {
-            const standardHours = Number(job.standardDayHours) || 9; 
             hourlyRate = (baseSalary / 30) / standardHours;
         } else {
             hourlyRate = Number(job.hourlyRate) || 0;
@@ -121,41 +120,106 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
 
         const overtimePay = ((staff.approvedOTMinutes || 0) / 60) * hourlyRate * 1.5;
 
-        // --- IN-MEMORY FILTERING FOR ADVANCES ---
-        const allMonthAdvances = [];
-        advancesRes.docs.forEach(d => {
-            const data = d.data();
-            const advDate = data.date || data.requestDate; // Backward compatibility
-            if (advDate >= startStr && advDate <= endStr) {
-                allMonthAdvances.push({ id: d.id, ...data });
-            }
-        });
+        // --- LIVE OFFBOARDING LEAVE PAYOUT CALCULATION (Eliminates the Loophole) ---
+        let offboardingPayout = 0;
+        let offboardingDetails = null;
 
-        // --- IN-MEMORY FILTERING FOR LOANS ---
-        const activeLoansList = [];
-        loansRes.docs.forEach(d => {
-            const data = d.data();
-            // Active if explicitly 'active' OR if it has a remaining balance > 0
-            if (data.status === 'active' || (data.remainingBalance !== undefined && data.remainingBalance > 0)) {
-                activeLoansList.push({ id: d.id, ...data });
-            }
-        });
+        if (staff.offboardingSettings && staff.endDate) {
+            const endDateDT = DateTime.fromISO(staff.endDate);
+            const startDT = DateTime.fromISO(startStr);
+            const endDT = DateTime.fromISO(endStr);
+            
+            // Only calculate the payout if their final day falls within the current payroll month
+            if (endDateDT >= startDT && endDateDT <= endDT) {
+                
+                // 1. Re-calculate live usage directly from the database
+                const targetDate = new Date(staff.endDate);
+                targetDate.setHours(23, 59, 59, 999);
+                
+                let usedAnnual = 0;
+                let usedPhDaysOff = 0;
+                let usedPhCashOuts = 0;
+                
+                leaveRes.docs.forEach(doc => {
+                    const req = doc.data();
+                    const reqDate = new Date(req.startDate);
+                    if (reqDate.getFullYear() === targetDate.getFullYear()) {
+                        if (req.leaveType === 'Annual Leave') usedAnnual += req.totalDays;
+                    }
+                    if (req.leaveType === 'Public Holiday (In Lieu)') usedPhDaysOff += req.totalDays;
+                    if (req.leaveType === 'Cash Out Holiday Credits') usedPhCashOuts += req.totalDays;
+                });
 
-        // Only deduct Approved/Paid advances from the net pay
-        const advancesTotal = allMonthAdvances
-            .filter(adv => adv.status === 'approved' || adv.status === 'paid')
+                // 2. Calculate true quotas based on exact seniority
+                const hireDate = new Date(staff.startDate);
+                const monthsOfService = (targetDate.getFullYear() - hireDate.getFullYear()) * 12 + (targetDate.getMonth() - hireDate.getMonth());
+                
+                let annualQuota = 0;
+                if (monthsOfService >= 12) annualQuota = Number(config.annualLeaveDays) || 0;
+                else if (monthsOfService > 0) annualQuota = Math.floor((Number(config.annualLeaveDays) / 12) * monthsOfService);
+                
+                const remainingAnnual = Math.max(0, annualQuota - usedAnnual);
+
+                const allPassedHolidays = (config.publicHolidays || []).filter(h => {
+                    const d = new Date(h.date);
+                    return d && d <= targetDate && d >= hireDate;
+                });
+                const holidaysByYear = {};
+                allPassedHolidays.forEach(h => {
+                    const y = new Date(h.date).getFullYear();
+                    if (!holidaysByYear[y]) holidaysByYear[y] = [];
+                    holidaysByYear[y].push(h);
+                });
+                let cappedPastHolidays = [];
+                Object.keys(holidaysByYear).sort().forEach(year => {
+                    const sorted = holidaysByYear[year].sort((a,b) => new Date(a.date) - new Date(b.date));
+                    cappedPastHolidays.push(...sorted.slice(0, 13));
+                });
+                const remainingAfterDaysOff = cappedPastHolidays.slice(usedPhDaysOff);
+                const maxCap = config.maxHolidayBalance ?? config.publicHolidayCreditCap ?? 15;
+                const bankedHolidays = remainingAfterDaysOff.slice(-maxCap);
+                const remainingPh = Math.max(0, bankedHolidays.length - usedPhCashOuts);
+
+                // 3. Compute final cash value based on precise daily rate
+                const dailyRate = isMonthly ? (baseSalary / 30) : (hourlyRate * standardHours);
+                let payoutAmount = 0;
+                
+                if (staff.offboardingSettings.payoutAnnualLeave) {
+                    payoutAmount += (remainingAnnual * dailyRate);
+                }
+                if (staff.offboardingSettings.payoutPublicHolidays) {
+                    payoutAmount += (remainingPh * dailyRate);
+                }
+                
+                offboardingPayout = Math.round(payoutAmount);
+                if (offboardingPayout > 0) {
+                    offboardingDetails = {
+                        annualDaysPaid: staff.offboardingSettings.payoutAnnualLeave ? remainingAnnual : 0,
+                        phCreditsPaid: staff.offboardingSettings.payoutPublicHolidays ? remainingPh : 0,
+                        dailyRate: Math.round(dailyRate),
+                        totalAmount: offboardingPayout
+                    };
+                }
+            }
+        }
+        // --- END OF OFFBOARDING LOGIC ---
+
+        const advancesTotal = advancesRes.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(adv => (adv.date >= startStr && adv.date <= endStr) && (adv.status === 'approved' || adv.status === 'paid'))
             .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
-        // Deduct loan monthly repayment
-        const loansTotal = activeLoansList.reduce((sum, d) => sum + (Number(d.monthlyRepayment) || 0), 0);
+        const loansTotal = loansRes.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(d => d.status === 'active' || (d.remainingBalance !== undefined && d.remainingBalance > 0))
+            .reduce((sum, d) => sum + (Number(d.monthlyRepayment) || 0), 0);
         
-        const estimatedGross = earnings + overtimePay; 
+        // Add the offboarding payout directly to their gross earnings!
+        const estimatedGross = earnings + overtimePay + offboardingPayout; 
         
-        // --- SMART SSO ---
         let ssoDeduction = 0;
         let ssoAllowance = 0;
 
-        // Apply SSO if staff is registered and earned money
         if (staff.isSsoRegistered !== false && estimatedGross > 0) {
             const ssoRate = (config.financialRules?.ssoRate || 5) / 100;
             const ssoMax = Number(config.financialRules?.ssoMaxContribution) || 875; 
@@ -163,7 +227,6 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             ssoAllowance = ssoDeduction; 
         }
 
-        // --- BONUS LOGIC ---
         const totalLates = Object.values(attendanceMap).filter(d => d.status === 'Late').length;
         const bonusConfig = config.attendanceBonus || {};
         const bonusOnTrack = totalLates <= (bonusConfig.allowedLates || 3) && absenceHours === 0;
@@ -176,13 +239,13 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
             else potentialBonus = bonusConfig.month3 || 1200;
         }
 
-        // Calculate Final Net (Allowance cancels out the Deduction)
         const estimatedNet = estimatedGross + potentialBonus + ssoAllowance - (absenceDeduction + advancesTotal + loansTotal + ssoDeduction);
 
         return {
             contractDetails: { payType: job.payType, baseSalary: baseSalary, hourlyRate: hourlyRate },
             baseSalaryEarned: Math.round(earnings),
             overtimePay: Math.round(overtimePay), 
+            offboardingPayout: offboardingDetails, // <-- We send this to the UI so you can show it on the Payslip!
             potentialBonus: { amount: potentialBonus, onTrack: bonusOnTrack },
             ssoAllowance: Math.round(ssoAllowance), 
             deductions: { 
@@ -192,8 +255,8 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
                 loanRepayment: Math.round(loansTotal) 
             },
             estimatedNetPay: Math.max(0, Math.round(estimatedNet)),
-            monthAdvances: allMonthAdvances, // Sending ALL requests (including pending) to the UI
-            activeLoans: activeLoansList     // Sending ALL active loans to the UI
+            monthAdvances: advancesRes.docs.map(d => ({ id: d.id, ...d.data() })).filter(adv => adv.date >= startStr && adv.date <= endStr),
+            activeLoans: loansRes.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.status === 'active' || (d.remainingBalance !== undefined && d.remainingBalance > 0))
         };
 
     } catch (error) {

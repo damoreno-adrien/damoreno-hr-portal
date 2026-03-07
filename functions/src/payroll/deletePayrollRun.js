@@ -35,8 +35,11 @@ exports.deletePayrollRunHandler = https.onCall({ region: "asia-southeast1" }, as
             
             batch.delete(docSnap.ref);
 
-            // --- YOUR NEW LOGIC: Revert Streak using Historical Data ---
+            // --- REVERT PROFILE DATA (Streak & Offboarding) ---
             if (staffId) {
+                let staffUpdates = {};
+
+                // 1. Revert Streak using Historical Data
                 let previousStreak = 0;
                 const prevMonth = month === 1 ? 12 : month - 1;
                 const prevYear = month === 1 ? year - 1 : year;
@@ -50,8 +53,21 @@ exports.deletePayrollRunHandler = https.onCall({ region: "asia-southeast1" }, as
                 if (!prevPayslipSnap.empty) {
                     previousStreak = prevPayslipSnap.docs[0].data().bonusInfo?.newStreak || 0;
                 }
-                
-                batch.update(db.collection("staff_profiles").doc(staffId), { bonusStreak: previousStreak });
+                staffUpdates.bonusStreak = previousStreak;
+
+                // 2. Revert Offboarding Payout Stamp
+                if (payslipData.offboardingPayout && payslipData.offboardingPayout.totalAmount > 0) {
+                    staffUpdates['offboardingSettings.payoutDisbursed'] = false;
+                    staffUpdates['offboardingSettings.payoutDisbursedAt'] = admin.firestore.FieldValue.delete();
+                    staffUpdates['offboardingSettings.payoutPayslipId'] = admin.firestore.FieldValue.delete();
+                    
+                    // Note: If you want undoing payroll to also completely "un-fire" them 
+                    // and let them back into the app, uncomment these two lines:
+                    // staffUpdates['status'] = 'active';
+                    // staffUpdates['offboardingSettings.isPendingFutureOffboard'] = true;
+                }
+
+                batch.update(db.collection("staff_profiles").doc(staffId), staffUpdates);
             }
 
             // --- Revert Salary Advances back to 'approved' ---

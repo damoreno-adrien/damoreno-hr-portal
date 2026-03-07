@@ -31,11 +31,11 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
         // --- CRITICAL FIX: Flattened payPeriodYear/Month so the frontend queries actually work! ---
         const payslipToSave = {
-            ...payslip,
-            staffId: payslip.id, // Ensure staffId is explicitly defined
+            ...payslip, // This inherently includes our new 'offboardingPayout' object!
+            staffId: payslip.id, 
             payPeriodYear: year,
             payPeriodMonth: month,
-            generatedAt: admin.firestore.FieldValue.serverTimestamp(), // Matches History query
+            generatedAt: admin.firestore.FieldValue.serverTimestamp(), 
             finalizedAt: admin.firestore.FieldValue.serverTimestamp(),
             finalizedBy: request.auth.uid,
             status: 'finalized'
@@ -43,10 +43,20 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
         batch.set(payslipRef, payslipToSave);
 
-        // 1. Update Bonus Streak
         const staffRef = db.collection("staff_profiles").doc(payslip.id);
+
+        // 1. Update Bonus Streak
         const newStreak = payslip.bonusInfo?.newStreak ?? 0;
         batch.update(staffRef, { bonusStreak: newStreak });
+
+        // --- NEW: Bulletproof Audit Trail for Offboarding Payouts ---
+        if (payslip.offboardingPayout && payslip.offboardingPayout.totalAmount > 0) {
+            batch.update(staffRef, {
+                'offboardingSettings.payoutDisbursed': true,
+                'offboardingSettings.payoutDisbursedAt': admin.firestore.FieldValue.serverTimestamp(),
+                'offboardingSettings.payoutPayslipId': payslipId
+            });
+        }
 
         // 2. Handle Loan Deductions
         const loanDeductionAmount = payslip.deductions?.loan || 0;

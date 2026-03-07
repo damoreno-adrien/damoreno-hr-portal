@@ -6,6 +6,8 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase"
 import * as dateUtils from '../utils/dateUtils';
 import { calculateMonthlyStats } from '../utils/attendanceCalculator';
+// --- NEW: Import the Master Calculator ---
+import { calculateStaffLeaveBalances } from '../utils/leaveCalculator'; 
 
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips');
@@ -60,7 +62,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const endOfMonth = dateUtils.endOfMonth(payPeriodDate);
             const startDateStr = dateUtils.formatISODate(startOfMonth);
             const endDateStr = dateUtils.formatISODate(endOfMonth);
-            const daysInMonth = dateUtils.getDaysInMonth(payPeriodDate);
 
             const finalizedPayslipsSnap = await getDocs(query(collection(db, "payslips"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month)));
             const finalizedStaffIds = new Set(finalizedPayslipsSnap.docs.map(doc => doc.data().staffId));
@@ -89,17 +90,16 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
             const staffWithJobs = staffToProcess.map(staff => ({ ...staff, currentJob: getCurrentJob(staff) }));
 
-            const [advancesSnap, loansSnap, adjustmentsSnap, approvedOtSnap, attendanceSnap, cashOutsSnap, allStaffStats] = await Promise.all([
+            // --- ADDED: We now fetch ALL approved leave requests across the company so we can run live offboarding math ---
+            const [advancesSnap, loansSnap, adjustmentsSnap, approvedOtSnap, attendanceSnap, cashOutsSnap, allStaffStats, allApprovedLeaveSnap] = await Promise.all([
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month), where("status", "==", "approved"))),
-                
-                // --- FIX 1: Removed strict isActive boolean query. Fetch all loans and filter safely in memory ---
                 getDocs(collection(db, "loans")), 
-                
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr), where("otStatus", "==", "approved"))),
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr))),
                 getDocs(query(collection(db, "leave_requests"), where("leaveType", "==", "Cash Out Holiday Credits"), where("status", "==", "approved"), where("startDate", ">=", startDateStr), where("startDate", "<=", endDateStr))),
-                Promise.all(staffWithJobs.map(staff => calculateMonthlyStats(db, staff, payPeriod, companyConfig, staff.currentJob).then(stats => ({ staffId: staff.id, ...stats }))))
+                Promise.all(staffWithJobs.map(staff => calculateMonthlyStats(db, staff, payPeriod, companyConfig, staff.currentJob).then(stats => ({ staffId: staff.id, ...stats })))),
+                getDocs(query(collection(db, "leave_requests"), where("status", "==", "approved"))) 
             ]);
 
             const advancesData = advancesSnap.docs.map(doc => doc.data());
@@ -108,6 +108,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const approvedOtData = approvedOtSnap.docs.map(doc => doc.data());
             const attendanceData = attendanceSnap.docs.map(doc => doc.data());
             const cashOutsData = cashOutsSnap.docs.map(doc => doc.data());
+            const allApprovedLeaveData = allApprovedLeaveSnap.docs.map(doc => doc.data());
             const statsMap = new Map(allStaffStats.map(res => [res.staffId, res]));
             const overtimeRateMultiplier = companyConfig.overtimeRate || 1.5;
 
@@ -124,6 +125,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 if (currentJob.payType === 'Salary') {
                     const salary = currentJob.baseSalary || 0;
                     const standardHours = currentJob.standardDayHours || 8;
+                    const legalDailyRate = salary / 30; 
 
                     let effectiveStart = startOfMonth;
                     if (staffStartDate && staffStartDate > startOfMonth) effectiveStart = staffStartDate;
@@ -133,30 +135,40 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                     const isFullMonth = effectiveStart.getTime() === startOfMonth.getTime() && effectiveEnd.getTime() === endOfMonth.getTime();
 
-                    if (isFullMonth) { basePay = salary; } 
-                    else {
+                    if (isFullMonth) { 
+                        basePay = salary; 
+                    } else {
                         const daysActive = dateUtils.differenceInCalendarDays(dateUtils.formatISODate(effectiveEnd), dateUtils.formatISODate(effectiveStart));
-                        const dailyRateCalendar = salary / daysInMonth; 
-                        basePay = dailyRateCalendar * daysActive;
+                        basePay = legalDailyRate * daysActive;
                     }
 
                     const isLeavingThisMonth = staffEndDate && dateUtils.getYear(staffEndDate) === payPeriod.year && dateUtils.getMonth(staffEndDate) === payPeriod.month;
                                                
                     if (isLeavingThisMonth) {
-                        const dailyRateCalendar = salary / daysInMonth;
                         let annualDaysToPay = 0; let holidayCreditsToPay = 0;
 
                         if (staff.offboardingSettings) {
-                            if (staff.offboardingSettings.payoutAnnualLeave) annualDaysToPay = staff.offboardingSettings.finalBalances?.annual || 0;
-                            if (staff.offboardingSettings.payoutPublicHolidays) holidayCreditsToPay = staff.offboardingSettings.finalBalances?.ph || 0;
+                            // --- FIX: LIVE CALCULATION INSTEAD OF SNAPSHOT ---
+                            const staffLeaveReqs = allApprovedLeaveData.filter(r => r.staffId === staff.id);
+                            
+                            // Send their actual last day to the calculator so it knows exactly what to project
+                            const liveBalances = calculateStaffLeaveBalances(staff, staffLeaveReqs, companyConfig, staffEndDate);
+                            
+                            if (liveBalances) {
+                                if (staff.offboardingSettings.payoutAnnualLeave) {
+                                    annualDaysToPay = liveBalances.annual.remaining;
+                                }
+                                if (staff.offboardingSettings.payoutPublicHolidays) {
+                                    holidayCreditsToPay = liveBalances.ph.remaining;
+                                }
+                            }
                         }
                         
-                        leavePayout = { annualDays: annualDaysToPay, holidayCredits: holidayCreditsToPay, dailyRate: dailyRateCalendar, total: (annualDaysToPay + holidayCreditsToPay) * dailyRateCalendar };
+                        leavePayout = { annualDays: annualDaysToPay, holidayCredits: holidayCreditsToPay, dailyRate: legalDailyRate, total: (annualDaysToPay + holidayCreditsToPay) * legalDailyRate };
                     }
 
-                    const dailyDeductionRate = salary / 30;
-                    autoDeductions = (dailyDeductionRate * (stats.daysToDeduct || 0)) + (dailyDeductionRate * (stats.totalAbsencesCount || 0));
-                    hourlyRateForOT = dailyDeductionRate / standardHours;
+                    autoDeductions = (legalDailyRate * (stats.daysToDeduct || 0)) + (legalDailyRate * (stats.totalAbsencesCount || 0));
+                    hourlyRateForOT = legalDailyRate / standardHours;
 
                 } else {
                     const rate = currentJob.hourlyRate || 0;
@@ -168,12 +180,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const totalOtMinutes = staffApprovedOT.reduce((sum, ot) => sum + (ot.otApprovedMinutes || 0), 0);
                 const overtimePay = (totalOtMinutes / 60) * hourlyRateForOT * overtimeRateMultiplier;
 
-                // Holiday Bonus & Cash Outs
                 let holidayPayBonus = 0; let cashOutPay = 0;
                 const staffProfileHolidayPolicy = staff.holidayPolicy || 'in_lieu';
                 const dailyDeductionRate = currentJob.payType === 'Salary' ? (currentJob.baseSalary || 0) / 30 : (currentJob.hourlyRate || 0) * (currentJob.standardDayHours || 8);
 
-                // Auto-Pay for worked holidays
                 if (staffProfileHolidayPolicy === 'paid') {
                     const periodHolidays = (companyConfig.publicHolidays || []).filter(h => {
                          const hDate = dateUtils.parseISODateString(h.date);
@@ -189,7 +199,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     }
                 }
 
-                // Process requested Cash Outs
                 const staffCashOuts = cashOutsData.filter(c => c.staffId === staff.id);
                 const cashOutCredits = staffCashOuts.reduce((sum, c) => sum + (c.totalDays || 0), 0);
 
@@ -197,9 +206,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     cashOutPay = cashOutCredits * dailyDeductionRate;
                 }
 
-                // Compile Other Earnings array cleanly
                 const staffAdjustments = adjustmentsData.filter(a => a.staffId === staff.id);
-                
                 const safeOtherEarningsArray = staffAdjustments
                     .filter(a => a.type === 'Earning')
                     .map(a => ({ description: a.description, amount: a.amount }));
@@ -230,7 +237,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const totalEarnings = preSsoEarnings + ssoAllowance;
                 const advanceDeduction = advancesData.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + item.amount, 0);
                 
-                // --- FIX 2: Robust Memory Filtering & Safe Number Parsing for Loans ---
                 const loanDeduction = loansData
                     .filter(l => l.staffId === staff.id && Number(l.remainingBalance) > 0)
                     .reduce((sum, item) => {
@@ -241,6 +247,9 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 
                 const totalDeductions = autoDeductions + ssoDeduction + advanceDeduction + loanDeduction + otherDeductions;
                 const netPay = totalEarnings - totalDeductions;
+
+                const unexcusedAmount = ((currentJob.baseSalary || 0) / 30) * stats.totalAbsencesCount;
+                const sickOverageAmount = ((currentJob.baseSalary || 0) / 30) * stats.daysToDeduct;
 
                 return { 
                     id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName, displayName,
@@ -255,8 +264,8 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     deductions: { 
                         absences: autoDeductions, 
                         unpaidAbsences: [
-                            ...(stats.totalAbsencesCount > 0 ? [{ date: `${stats.totalAbsencesCount} Unexcused Days`, hours: stats.totalAbsencesCount * (currentJob.standardDayHours || 8), amount: (basePay/30 * stats.totalAbsencesCount) }] : []),
-                            ...(stats.daysToDeduct > 0 ? [{ date: `${stats.daysToDeduct} Sick Leave Overage`, hours: stats.daysToDeduct * (currentJob.standardDayHours || 8), amount: (basePay/30 * stats.daysToDeduct) }] : [])
+                            ...(stats.totalAbsencesCount > 0 ? [{ date: `${stats.totalAbsencesCount} Unexcused Days`, hours: stats.totalAbsencesCount * (currentJob.standardDayHours || 8), amount: unexcusedAmount }] : []),
+                            ...(stats.daysToDeduct > 0 ? [{ date: `${stats.daysToDeduct} Sick Leave Overage`, hours: stats.daysToDeduct * (currentJob.standardDayHours || 8), amount: sickOverageAmount }] : [])
                         ],
                         totalAbsenceHours: (stats.totalAbsencesCount + stats.daysToDeduct) * (currentJob.standardDayHours || 8), 
                         sso: ssoDeduction, advance: advanceDeduction, loan: loanDeduction, 

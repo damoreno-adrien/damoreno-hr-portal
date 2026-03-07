@@ -10,8 +10,8 @@ import {
     differenceInCalendarMonths, 
     formatISODate, 
     formatDisplayDate,
-    isStaffActiveOnDate, // <-- NEW
-    getDynamicStaffStatus // <-- NEW
+    isStaffActiveOnDate,
+    getDynamicStaffStatus
 } from '../utils/dateUtils';
 import { app } from "../../firebase.js";
 import jsPDF from 'jspdf';
@@ -468,7 +468,17 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
                                     return (
                                         <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{getDisplayName(staff)}</td>
+                                            {/* --- NEW: THE "LEAVING SOON" BADGE --- */}
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
+                                                <div className="flex items-center">
+                                                    <span>{getDisplayName(staff)}</span>
+                                                    {staff.offboardingSettings?.isPendingFutureOffboard && staff.status === 'active' && (
+                                                        <span className="ml-2 bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex whitespace-nowrap">
+                                                            Leaving: {formatDisplayDate(staff.endDate)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{currentJob.position}</td>
                                             
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">

@@ -462,6 +462,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 onClose={onClose}
                 activeTab={activeTab}
                 showSaveCancel={isEditing && activeTab === 'details'}
+                staffProfile={staff}
             />
         </div>
     );

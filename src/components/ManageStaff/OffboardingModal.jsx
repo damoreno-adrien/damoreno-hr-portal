@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { X, AlertTriangle, Calendar, Info, CheckCircle, Save, Loader2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
+import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator'; // <-- NEW: Import Master Calculator
 
 export default function OffboardingModal({ db, staff, companyConfig, onClose, onSuccess }) {
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
@@ -11,8 +12,12 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
     const [notes, setNotes] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     
-    // --- NEW: State to hold the dynamically calculated leave balances ---
+    // State to hold the dynamically calculated leave balances
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, ph: 0, loading: true });
+    
+    // --- NEW: Cache the staff's leave requests so we don't spam the database when changing dates ---
+    const [staffRequests, setStaffRequests] = useState([]);
+    const [requestsLoaded, setRequestsLoaded] = useState(false);
 
     // Calculate Seniority & Eligibility on the fly
     const { monthsOfService, isEligibleForAnnualPayout } = useMemo(() => {
@@ -41,94 +46,80 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
         }
     }, [isEligibleForAnnualPayout, terminationType]);
 
-    // --- NEW: Fetch and calculate remaining leave based on the selected endDate ---
+    // --- NEW: Step 1: Fetch their leave requests exactly ONCE when the modal opens ---
     useEffect(() => {
-        const fetchAndCalculateBalances = async () => {
-            setLeaveBalances(prev => ({ ...prev, loading: true }));
+        const fetchRequests = async () => {
             try {
-                const endObj = dateUtils.parseISODateString(endDate) || new Date();
-                const currentYear = endObj.getFullYear();
-                
-                let hireDate = new Date();
-                if (staff.startDate) {
-                    if (staff.startDate.toDate) hireDate = staff.startDate.toDate();
-                    else hireDate = dateUtils.parseISODateString(staff.startDate) || new Date(staff.startDate);
-                }
-
-                // 1. Fetch their used leave for the offboarding year
-                const q = query(
-                    collection(db, 'leave_requests'), 
-                    where('staffId', '==', staff.id), 
-                    where('status', 'in', ['approved', 'pending'])
-                );
+                const q = query(collection(db, 'leave_requests'), where('staffId', '==', staff.id));
                 const snap = await getDocs(q);
-                
-                let usedAnnual = 0;
-                let usedPh = 0;
-
-                snap.docs.forEach(docSnap => {
-                    const req = docSnap.data();
-                    const reqDate = dateUtils.parseISODateString(req.startDate);
-                    if (reqDate && reqDate.getFullYear() === currentYear) {
-                        if (req.leaveType === 'Annual Leave') usedAnnual += req.totalDays;
-                        if (req.leaveType === 'Public Holiday (In Lieu)') usedPh += req.totalDays;
-                    }
-                });
-
-                // 2. Calculate Accrued Annual Leave
-                const monthsOfServiceLocal = (endObj.getFullYear() - hireDate.getFullYear()) * 12 + (endObj.getMonth() - hireDate.getMonth());
-                let annualQuota = 0;
-                if (monthsOfServiceLocal >= 12) { 
-                    annualQuota = Number(companyConfig.annualLeaveDays) || 0; 
-                } else if (monthsOfServiceLocal > 0) {
-                    annualQuota = Math.floor((Number(companyConfig.annualLeaveDays) / 12) * monthsOfServiceLocal);
-                }
-
-                // 3. Calculate Accrued Public Holidays up to the End Date
-                const pastHolidays = (companyConfig.publicHolidays || []).filter(h => {
-                    const d = dateUtils.parseISODateString(h.date);
-                    return d && d <= endObj && d >= hireDate && d.getFullYear() === currentYear;
-                });
-                const phQuota = Math.min(pastHolidays.length, Number(companyConfig.publicHolidayCreditCap) || 15);
-
-                // 4. Set final remaining balances
-                setLeaveBalances({
-                    annual: Math.max(0, annualQuota - usedAnnual),
-                    ph: Math.max(0, phQuota - usedPh),
-                    loading: false
-                });
-
+                const reqs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setStaffRequests(reqs);
+                setRequestsLoaded(true);
             } catch (error) {
-                console.error("Failed to fetch leave for offboarding calculation:", error);
-                setLeaveBalances({ annual: 0, ph: 0, loading: false });
+                console.error("Failed to fetch requests for offboarding:", error);
+                setRequestsLoaded(true); // Stop loading even if it fails
             }
         };
+        fetchRequests();
+    }, [db, staff.id]);
 
-        fetchAndCalculateBalances();
-    }, [db, staff, endDate, companyConfig]);
+    // --- NEW: Step 2: Instantly recalculate balances if the Manager changes the End Date! ---
+    useEffect(() => {
+        if (!requestsLoaded) return;
+        
+        setLeaveBalances(prev => ({ ...prev, loading: true }));
+        
+        const endObj = dateUtils.parseISODateString(endDate) || new Date();
+        
+        // Pass the precise End Date to the calculator to project future earnings!
+        const balances = calculateStaffLeaveBalances(staff, staffRequests, companyConfig, endObj);
+
+        if (balances) {
+            setLeaveBalances({
+                annual: balances.annual.remaining,
+                ph: balances.ph.remaining,
+                loading: false
+            });
+        } else {
+            setLeaveBalances({ annual: 0, ph: 0, loading: false });
+        }
+    }, [endDate, staffRequests, requestsLoaded, staff, companyConfig]);
 
     const handleOffboard = async () => {
         if (!endDate) return alert("Please select a final working date.");
         
-        if (!window.confirm(`Are you sure you want to offboard ${staff.firstName || staff.nickname}? This will mark their profile as inactive.`)) return;
+        // 1. Determine if this is a future offboarding
+        const endObj = dateUtils.parseISODateString(endDate) || new Date();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Strip the time to just compare the dates
+        
+        const isFutureOffboarding = endObj > today;
+        const newStatus = isFutureOffboarding ? 'active' : 'inactive';
+
+        // 2. Show a smart warning message based on the date
+        const confirmMessage = isFutureOffboarding
+            ? `Are you sure you want to schedule offboarding for ${staff.firstName || staff.nickname}? \n\nThey will REMAIN ACTIVE and keep their app access until their final day: ${dateUtils.formatDisplayDate(endDate)}.`
+            : `Are you sure you want to offboard ${staff.firstName || staff.nickname} today? \n\nThis will IMMEDIATELY mark their profile as inactive and revoke access.`;
+
+        if (!window.confirm(confirmMessage)) return;
 
         setIsSaving(true);
         try {
             const staffRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffRef, {
-                status: 'inactive',
+                status: newStatus, // Will stay 'active' if in the future!
                 endDate: endDate,
                 offboardingSettings: {
                     terminationType,
                     payoutAnnualLeave: payoutAnnual,
                     payoutPublicHolidays: payoutPH,
-                    // Save the calculated balances so the payroll generator has a snapshot!
                     finalBalances: {
                         annual: leaveBalances.annual,
                         ph: leaveBalances.ph
                     },
                     notes,
-                    processedAt: serverTimestamp()
+                    processedAt: serverTimestamp(),
+                    isPendingFutureOffboard: isFutureOffboarding // A helpful flag for your database
                 }
             });
             onSuccess();
@@ -148,7 +139,7 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <div>
                         <h2 className="text-xl font-bold text-white">Offboard Staff Member</h2>
-                        <p className="text-sm text-gray-400">Process departure for {staff.firstName || staff.nickname}</p>
+                        <p className="text-sm text-gray-400">Process departure for {staff.firstName + ' ' + staff.lastName + ' (' + staff.nickname + ')' || staff.nickname}</p>
                     </div>
                     <button onClick={onClose} className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
                         <X className="w-5 h-5" />
@@ -197,7 +188,6 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
                             <div className="flex items-center justify-between mb-2">
                                 <span className="font-semibold text-white">Pay out unused Annual Leave</span>
                                 <div className="flex items-center gap-3">
-                                    {/* --- NEW: Display the calculated Annual balance --- */}
                                     {leaveBalances.loading ? (
                                         <span className="text-xs text-gray-500">Calc...</span>
                                     ) : (
@@ -233,7 +223,6 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
                             <div className="flex items-center justify-between mb-2">
                                 <span className="font-semibold text-white">Pay out unused Public Holidays</span>
                                 <div className="flex items-center gap-3">
-                                    {/* --- NEW: Display the calculated PH balance --- */}
                                     {leaveBalances.loading ? (
                                         <span className="text-xs text-gray-500">Calc...</span>
                                     ) : (

@@ -1,7 +1,9 @@
-import React from 'react';
-import { Save, Edit, X } from 'lucide-react'; // Only import icons needed here
+import React, { useState } from 'react';
+import { Save, Edit, X, FileText } from 'lucide-react'; // Added FileText
+import ResignationLetterGenerator from '../ManageStaff/ResignationLetterGenerator'; // Added import
 
 export const ProfileActionButtons = ({
+    staffProfile, // <-- ADDED PROP: Make sure the parent component passes this!
     isEditing,
     isSaving,
     onSetEditing,
@@ -10,16 +12,29 @@ export const ProfileActionButtons = ({
     activeTab,
     showSaveCancel
 }) => {
+    // --- NEW: State to control the modal ---
+    const [showResignationModal, setShowResignationModal] = useState(false);
 
     return (
         <div className="mt-8 pt-6 border-t border-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
+            
             {/* Left-aligned buttons */}
-            <div className="flex space-x-3">
-                {/* Intentionally empty - Archive/Delete/Reset buttons are now in Settings tab */}
+            <div className="flex space-x-3 w-full sm:w-auto">
+                {/* --- NEW BUTTON: Generate Resignation Letter --- */}
+                {!isEditing && staffProfile && (
+                    <button 
+                        type="button"
+                        onClick={() => setShowResignationModal(true)}
+                        className="flex items-center justify-center w-full sm:w-auto bg-blue-900/40 hover:bg-blue-800 text-blue-300 px-4 py-2 rounded-lg font-bold transition-colors border border-blue-700/50"
+                    >
+                        <FileText className="w-5 h-5 mr-2" />
+                        Generate Resignation Letter
+                    </button>
+                )}
             </div>
 
             {/* Right-aligned buttons (Close, Edit/Save/Cancel) */}
-            <div className="flex space-x-3">
+            <div className="flex space-x-3 w-full sm:w-auto justify-end">
                 <button
                     type="button"
                     onClick={onClose}
@@ -65,6 +80,13 @@ export const ProfileActionButtons = ({
                 )}
                  {/* --- End Conditional Rendering --- */}
             </div>
+
+            {/* --- NEW: The Hidden Print Modal --- */}
+            <ResignationLetterGenerator 
+                staff={staffProfile} 
+                isOpen={showResignationModal} 
+                onClose={() => setShowResignationModal(false)} 
+            />
         </div>
     );
 };

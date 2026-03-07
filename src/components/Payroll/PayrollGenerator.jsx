@@ -3,20 +3,21 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import usePayrollGenerator from '../../hooks/usePayrollGenerator';
 import * as dateUtils from '../../utils/dateUtils';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore'; // <-- NEW IMPORTS
+
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // Generate years dynamically
 const generateYears = (startYear = 2025) => {
-    const currentYear = dateUtils.getYear(new Date()); // Use new standard
+    const currentYear = dateUtils.getYear(new Date()); 
     const years = [];
-    // Go up to current year + 1 to allow for planning/viewing next year if needed
     for (let year = startYear; year <= currentYear + 1; year++) {
         years.push(year);
     }
-    return years.sort((a, b) => b - a); // Sort descending (newest first)
+    return years.sort((a, b) => b - a); 
 };
-const dynamicYears = generateYears(); // Generate the list once
+const dynamicYears = generateYears(); 
 
 export default function PayrollGenerator({ db, staffList, companyConfig, payPeriod, setPayPeriod, onViewDetails }) {
     const {
@@ -25,16 +26,51 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
         handleGeneratePayroll, handleFinalizePayroll, handleSelectOne, handleSelectAll,
     } = usePayrollGenerator(db, staffList, companyConfig, payPeriod);
 
+    // --- NEW: Wrapper function to handle Auto-Deactivation after saving payroll ---
+    const onFinalizeClick = async () => {
+        // 1. Run the normal finalization process
+        await handleFinalizePayroll();
+
+        // 2. Check for staff whose offboarding date has passed
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (const item of payrollData) {
+            // Only process the ones we actually ran payroll for
+            if (!selectedForPayroll.has(item.id)) continue; 
+            
+            const staff = staffList.find(s => s.id === item.id);
+            if (staff && staff.offboardingSettings?.isPendingFutureOffboard) {
+                const endDateObj = dateUtils.parseISODateString(staff.endDate);
+                
+                // If their end date is today or in the past, cleanly deactivate them!
+                if (endDateObj && endDateObj <= today) {
+                    try {
+                        const staffRef = doc(db, 'staff_profiles', staff.id);
+                        await updateDoc(staffRef, {
+                            status: 'inactive',
+                            'offboardingSettings.isPendingFutureOffboard': false, // Turn off the flag
+                            'offboardingSettings.finalDeactivationDate': serverTimestamp()
+                        });
+                        console.log(`Successfully auto-deactivated ${staff.firstName || staff.nickname} post-payroll.`);
+                    } catch (err) {
+                        console.error(`Failed to auto-deactivate ${staff.firstName || staff.nickname}:`, err);
+                    }
+                }
+            }
+        }
+    };
+
     const handleExportSummaryPDF = () => {
         const doc = new jsPDF();
         doc.text(`Payroll Summary - ${months[payPeriod.month - 1]} ${payPeriod.year}`, 14, 15);
         autoTable(doc, {
             head: [['Staff', 'Total Earnings', 'Total Deductions', 'Net Pay']],
             body: payrollData
-                    .filter(item => selectedForPayroll.has(item.id)) // Only export selected
+                    .filter(item => selectedForPayroll.has(item.id)) 
                     .map(item => [item.displayName, formatCurrency(item.totalEarnings), formatCurrency(item.totalDeductions), formatCurrency(item.netPay)]),
             startY: 20,
-            foot: [['TOTAL', '', '', formatCurrency(totalSelectedNetPay)]], // Add total row
+            foot: [['TOTAL', '', '', formatCurrency(totalSelectedNetPay)]], 
             footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 20 },
         });
         doc.save(`payroll_summary_${payPeriod.year}_${payPeriod.month}.pdf`);
@@ -47,7 +83,6 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
         if (isMonthFullyFinalized) {
             return <tr><td colSpan="5" className="px-6 py-10 text-center text-green-400">Payroll for {months[payPeriod.month - 1]} {payPeriod.year} has been fully completed.</td></tr>;
         }
-         // Display error if generation failed (e.g., future month)
          if (error && payrollData.length === 0) {
             return <tr><td colSpan="5" className="px-6 py-10 text-center text-red-400">{error}</td></tr>;
         }
@@ -61,7 +96,6 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                     <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
                     <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
                     
-                    {/* --- NEW: Highlighting Negative Net Pay in Red --- */}
                     <td onClick={() => onViewDetails(item)} className={`px-6 py-4 whitespace-nowrap text-sm font-bold cursor-pointer ${item.netPay < 0 ? 'text-red-500' : 'text-amber-400'}`}>
                         {formatCurrency(item.netPay)}
                         {item.netPay < 0 && <span className="ml-2 text-xs text-red-400 font-normal">(Negative Pay!)</span>}
@@ -84,7 +118,6 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                 </div>
                 <div className="flex-grow">
                     <label className="block text-sm font-medium text-gray-300 mb-1 invisible">Year</label>
-                    {/* Use dynamicYears array */}
                     <select value={payPeriod.year} onChange={e => setPayPeriod(p => ({ ...p, year: Number(e.target.value) }))} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 focus:border-amber-500 focus:ring focus:ring-amber-500 focus:ring-opacity-50">
                         {dynamicYears.map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
@@ -97,7 +130,6 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                 </button>
             </div>
 
-            {/* Display error prominently if generation failed */}
             {error && !isLoading && payrollData.length === 0 &&
                 <div className="bg-red-900/30 border border-red-700 text-red-300 px-4 py-3 rounded-lg text-center mb-6">
                     {error}
@@ -128,15 +160,15 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                     </tbody>
                 </table>
             </div>
-            {/* Show finalize section only if there's data and the month isn't fully completed */}
             {payrollData.length > 0 && !isMonthFullyFinalized && (
                  <div className="mt-8 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                     <div>
                         <span className="text-gray-400">Total for Selected ({selectedForPayroll.size}): </span>
                         <span className="text-2xl font-bold text-amber-400">{formatCurrency(totalSelectedNetPay)} THB</span>
                     </div>
+                    {/* --- FIX: Switched onClick to use our new wrapper function --- */}
                     <button
-                        onClick={handleFinalizePayroll}
+                        onClick={onFinalizeClick}
                         disabled={isFinalizing || selectedForPayroll.size === 0}
                         className="w-full sm:w-auto px-6 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold disabled:bg-gray-600 transition-colors"
                     >
