@@ -308,14 +308,19 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     staff={staff} 
                     companyConfig={companyConfig} 
                     onClose={() => setIsOffboardingModalOpen(false)} 
-                    onSuccess={async () => {
+                    // We now receive a flag telling us if we should disable them right now
+                    onSuccess={async (shouldDisableImmediately) => {
                         setIsOffboardingModalOpen(false);
-                        // Make sure we still disable their login!
-                        try {
-                            await setStaffAuthStatus({ staffId: staff.id, disabled: true });
-                        } catch(e) { 
-                            console.error("Failed to disable auth login", e); 
+                        
+                        // ONLY lock the Firebase Auth vault if today is their final day
+                        if (shouldDisableImmediately) {
+                            try {
+                                await setStaffAuthStatus({ staffId: staff.id, disabled: true });
+                            } catch(e) { 
+                                console.error("Failed to disable auth login", e); 
+                            }
                         }
+                        
                         onClose(); // Close the main profile modal
                     }} 
                 />
