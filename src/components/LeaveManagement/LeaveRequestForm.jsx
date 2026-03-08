@@ -235,15 +235,19 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 </div>
             )}
             
-            {/* --- NEW: Editable Credits Box replacing the old 'Total Days' text --- */}
+            {/* --- NEW: Editable Credits Box (Locked for Staff, Editable for Managers) --- */}
             {leaveType !== 'Cash Out Holiday Credits' && startDate && endDate && (
                 <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-lg mt-2">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
                             <p className="text-blue-400 font-bold text-sm">Calendar Duration: {calendarDays} Days</p>
-                            {userRole === 'manager' && (
+                            {userRole === 'manager' ? (
                                 <p className="text-xs text-gray-300 mt-1">
                                     <span className="font-bold text-amber-400">Manager Reminder:</span> Do not charge staff for their regular weekly days off.
+                                </p>
+                            ) : (
+                                <p className="text-[10px] text-gray-400 mt-1 italic">
+                                    * Management will review and adjust the final deducted credits if your request spans across your regular days off.
                                 </p>
                             )}
                         </div>
@@ -255,7 +259,8 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                                 step="0.5"
                                 value={manualLeaveDays} 
                                 onChange={(e) => setManualLeaveDays(Number(e.target.value))}
-                                className="w-24 p-2 bg-gray-900 rounded-md text-white border border-blue-500 focus:border-amber-500 outline-none text-center font-bold text-lg"
+                                disabled={userRole !== 'manager'}
+                                className={`w-24 p-2 bg-gray-900 rounded-md text-white border outline-none text-center font-bold text-lg transition-colors ${userRole === 'manager' ? 'border-blue-500 focus:border-amber-500 cursor-text' : 'border-gray-700 opacity-60 cursor-not-allowed'}`}
                             />
                         </div>
                     </div>
