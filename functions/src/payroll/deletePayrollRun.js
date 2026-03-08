@@ -28,14 +28,14 @@ exports.deletePayrollRunHandler = https.onCall({ region: "asia-southeast1" }, as
         if (payslipsToDeleteSnap.empty) return { result: `No payslips found for ${months[month - 1]} ${year}. Nothing to delete.` }; 
 
         const batch = db.batch();
+        const authEnablePromises = []; // <-- NEW: Array to hold our Auth unlock commands
         
         const processDeletions = payslipsToDeleteSnap.docs.map(async (docSnap) => {
             const payslipData = docSnap.data();
-            const staffId = payslipData.staffId || payslipData.id; // Fallback for safety
+            const staffId = payslipData.staffId || payslipData.id; 
             
             batch.delete(docSnap.ref);
 
-            // --- REVERT PROFILE DATA (Streak & Offboarding) ---
             if (staffId) {
                 let staffUpdates = {};
 
@@ -55,16 +55,24 @@ exports.deletePayrollRunHandler = https.onCall({ region: "asia-southeast1" }, as
                 }
                 staffUpdates.bonusStreak = previousStreak;
 
-                // 2. Revert Offboarding Payout Stamp
-                if (payslipData.offboardingPayout && payslipData.offboardingPayout.totalAmount > 0) {
+                // --- 2. THE HUMAN ACTION UNDO (Restore Access) ---
+                if (payslipData.offboardingPayout) {
+                    
+                    // A. Revert the financial audit stamps
                     staffUpdates['offboardingSettings.payoutDisbursed'] = false;
                     staffUpdates['offboardingSettings.payoutDisbursedAt'] = admin.firestore.FieldValue.delete();
                     staffUpdates['offboardingSettings.payoutPayslipId'] = admin.firestore.FieldValue.delete();
                     
-                    // Note: If you want undoing payroll to also completely "un-fire" them 
-                    // and let them back into the app, uncomment these two lines:
-                    // staffUpdates['status'] = 'active';
-                    // staffUpdates['offboardingSettings.isPendingFutureOffboard'] = true;
+                    // B. "Un-fire" them in the database
+                    staffUpdates['status'] = 'active';
+                    staffUpdates['offboardingSettings.isPendingFutureOffboard'] = true;
+
+                    // C. Reach into Firebase Auth and unlock the door
+                    const enableAuthPromise = admin.auth().updateUser(staffId, { disabled: false })
+                        .then(() => console.log(`Successfully unlocked Auth for: ${staffId}`))
+                        .catch(err => console.error(`Failed to unlock Auth for ${staffId}:`, err));
+                    
+                    authEnablePromises.push(enableAuthPromise);
                 }
 
                 batch.update(db.collection("staff_profiles").doc(staffId), staffUpdates);
@@ -83,7 +91,7 @@ exports.deletePayrollRunHandler = https.onCall({ region: "asia-southeast1" }, as
                 advSnap.forEach(advDoc => {
                     batch.update(advDoc.ref, {
                         status: "approved",
-                        deductedAt: admin.firestore.FieldValue.delete() // Hard delete
+                        deductedAt: admin.firestore.FieldValue.delete() 
                     });
                 });
             }
@@ -105,6 +113,9 @@ exports.deletePayrollRunHandler = https.onCall({ region: "asia-southeast1" }, as
 
         await Promise.all(processDeletions);
         await batch.commit();
+
+        // Execute all the Auth unlocks after the database successfully updates
+        await Promise.all(authEnablePromises);
 
         return { result: `Successfully deleted ${payslipsToDeleteSnap.size} payslips and reverted all financial deductions for ${months[month - 1]} ${year}.` };
 

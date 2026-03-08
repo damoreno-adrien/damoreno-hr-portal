@@ -24,15 +24,16 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
     }
 
     const batch = db.batch();
+    const authDisablePromises = []; // Array to hold our Auth lockout commands
 
     const processPayslips = payrollData.map(async (payslip) => {
-        const payslipId = `${payslip.id}_${year}_${month}`;
+        const staffId = payslip.staffId || payslip.id;
+        const payslipId = `${staffId}_${year}_${month}`;
         const payslipRef = db.collection("payslips").doc(payslipId);
 
-        // --- CRITICAL FIX: Flattened payPeriodYear/Month so the frontend queries actually work! ---
         const payslipToSave = {
-            ...payslip, // This inherently includes our new 'offboardingPayout' object!
-            staffId: payslip.id, 
+            ...payslip,
+            staffId: staffId, 
             payPeriodYear: year,
             payPeriodMonth: month,
             generatedAt: admin.firestore.FieldValue.serverTimestamp(), 
@@ -43,25 +44,37 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
         batch.set(payslipRef, payslipToSave);
 
-        const staffRef = db.collection("staff_profiles").doc(payslip.id);
+        const staffRef = db.collection("staff_profiles").doc(staffId);
 
         // 1. Update Bonus Streak
         const newStreak = payslip.bonusInfo?.newStreak ?? 0;
         batch.update(staffRef, { bonusStreak: newStreak });
 
-        // --- NEW: Bulletproof Audit Trail for Offboarding Payouts ---
-        if (payslip.offboardingPayout && payslip.offboardingPayout.totalAmount > 0) {
+        // --- 2. THE HUMAN ACTION OFFBOARDING TRIGGER ---
+        // If this payslip contains an offboarding payout (meaning it's their final month)
+        if (payslip.offboardingPayout) {
+            
+            // A. Update the database to mark them inactive and stamp the audit trail
             batch.update(staffRef, {
+                'status': 'inactive',
+                'offboardingSettings.isPendingFutureOffboard': false,
                 'offboardingSettings.payoutDisbursed': true,
                 'offboardingSettings.payoutDisbursedAt': admin.firestore.FieldValue.serverTimestamp(),
                 'offboardingSettings.payoutPayslipId': payslipId
             });
+
+            // B. Reach into the Firebase Auth vault and disable their login credentials
+            const disableAuthPromise = admin.auth().updateUser(staffId, { disabled: true })
+                .then(() => console.log(`Successfully locked Auth for offboarded staff: ${staffId}`))
+                .catch(err => console.error(`Failed to lock Auth for ${staffId}:`, err));
+            
+            authDisablePromises.push(disableAuthPromise);
         }
 
-        // 2. Handle Loan Deductions
+        // 3. Handle Loan Deductions
         const loanDeductionAmount = payslip.deductions?.loan || 0;
         if (loanDeductionAmount > 0) {
-            const loansSnapshot = await db.collection("loans").where("staffId", "==", payslip.id).where("isActive", "==", true).get();
+            const loansSnapshot = await db.collection("loans").where("staffId", "==", staffId).where("isActive", "==", true).get();
             if (!loansSnapshot.empty) {
                 const loanDoc = loansSnapshot.docs[0]; 
                 const loanData = loanDoc.data();
@@ -73,11 +86,11 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
             }
         }
 
-        // 3. Handle Salary Advance Deductions
+        // 4. Handle Salary Advance Deductions
         const advanceDeductionAmount = payslip.deductions?.advance || 0;
         if (advanceDeductionAmount > 0) {
             const advancesSnapshot = await db.collection("salary_advances")
-                .where("staffId", "==", payslip.id)
+                .where("staffId", "==", staffId)
                 .where("payPeriodYear", "==", year)
                 .where("payPeriodMonth", "==", month)
                 .where("status", "==", "approved")
@@ -95,6 +108,10 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
     try {
         await Promise.all(processPayslips);
         await batch.commit();
+        
+        // Execute all the Auth lockouts after the database successfully updates
+        await Promise.all(authDisablePromises);
+
         return { result: `Successfully stored ${payrollData.length} payslips for ${month}/${year}.` };
     } catch (error) {
         console.error("Batch commit failed:", error);
