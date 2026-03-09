@@ -1,25 +1,23 @@
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 
-// --- NEW: Baseline defaults for the new Holiday Ledger ---
-// These will be used automatically if the database doesn't have them yet.
 const DEFAULT_CONFIG = {
     holidayPayMultiplier: 1.0,
     maxHolidayBalance: 15,
     cashOutWindowDays: 60,
 };
 
-export default function useCompanyConfig(db) {
+// --- FIX: Pass 'user' into the hook ---
+export default function useCompanyConfig(db, user) {
     const [companyConfig, setCompanyConfig] = useState(null);
 
     useEffect(() => {
-        if (!db) return;
+        // --- FIX: Wait for both the database AND the user to be ready ---
+        if (!db || !user) return;
 
         const configDocRef = doc(db, 'settings', 'company_config');
         const unsubscribe = onSnapshot(configDocRef, (docSnap) => {
             if (docSnap.exists()) {
-                // Merge database data WITH our new defaults. 
-                // This guarantees the app has the rules it needs instantly.
                 setCompanyConfig({ ...DEFAULT_CONFIG, ...docSnap.data() });
             } else {
                 console.error("Company config document not found!");
@@ -27,9 +25,8 @@ export default function useCompanyConfig(db) {
             }
         });
 
-        // Cleanup subscription on unmount
         return () => unsubscribe();
-    }, [db]);
+    }, [db, user]); // <-- Added 'user' to the dependency array
 
     return companyConfig;
 }

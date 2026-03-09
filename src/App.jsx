@@ -47,7 +47,7 @@ export default function App() {
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
     const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db); 
-    const companyConfig = useCompanyConfig(db); 
+    const companyConfig = useCompanyConfig(db, user); 
     const staffList = useStaffList(db, user); 
     
     useEffect(() => {
@@ -140,8 +140,9 @@ export default function App() {
         setCurrentPage('dashboard');
     };
 
-    const isLoading = !auth || !db || isAuthLoading || companyConfig === null;
-     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
+    const isLoading = !auth || !db || isAuthLoading || (user && companyConfig === null);
+    
+    if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
 
     if (!user) {
         return (
