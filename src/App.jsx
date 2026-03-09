@@ -157,7 +157,22 @@ export default function App() {
              if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
              if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
          }
+         
+         // --- NEW: Ironclad Manager Firewall ---
+         const requireManager = (Component) => {
+             if (userRole !== 'manager') {
+                 return (
+                     <div className="flex flex-col items-center justify-center h-full text-center">
+                         <h2 className="text-4xl font-bold text-red-500 mb-4">Access Denied</h2>
+                         <p className="text-gray-400">You do not have permission to view this page.</p>
+                     </div>
+                 );
+             }
+             return Component;
+         };
+
          switch(currentPage) {
+             // Shared Pages (Role logic is handled inside these specific components)
              case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={companyConfig} />;
              case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} companyConfig={companyConfig} />;
              case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={companyConfig} />;
@@ -166,10 +181,13 @@ export default function App() {
              case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={companyConfig} />;
              case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={companyConfig} />; 
              case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
-             case 'reports': return <AttendanceReportsPage db={db} staffList={staffList} />;
-             case 'financials': return <FinancialsPage db={db} staffList={staffList} />;
-             case 'payroll': return <PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />;
-             case 'settings': return <SettingsPage db={db} companyConfig={companyConfig} />;
+             
+             // --- STRICT MANAGER ONLY PAGES ---
+             case 'reports': return requireManager(<AttendanceReportsPage db={db} staffList={staffList} />);
+             case 'financials': return requireManager(<FinancialsPage db={db} staffList={staffList} />);
+             case 'payroll': return requireManager(<PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />);
+             case 'settings': return requireManager(<SettingsPage db={db} companyConfig={companyConfig} />);
+             
              default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
          }
      };
