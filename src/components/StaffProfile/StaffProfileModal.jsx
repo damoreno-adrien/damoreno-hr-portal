@@ -8,9 +8,11 @@ import { ProfileDetailsEdit } from './ProfileDetailsEdit';
 import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
-import OffboardingModal from '../ManageStaff/OffboardingModal.jsx'; // --- NEW: Import the modal ---
-import { Archive, UserCheck, Trash, Key } from 'lucide-react'; 
+import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
+// --- MODIFIED: Added FileText and Loader2 icons for the contract button ---
+import { Archive, UserCheck, Trash, Key, FileText, Loader2 } from 'lucide-react'; 
 import * as dateUtils from '../../utils/dateUtils.js';
+import { generateContract } from '../../utils/contractGenerator';
 
 // Initialize Functions
 const functionsDefault = getFunctions(app); 
@@ -45,7 +47,6 @@ const getInitialFormData = (staff) => {
     return { ...initialData, firstName, lastName, nickname: staff.nickname || '' };
 };
 
-// --- NEW PROPS: Added companyConfig so we can pass it down to the offboarding modal ---
 export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole }) {
     const [activeTab, setActiveTab] = useState('details');
     const [formData, setFormData] = useState(getInitialFormData(staff));
@@ -55,8 +56,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
     const [isBonusEligible, setIsBonusEligible] = useState(staff.isAttendanceBonusEligible ?? true);
     
-    // --- NEW: State for the Offboarding Modal ---
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
+    
+    // --- NEW: State for Contract Generator ---
+    const [isGenerating, setIsGenerating] = useState(false);
 
     useEffect(() => {
         setFormData(getInitialFormData(staff));
@@ -181,7 +184,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         }
     };
 
-    // --- MODIFIED: Now only handles Reactivating staff. Archiving is handled by the Modal. ---
     const handleReactivateStaff = async () => {
         setIsSaving(true);
         setError('');
@@ -291,28 +293,35 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             setIsSaving(false);
         }
     };
+
+    // --- NEW: Contract Generator Handler ---
+    const handleGenerateContract = async () => {
+        setIsGenerating(true);
+        const result = await generateContract(staff, companyConfig);
+        if (!result.success) {
+            alert("Failed to generate contract: " + result.error);
+        }
+        setIsGenerating(false);
+    };
+
     // --- End Action Handlers ---
 
     const getTabClasses = (tabName) => {
-         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm`;
+         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`;
      };
     const isActive = staff.status === 'active' || staff.status === undefined || staff.status === null;
 
     return (
         <div className="space-y-6 relative">
             
-            {/* --- NEW: The Offboarding Modal --- */}
             {isOffboardingModalOpen && (
                 <OffboardingModal 
                     db={db} 
                     staff={staff} 
                     companyConfig={companyConfig} 
                     onClose={() => setIsOffboardingModalOpen(false)} 
-                    // We now receive a flag telling us if we should disable them right now
                     onSuccess={async (shouldDisableImmediately) => {
                         setIsOffboardingModalOpen(false);
-                        
-                        // ONLY lock the Firebase Auth vault if today is their final day
                         if (shouldDisableImmediately) {
                             try {
                                 await setStaffAuthStatus({ staffId: staff.id, disabled: true });
@@ -320,14 +329,14 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                                 console.error("Failed to disable auth login", e); 
                             }
                         }
-                        
-                        onClose(); // Close the main profile modal
+                        onClose();
                     }} 
                 />
             )}
 
-            <div className="border-b border-gray-700">
-                <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
+            {/* --- MODIFIED: Added flex wrapper for Tabs & Generate Button --- */}
+            <div className="border-b border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
+                <nav className="-mb-px flex space-x-6 overflow-x-auto w-full sm:w-auto" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>
                         Profile Details
                     </button>
@@ -343,6 +352,21 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         </button>
                     )}
                 </nav>
+                
+                {/* The Generate Contract Button */}
+                {userRole === 'manager' && (
+                    <div className="pb-2 w-full sm:w-auto">
+                        <button 
+                            onClick={handleGenerateContract}
+                            disabled={isGenerating || isSaving}
+                            className="w-full sm:w-auto flex justify-center items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors disabled:opacity-50"
+                            title="Download filled Employment Contract"
+                        >
+                            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                            {isGenerating ? "Generating..." : "Generate Contract"}
+                        </button>
+                    </div>
+                )}
             </div>
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
@@ -439,10 +463,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                          <h4 className="text-base font-semibold text-white">Staff Actions</h4>
                          <div>
                             {isActive ? (
-                                /* --- MODIFIED: Triggers the new modal --- */
                                 <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button>
                             ) : (
-                                /* --- UNCHANGED: Triggers the reactivate function --- */
                                 <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button>
                             )}
                          </div>
