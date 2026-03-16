@@ -32,8 +32,9 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
         throw new HttpsError("internal", "Internal server error while verifying role.");
     }
 
-    // --- 2. Input Validation ---
-    const { attendanceDocId, alertId } = request.data;
+    // --- 2. Input Validation (NEW: Grab scheduledEndTime) ---
+    // If for some reason the frontend doesn't send it, fallback to 23:00
+    const { attendanceDocId, alertId, scheduledEndTime = "23:00" } = request.data;
     if (!attendanceDocId || !alertId) {
         throw new HttpsError("invalid-argument", "Missing required 'attendanceDocId' or 'alertId'.");
     }
@@ -65,25 +66,13 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
             throw new HttpsError("failed-precondition", "Attendance record is missing checkInTime or date.");
         }
 
-        // --- 4. Time Calculation ---
+        // --- 4. Time Calculation (NEW: Use scheduledEndTime) ---
         
-        // Convert the checkInTime (Timestamp) to a Luxon object in our timezone
-        const checkInTimeLuxon = DateTime.fromJSDate(data.checkInTime.toDate()).setZone(timeZone);
-        
-        // Calculate the "check-in + 9 hours" time
-        const autoFixTime = checkInTimeLuxon.plus({ hours: 9 });
+        // Format the incoming time string (e.g. "22:30" becomes "22:30:00")
+        const timeString = scheduledEndTime.length === 5 ? `${scheduledEndTime}:00` : scheduledEndTime;
 
-        // Create the 11:00 PM "cap" time for that specific day
-        const capTime = DateTime.fromISO(`${data.date}T23:00:00`, { zone: timeZone });
-
-        // Find the earlier of the two times
-        let finalCheckOutTime;
-        // if (autoFixTime < capTime) {
-        //     finalCheckOutTime = autoFixTime; // Use the +9h time
-        // } else {
-        //     finalCheckOutTime = capTime; // Use the 11 PM cap
-        // }
-        finalCheckOutTime = capTime; // Use the 11 PM cap
+        // Create the end time based on their specific schedule for that day
+        const finalCheckOutTime = DateTime.fromISO(`${data.date}T${timeString}`, { zone: timeZone });
 
         // Convert the final Luxon time back to a Firestore Timestamp
         const finalTimestamp = Timestamp.fromDate(finalCheckOutTime.toJSDate());
@@ -94,7 +83,7 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
         // Update the attendance record
         batch.update(attendanceRef, {
             checkOutTime: finalTimestamp,
-            checkOutNote: "Auto-fixed by manager (+9h cap)"
+            checkOutNote: `Auto-fixed by manager (Scheduled End: ${scheduledEndTime})` // <-- Updated Note
         });
 
         // Delete the alert, as it's now resolved
@@ -102,7 +91,7 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
 
         await batch.commit();
 
-        console.log(`Successfully auto-fixed shift ${attendanceDocId} by manager ${callerUid}.`);
+        console.log(`Successfully auto-fixed shift ${attendanceDocId} to ${scheduledEndTime} by manager ${callerUid}.`);
         return { result: `Success! Shift fixed at ${finalCheckOutTime.toFormat('HH:mm')}.` };
 
     } catch (error) {

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../../../firebase"; 
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, getDocs } from "firebase/firestore";
-import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, ShieldAlert, ChevronDown, ChevronUp, Zap, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, ShieldAlert, ChevronDown, ChevronUp, Zap, RefreshCw, CheckSquare } from 'lucide-react';
 import { formatDisplayTime, formatDisplayDate } from '../../utils/dateUtils';
 
 const functions = getFunctions(app, "asia-southeast1");
@@ -18,13 +18,16 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
 
     const checkInTime = alert.checkInTime?.toDate();
     const formattedCheckIn = checkInTime ? formatDisplayTime(checkInTime) : 'Unknown';
+    
+    // --- NEW: Dynamic End Time Formatting ---
+    const scheduledEndStr = alert.scheduledEndTime || "23:00";
+    const displayEndTime = scheduledEndStr.replace(':', 'h');
 
     // Auto-Resolve Listener
     useEffect(() => {
         if (!alert.attendanceDocId) return;
         const unsub = onSnapshot(doc(db, "attendance", alert.attendanceDocId), async (docSnap) => {
             if (!docSnap.exists()) return;
-            // NEW: Do NOT try to auto-resolve if the user just clicked the fix button
             if (isFixing) return; 
 
             const data = docSnap.data();
@@ -32,7 +35,6 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
                 try {
                     await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'resolved' });
                 } catch (e) { 
-                    // Make the error silent if it just means the document is already handled
                     if (e.code !== 'not-found') {
                          console.error("Auto-resolve failed", e); 
                     }
@@ -40,12 +42,17 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
             }
         });
         return () => unsub();
-    }, [alert.attendanceDocId, alert.id, isFixing]); // NEW: Add isFixing to dependencies
+    }, [alert.attendanceDocId, alert.id, isFixing]); 
 
     const handleAutoFix = async () => {
         setIsFixing(true); setError(null);
         try {
-            const result = await autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: alert.id });
+            // --- NEW: Send the dynamic time to the backend ---
+            const result = await autoFixShiftFunc({ 
+                attendanceDocId: alert.attendanceDocId, 
+                alertId: alert.id,
+                scheduledEndTime: scheduledEndStr
+            });
             setSuccess(result.data.result || "Shift fixed!");
         } catch (err) {
             setError(err.message || "Failed to fix.");
@@ -70,7 +77,9 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
             </div>
             <div className="flex items-center justify-end gap-2 w-full sm:w-auto">
                 <button onClick={() => onManualFix(alert)} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-indigo-600 hover:text-white text-gray-200 rounded-md transition-colors">Fix Manually</button>
-                <button onClick={handleAutoFix} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-md flex items-center gap-1.5 transition-colors">{isFixing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Auto-Fix (23h00)"}</button>
+                <button onClick={handleAutoFix} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-md flex items-center gap-1.5 transition-colors">
+                    {isFixing ? <Loader2 className="h-3 w-3 animate-spin" /> : `Auto-Fix (${displayEndTime})`}
+                </button>
             </div>
             {error && <p className="text-xs text-red-400 w-full text-center sm:text-left">{error}</p>}
         </li>
@@ -94,11 +103,8 @@ const RiskAlertItem = ({ alert }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isValidating, setIsValidating] = useState(false);
 
-    // --- 🛠 FIXED SELF-HEALING LOGIC ---
     useEffect(() => {
         const validateAlert = async () => {
-            // 🛑 STOP: Do not auto-resolve Lateness alerts just because a record exists.
-            // The record existing IS the proof of lateness.
             if (alert.type === 'risk_late') return; 
 
             if (!alert.details || alert.details.length === 0 || !alert.staffId) return;
@@ -117,8 +123,6 @@ const RiskAlertItem = ({ alert }) => {
                     );
                     const snap = await getDocs(q);
                     
-                    // For ABSENCE alerts: If doc exists now, it means it's fixed (False Alarm).
-                    // If doc is missing or incomplete, it's NOT fixed.
                     if (snap.empty) {
                         allFixed = false;
                         break;
@@ -217,6 +221,10 @@ export default function ManagerAlerts({ onManualFix }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isScanning, setIsScanning] = useState(false);
+    
+    // --- NEW: State for fixing all at once ---
+    const [isFixingAll, setIsFixingAll] = useState(false);
+    
     const scanRan = useRef(false);
 
     useEffect(() => {
@@ -254,9 +262,35 @@ export default function ManagerAlerts({ onManualFix }) {
         finally { setIsScanning(false); }
     };
 
+    // --- NEW: Function to loop through all missing checkouts ---
+    const handleFixAll = async () => {
+        const missingCheckouts = alerts.filter(a => a.type === 'missing_checkout' || !a.type);
+        if (missingCheckouts.length === 0) return;
+        if (!window.confirm(`Are you sure you want to auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`)) return;
+
+        setIsFixingAll(true);
+        try {
+            const promises = missingCheckouts.map(alert => {
+                const scheduledEndStr = alert.scheduledEndTime || "23:00";
+                return autoFixShiftFunc({ 
+                    attendanceDocId: alert.attendanceDocId, 
+                    alertId: alert.id,
+                    scheduledEndTime: scheduledEndStr
+                });
+            });
+            await Promise.allSettled(promises);
+        } catch (err) {
+            console.error("Error running Fix All:", err);
+        } finally {
+            setIsFixingAll(false);
+        }
+    };
+
     if (loading) return <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700"><p className="text-sm text-gray-300 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading pending actions...</p></div>;
     if (error) return <div className="p-4 text-red-400 text-sm bg-gray-800 rounded-lg border border-red-900">{error}</div>;
     if (alerts.length === 0) return null;
+
+    const missingCheckoutCount = alerts.filter(a => a.type === 'missing_checkout' || !a.type).length;
 
     return (
         <div className="space-y-4 animate-fadeIn">
@@ -265,10 +299,21 @@ export default function ManagerAlerts({ onManualFix }) {
                     <AlertTriangle className="h-5 w-5 text-amber-500" />
                     Attention Required ({alerts.length})
                 </h3>
-                <button onClick={handleForceScan} disabled={isScanning} className="flex items-center gap-2 text-[10px] uppercase font-bold text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50">
-                    {isScanning ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                    {isScanning ? "Scanning..." : "Re-Scan"}
-                </button>
+                
+                <div className="flex items-center gap-3">
+                    {/* --- NEW: The Fix All Button --- */}
+                    {missingCheckoutCount > 1 && (
+                        <button onClick={handleFixAll} disabled={isFixingAll || isScanning} className="flex items-center gap-1.5 text-xs font-bold bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 px-3 py-1.5 rounded transition-colors disabled:opacity-50">
+                            {isFixingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+                            {isFixingAll ? "Fixing All..." : `Fix All Check-outs (${missingCheckoutCount})`}
+                        </button>
+                    )}
+                    
+                    <button onClick={handleForceScan} disabled={isScanning || isFixingAll} className="flex items-center gap-2 text-[10px] uppercase font-bold text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50">
+                        {isScanning ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                        {isScanning ? "Scanning..." : "Re-Scan"}
+                    </button>
+                </div>
             </div>
             <ul className="space-y-3">
                 {alerts.map(alert => {

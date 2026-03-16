@@ -49,24 +49,40 @@ const performOperationalScan = async () => {
             .where("date", "<", todayStr) 
             .get();
 
-        openShiftsSnap.forEach(doc => {
-            const data = doc.data();
-            if (data.date >= todayStr) return;
+        for (const docSnap of openShiftsSnap.docs) {
+            const data = docSnap.data();
+            if (data.date >= todayStr) continue;
 
-            const alertRef = db.collection("manager_alerts").doc(`missing_out_${doc.id}`);
+            // --- NEW: Fetch their specific schedule for that day to get the exact end time ---
+            const schedSnap = await db.collection("schedules")
+                .where("staffId", "==", data.staffId)
+                .where("date", "==", data.date)
+                .get();
+
+            let scheduledEndTime = "23:00"; // Default fallback if no schedule exists
+            if (!schedSnap.empty) {
+                const schedData = schedSnap.docs[0].data();
+                if (schedData.endTime) {
+                    scheduledEndTime = schedData.endTime;
+                }
+            }
+            // ---------------------------------------------------------------------------------
+
+            const alertRef = db.collection("manager_alerts").doc(`missing_out_${docSnap.id}`);
             batch.set(alertRef, {
                 type: "missing_checkout",
                 status: "pending",
-                attendanceDocId: doc.id,
+                attendanceDocId: docSnap.id,
                 date: data.date,
                 staffId: data.staffId,
                 staffName: data.staffName || "Unknown",
                 checkInTime: data.checkInTime,
+                scheduledEndTime: scheduledEndTime, // <-- Save the dynamic time to the alert
                 createdAt: Timestamp.now(),
                 message: "Staff forgot to check out."
             });
             alertsCount++;
-        });
+        }
 
         // 2. RISK ANALYSIS
         for (const staffDoc of activeStaffSnap.docs) {
