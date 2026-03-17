@@ -8,6 +8,7 @@ import {
 
 const settingsSections = [
     { id: 'company-info', title: 'Company Information' },
+    { id: 'role-descriptions', title: 'Role Descriptions' }, // <-- NEW SECTION
     { id: 'attendance-bonus', title: 'Attendance Bonus' },
     { id: 'financial-rules', title: 'Financial & Payroll Rules' },
     { id: 'leave-entitlements', title: 'Leave Entitlements' },

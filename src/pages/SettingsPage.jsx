@@ -5,16 +5,16 @@ import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
 // Import the setting components
 import { CompanyInfoSettings } from '../components/Settings/CompanyInfoSettings';
+import { RoleDescriptionsSettings } from '../components/Settings/RoleDescriptionsSettings'; // <-- NEW IMPORT
 import { AttendanceBonusSettings } from '../components/Settings/AttendanceBonusSettings';
 import { FinancialRulesSettings } from '../components/Settings/FinancialRulesSettings';
 import { LeaveEntitlementsSettings } from '../components/Settings/LeaveEntitlementsSettings';
 import { PublicHolidaysSettings } from '../components/Settings/PublicHolidaysSettings';
 import { GeofenceSettings } from '../components/Settings/GeofenceSettings';
 import { DepartmentManager } from '../components/Settings/DepartmentManager';
-import { RoleDescriptionsSettings } from '../components/Settings/RoleDescriptionsSettings';
 
 export default function SettingsPage({ db, companyConfig }) {
-        const handleAddDepartment = async (deptName) => { 
+    const handleAddDepartment = async (deptName) => { 
         await updateDoc(doc(db, 'settings', 'company_config'), { departments: arrayUnion(deptName) }); 
     };
     const handleDeleteDepartment = async (dept) => { 
@@ -40,6 +40,13 @@ export default function SettingsPage({ db, companyConfig }) {
                     db={db}
                     companyConfig={companyConfig} 
                 />
+                
+                {/* --- NEW: Role Descriptions Settings --- */}
+                <RoleDescriptionsSettings 
+                    db={db} 
+                    config={companyConfig} 
+                />
+
                 <AttendanceBonusSettings 
                     db={db}
                     config={companyConfig} 
@@ -67,8 +74,7 @@ export default function SettingsPage({ db, companyConfig }) {
                     onAddDepartment={handleAddDepartment}
                     onDeleteDepartment={handleDeleteDepartment}
                 />
-                <RoleDescriptionsSettings db={db} config={companyConfig} />
             </div>
         </div>
     );
-};
+}
