@@ -9,42 +9,31 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-// --- MODIFIED: Added FileText and Loader2 icons for the contract button ---
-import { Archive, UserCheck, Trash, Key, FileText, Loader2 } from 'lucide-react'; 
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut } from 'lucide-react'; 
 import * as dateUtils from '../../utils/dateUtils.js';
-import { generateContract } from '../../utils/contractGenerator';
 
-// Initialize Functions
+// Import the new Universal Generator
+import { generateDocument } from '../../utils/documentGenerator';
+
 const functionsDefault = getFunctions(app); 
 const functionsAsia = getFunctions(app, "asia-southeast1");
 
-// Prepare Callable References
 const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff'); 
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
-// Helper to get initial form data
 const getInitialFormData = (staff) => {
     const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
     const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
     let initialData = {
-        email: staff.email || '',
-        phoneNumber: staff.phoneNumber || '',
-        birthdate: formattedBirthdate || '',
-        startDate: formattedStartDate || '',
-        bankAccount: staff.bankAccount || '',
-        address: staff.address || '',
-        emergencyContactName: staff.emergencyContactName || '',
-        emergencyContactPhone: staff.emergencyContactPhone || '',
+        email: staff.email || '', phoneNumber: staff.phoneNumber || '', birthdate: formattedBirthdate || '',
+        startDate: formattedStartDate || '', bankAccount: staff.bankAccount || '', address: staff.address || '',
+        emergencyContactName: staff.emergencyContactName || '', emergencyContactPhone: staff.emergencyContactPhone || '',
         isSsoRegistered: staff.isSsoRegistered ?? true,
     };
-    if (staff.firstName || staff.lastName) {
-        return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
-    }
+    if (staff.firstName || staff.lastName) return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
     const nameParts = (staff.fullName || '').split(' ');
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
-    return { ...initialData, firstName, lastName, nickname: staff.nickname || '' };
+    return { ...initialData, firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '', nickname: staff.nickname || '' };
 };
 
 export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole }) {
@@ -57,153 +46,120 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [isBonusEligible, setIsBonusEligible] = useState(staff.isAttendanceBonusEligible ?? true);
     
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
-    
-    // --- NEW: State for Contract Generator ---
     const [isGenerating, setIsGenerating] = useState(false);
 
     useEffect(() => {
         setFormData(getInitialFormData(staff));
         setBonusStreak(staff.bonusStreak || 0);
         setIsBonusEligible(staff.isAttendanceBonusEligible ?? true);
-        setIsEditing(false);
-        setError('');
+        setIsEditing(false); setError('');
     }, [staff]);
 
-    const currentJob = (staff.jobHistory || []).sort((a, b) => {
-        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
-        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
+    // Smart Job Selection: Sort history by startDate (newest first)
+    const currentJob = [...(staff.jobHistory || [])].sort((a, b) => {
+        const dateA = new Date(b.startDate || 0);
+        const dateB = new Date(a.startDate || 0);
         return dateA - dateB;
     })[0] || {};
 
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
+    
     const handleInputChange = (e) => {
         const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
         setFormData(prev => ({ ...prev, [e.target.id]: value }));
     };
 
-    // --- Action Handlers ---
     const handleSaveDetails = async () => {
-        setIsSaving(true);
-        setError('');
+        setIsSaving(true); setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             const updateData = {
-                firstName: formData.firstName || null,
-                lastName: formData.lastName || null,
-                nickname: formData.nickname || null,
-                email: formData.email || null,
-                phoneNumber: formData.phoneNumber || null,
+                firstName: formData.firstName || null, lastName: formData.lastName || null, nickname: formData.nickname || null,
+                email: formData.email || null, phoneNumber: formData.phoneNumber || null,
                 birthdate: dateUtils.parseISODateString(formData.birthdate) ? formData.birthdate : null,
                 startDate: dateUtils.parseISODateString(formData.startDate) ? formData.startDate : null,
-                bankAccount: formData.bankAccount || null,
-                address: formData.address || null,
-                emergencyContactName: formData.emergencyContactName || null,
-                emergencyContactPhone: formData.emergencyContactPhone || null,
+                bankAccount: formData.bankAccount || null, address: formData.address || null,
+                emergencyContactName: formData.emergencyContactName || null, emergencyContactPhone: formData.emergencyContactPhone || null,
                 isSsoRegistered: formData.isSsoRegistered,
             };
-            if (updateData.firstName) {
-                updateData.fullName = null;
-            }
+            if (updateData.firstName) updateData.fullName = null;
             await updateDoc(staffDocRef, updateData);
             setIsEditing(false);
-        } catch (err) { setError("Failed to save profile details."); console.error("Save Details Error:", err); }
-        finally { setIsSaving(false); }
+        } catch (err) { setError("Failed to save profile details."); } finally { setIsSaving(false); }
     };
 
     const handleAddNewJob = async (newJobData) => {
-        if (!dateUtils.parseISODateString(newJobData.startDate)) {
-            alert("Invalid start date provided for new job role.");
-            return;
+        if (!dateUtils.parseISODateString(newJobData.startDate)) { alert("Invalid start date provided."); return; }
+        
+        // Fix 49,999 bug by stripping commas and rounding
+        if (newJobData.baseSalary) {
+            newJobData.baseSalary = Math.round(Number(String(newJobData.baseSalary).replace(/,/g, '')));
         }
-        setIsSaving(true); 
-        setError('');
+
+        setIsSaving(true); setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { jobHistory: arrayUnion(newJobData) });
-        } catch (err) {
-            alert("Failed to add job role.");
-            setError("Failed to add job role.");
-            console.error("Add Job Error:", err);
-        } finally {
-            setIsSaving(false);
-        }
+            
+            const oldTitle = currentJob.position || currentJob.title || "";
+            const oldDept = currentJob.department || "";
+            // Use fallback to position or title to match both DB schemas
+            const newTitle = newJobData.position || newJobData.title || "";
+            const isPromotion = (newTitle !== oldTitle || newJobData.department !== oldDept);
+            const docType = isPromotion ? 'promotion' : 'salary_increase';
+
+            if (window.confirm(`Job role saved! Would you like to generate the ${isPromotion ? 'Promotion' : 'Salary Increase'} Addendum document for them to sign?`)) {
+                const newSalaryNum = Number(newJobData.baseSalary || 0);
+                const extraData = {
+                    NEW_JOB_TITLE: newTitle, NEW_DEPARTMENT: newJobData.department,
+                    NEW_START_DATE: dateUtils.formatCustom(new Date(newJobData.startDate), 'dd MMMM yyyy'),
+                    NEW_SALARY: newSalaryNum.toLocaleString(), NEW_SALARY_EN: newSalaryNum.toLocaleString(), NEW_SALARY_TH: newSalaryNum.toLocaleString(),
+                };
+                await handleGenerate(docType, extraData);
+            }
+        } catch (err) { alert("Failed to add job role."); } finally { setIsSaving(false); }
     };
 
     const handleEditJob = async (oldJob, updatedJob) => {
-        if (!dateUtils.parseISODateString(updatedJob.startDate)) {
-            alert("Invalid start date provided.");
-            return;
+        if (!dateUtils.parseISODateString(updatedJob.startDate)) { alert("Invalid start date provided."); return; }
+        
+        if (updatedJob.baseSalary) {
+            updatedJob.baseSalary = Math.round(Number(String(updatedJob.baseSalary).replace(/,/g, '')));
         }
-        setIsSaving(true); 
-        setError('');
+
+        setIsSaving(true); setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { jobHistory: arrayRemove(oldJob) });
             await updateDoc(staffDocRef, { jobHistory: arrayUnion(updatedJob) });
-        } catch (err) {
-            alert("Failed to update job role.");
-            setError("Failed to update job role.");
-            console.error("Edit Job Error:", err);
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (err) { alert("Failed to update job role."); } finally { setIsSaving(false); }
     };
 
     const handleDeleteJob = async (jobToDelete) => {
-        const displayStartDate = dateUtils.formatDisplayDate(jobToDelete.startDate);
-        if (window.confirm(`Are you sure you want to delete the role "${jobToDelete.position}" started on ${displayStartDate}?`)) {
-            setIsSaving(true); 
-            setError('');
+        if (window.confirm(`Are you sure you want to delete this role?`)) {
+            setIsSaving(true); setError('');
             try {
                 const staffDocRef = doc(db, 'staff_profiles', staff.id);
                 await updateDoc(staffDocRef, { jobHistory: arrayRemove(jobToDelete) });
-            } catch (err) {
-                alert("Failed to delete job history entry.");
-                setError("Failed to delete job history entry.");
-                console.error("Delete Job Error:", err);
-            } finally {
-                setIsSaving(false);
-            }
+            } catch (err) { alert("Failed to delete job."); } finally { setIsSaving(false); }
         }
     };
 
     const handleDeleteStaff = async () => {
-        if (window.confirm(`DELETE STAFF?\n\nAre you sure you want to permanently delete ${displayName}? This will erase all their data and cannot be undone.`) && window.confirm("Final confirmation: Delete this staff member?")) {
-            setIsSaving(true);
-            setError('');
-            try {
-                await deleteStaffFunc({ staffId: staff.id });
-                onClose();
-            } catch (err) {
-                alert(`Error deleting staff: ${err.message}`);
-                setError(`Error deleting staff: ${err.message}`);
-                console.error("Delete Staff Error:", err);
-            } finally {
-                setIsSaving(false);
-            }
+        if (window.confirm(`DELETE STAFF?`) && window.confirm("Final confirmation: Delete this staff member?")) {
+            setIsSaving(true); setError('');
+            try { await deleteStaffFunc({ staffId: staff.id }); onClose(); } catch (err) { alert(`Error deleting staff.`); } finally { setIsSaving(false); }
         }
     };
 
     const handleReactivateStaff = async () => {
-        setIsSaving(true);
-        setError('');
+        setIsSaving(true); setError('');
         try {
-            if (!window.confirm(`Set ${displayName} as Active? This clears their end date.`)) {
-                setIsSaving(false); return;
-            }
+            if (!window.confirm(`Set ${displayName} as Active?`)) return;
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await Promise.all([
-                updateDoc(staffDocRef, { status: 'active', endDate: null }),
-                setStaffAuthStatus({ staffId: staff.id, disabled: false })
-            ]);
+            await Promise.all([ updateDoc(staffDocRef, { status: 'active', endDate: null }), setStaffAuthStatus({ staffId: staff.id, disabled: false }) ]);
             onClose();
-        } catch (err) {
-            alert(`Failed to activate staff: ${err.message}`);
-            setError(`Failed to activate staff: ${err.message}`);
-            console.error("Activate Error:", err);
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (err) { alert(`Failed to activate staff.`); } finally { setIsSaving(false); }
     };
 
     const handleUploadFile = async (fileToUpload) => {
@@ -219,8 +175,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
         } catch(err) {
              alert(`Failed to upload file: ${err.message}`);
-             setError(`Failed to upload file: ${err.message}`);
-             console.error("File Upload Error:", err);
         } finally { setIsSaving(false); }
     };
 
@@ -229,15 +183,13 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsSaving(true); setError('');
         try {
             const storage = getStorage();
-            if (!fileToDelete.path) { throw new Error("File path is missing."); }
+            if (!fileToDelete.path) throw new Error("File path is missing."); 
             const fileRef = ref(storage, fileToDelete.path);
             await deleteObject(fileRef);
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayRemove(fileToDelete) });
         } catch (error) {
-            console.error("File deletion error:", error);
             alert(`Failed to delete file: ${error.message}`);
-            setError(`Failed to delete file: ${error.message}`);
         } finally { setIsSaving(false); }
     };
 
@@ -251,8 +203,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             alert(result.data.result);
         } catch (err) {
             alert(`Failed to reset password: ${err.message}`);
-            setError(`Failed to reset password: ${err.message}`);
-            console.error("Password Reset Error:", err);
         } finally { setIsSaving(false); }
     };
 
@@ -269,45 +219,49 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
              alert(`Bonus streak for ${displayName} has been set to ${streakValue}.`);
          } catch (err) {
              alert("Failed to update bonus streak.");
-             setError("Failed to update bonus streak.");
-             console.error("Bonus Streak Update Error:", err);
-         } finally {
-            setIsSaving(false);
-         }
+         } finally { setIsSaving(false); }
      };
 
     const handleToggleBonusEligibility = async (e) => {
         const newValue = e.target.checked;
         setIsBonusEligible(newValue); 
-        setIsSaving(true);
-        setError('');
+        setIsSaving(true); setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { isAttendanceBonusEligible: newValue });
         } catch (err) {
             alert("Failed to update bonus eligibility.");
-            setError("Failed to update bonus eligibility.");
-            console.error("Bonus Eligibility Error:", err);
             setIsBonusEligible(!newValue); 
-        } finally {
-            setIsSaving(false);
-        }
+        } finally { setIsSaving(false); }
     };
 
-    // --- NEW: Contract Generator Handler ---
-    const handleGenerateContract = async () => {
+    const handleGenerate = async (docType, extraData = {}) => {
         setIsGenerating(true);
-        const result = await generateContract(staff, companyConfig);
-        if (!result.success) {
-            alert("Failed to generate contract: " + result.error);
-        }
+        const result = await generateDocument(docType, staff, companyConfig, extraData);
+        if (!result.success) alert("Failed to generate document: " + result.error);
         setIsGenerating(false);
     };
 
-    // --- End Action Handlers ---
+    const triggerDocumentForm = (docType) => {
+        let extraData = {};
+        if (docType === 'warning') {
+            const level = window.prompt("What level is this warning? (e.g., 1st Warning, Final Warning)"); if (!level) return;
+            const incident = window.prompt("Date of the incident? (e.g., 15 March 2026)"); if (!incident) return;
+            const reason = window.prompt("Reason for warning? (e.g., Late arrival by 2 hours without notice)"); if (!reason) return;
+            const consequence = window.prompt("Consequence? (e.g., 1-day suspension without pay)"); if (!consequence) return;
+            extraData = { WARNING_LEVEL: level, INCIDENT_DATE: incident, REASON: reason, CONSEQUENCE: consequence };
+        }
+        if (docType === 'leave') {
+            const start = window.prompt("Leave Start Date? (e.g., 10 April 2026)"); if (!start) return;
+            const end = window.prompt("Leave End Date? (e.g., 15 April 2026)"); if (!end) return;
+            const reason = window.prompt("Reason for special leave?"); if (!reason) return;
+            extraData = { LEAVE_START_DATE: start, LEAVE_END_DATE: end, LEAVE_REASON: reason };
+        }
+        handleGenerate(docType, extraData);
+    };
 
     const getTabClasses = (tabName) => {
-         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors`;
+         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`;
      };
     const isActive = staff.status === 'active' || staff.status === undefined || staff.status === null;
 
@@ -316,95 +270,113 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             
             {isOffboardingModalOpen && (
                 <OffboardingModal 
-                    db={db} 
-                    staff={staff} 
-                    companyConfig={companyConfig} 
+                    db={db} staff={staff} companyConfig={companyConfig} 
                     onClose={() => setIsOffboardingModalOpen(false)} 
                     onSuccess={async (shouldDisableImmediately) => {
                         setIsOffboardingModalOpen(false);
-                        if (shouldDisableImmediately) {
-                            try {
-                                await setStaffAuthStatus({ staffId: staff.id, disabled: true });
-                            } catch(e) { 
-                                console.error("Failed to disable auth login", e); 
-                            }
+                        if (shouldDisableImmediately) { try { await setStaffAuthStatus({ staffId: staff.id, disabled: true }); } catch(e) {} }
+                        if(window.confirm("Staff member archived! Would you like to print the Resignation Letter for them to sign?")) {
+                            await handleGenerate('resignation', { RESIGNATION_NOTICE_DATE: dateUtils.formatCustom(new Date(), 'dd MMMM yyyy'), LAST_WORKING_DAY: dateUtils.formatCustom(new Date(staff.endDate || new Date()), 'dd MMMM yyyy') });
                         }
                         onClose();
                     }} 
                 />
             )}
 
-            {/* --- MODIFIED: Added flex wrapper for Tabs & Generate Button --- */}
             <div className="border-b border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
-                <nav className="-mb-px flex space-x-6 overflow-x-auto w-full sm:w-auto" aria-label="Tabs">
-                    <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>
-                        Profile Details
-                    </button>
-                    <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>
-                        Job & Salary
-                    </button>
-                    <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>
-                        Documents
-                    </button>
+                <nav className="-mb-px flex space-x-6 overflow-x-auto w-full" aria-label="Tabs">
+                    <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>Profile Details</button>
+                    <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
+                    <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
                     {userRole === 'manager' && (
-                        <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>
-                            Settings & Stats
+                        <button onClick={() => setActiveTab('forms')} className={getTabClasses('forms')}>
+                            <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> HR Forms</span>
                         </button>
                     )}
+                    {userRole === 'manager' && <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>Settings & Stats</button>}
                 </nav>
-                
-                {/* The Generate Contract Button */}
-                {userRole === 'manager' && (
-                    <div className="pb-2 w-full sm:w-auto">
-                        <button 
-                            onClick={handleGenerateContract}
-                            disabled={isGenerating || isSaving}
-                            className="w-full sm:w-auto flex justify-center items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors disabled:opacity-50"
-                            title="Download filled Employment Contract"
-                        >
-                            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                            {isGenerating ? "Generating..." : "Generate Contract"}
-                        </button>
-                    </div>
-                )}
             </div>
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
 
-            {activeTab === 'details' && (
-                <div className="space-y-6">
-                    {isEditing ? (
-                        <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} />
-                    ) : (
-                        <ProfileDetailsView staff={staff} currentJob={currentJob} />
-                    )}
+            {/* --- NEW TAB: HR Forms UI --- */}
+            {activeTab === 'forms' && userRole === 'manager' && (
+                <div className="space-y-4">
+                    <div className="mb-6">
+                        <h3 className="text-xl font-semibold text-white">Official HR Documents</h3>
+                        <p className="text-sm text-gray-400 mt-1">Select a document to automatically populate it with this staff member's data.</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <button onClick={() => handleGenerate('contract')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-indigo-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                            <div className="bg-indigo-900/50 p-3 rounded-lg mr-4 group-hover:bg-indigo-600 transition-colors">
+                                {isGenerating ? <Loader2 className="h-6 w-6 text-indigo-300 animate-spin" /> : <FileBadge className="h-6 w-6 text-indigo-300 group-hover:text-white transition-colors" />}
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium">Main Employment Contract</h4>
+                                <p className="text-xs text-gray-400 mt-1">Standard bilingual contract & rules</p>
+                            </div>
+                        </button>
+
+                        <button onClick={() => handleGenerate('certificate')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-blue-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                            <div className="bg-blue-900/50 p-3 rounded-lg mr-4 group-hover:bg-blue-600 transition-colors">
+                                <FileText className="h-6 w-6 text-blue-300 group-hover:text-white transition-colors" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium">Certificate of Employment</h4>
+                                <p className="text-xs text-gray-400 mt-1">Proof of employment letter for visas/loans</p>
+                            </div>
+                        </button>
+
+                        <button onClick={() => triggerDocumentForm('leave')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                            <div className="bg-green-900/50 p-3 rounded-lg mr-4 group-hover:bg-green-600 transition-colors">
+                                <PlaneTakeoff className="h-6 w-6 text-green-300 group-hover:text-white transition-colors" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium">Special Leave Request</h4>
+                                <p className="text-xs text-gray-400 mt-1">Form for extended or unpaid leave</p>
+                            </div>
+                        </button>
+
+                        <button onClick={() => triggerDocumentForm('warning')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-amber-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                            <div className="bg-amber-900/50 p-3 rounded-lg mr-4 group-hover:bg-amber-600 transition-colors">
+                                <ShieldAlert className="h-6 w-6 text-amber-300 group-hover:text-white transition-colors" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium">Disciplinary Warning</h4>
+                                <p className="text-xs text-gray-400 mt-1">Issue official 1st, 2nd, or Final warnings</p>
+                            </div>
+                        </button>
+
+                        <button onClick={() => handleGenerate('uniform')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                            <div className="bg-purple-900/50 p-3 rounded-lg mr-4 group-hover:bg-purple-600 transition-colors">
+                                <Shirt className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium">Uniform Deduction Form</h4>
+                                <p className="text-xs text-gray-400 mt-1">Authorization for lost/extra uniform costs</p>
+                            </div>
+                        </button>
+
+                        <button onClick={() => handleGenerate('resignation')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-red-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                            <div className="bg-red-900/50 p-3 rounded-lg mr-4 group-hover:bg-red-600 transition-colors">
+                                <LogOut className="h-6 w-6 text-red-300 group-hover:text-white transition-colors" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium">Resignation Letter</h4>
+                                <p className="text-xs text-gray-400 mt-1">Voluntary resignation and waiver form</p>
+                            </div>
+                        </button>
+                    </div>
                 </div>
             )}
 
-            {activeTab === 'job' && (
-                <div className="space-y-6">
-                     <JobHistoryManager
-                        jobHistory={staff.jobHistory}
-                        departments={departments}
-                        onAddNewJob={handleAddNewJob}
-                        onEditJob={handleEditJob}
-                        onDeleteJob={handleDeleteJob}
-                    />
-                </div>
-            )}
-
-            {activeTab === 'documents' && (
-                <DocumentManager
-                    documents={staff.documents}
-                    onUploadFile={handleUploadFile}
-                    onDeleteFile={handleDeleteFile}
-                    isSaving={isSaving}
-                />
-            )}
+            {activeTab === 'details' && ( <div className="space-y-6"> {isEditing ? <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} /> : <ProfileDetailsView staff={staff} currentJob={currentJob} />} </div> )}
+            {activeTab === 'job' && ( <div className="space-y-6"> <JobHistoryManager jobHistory={staff.jobHistory} departments={departments} onAddNewJob={handleAddNewJob} onEditJob={handleEditJob} onDeleteJob={handleDeleteJob} /> </div> )}
+            {activeTab === 'documents' && <DocumentManager documents={staff.documents} onUploadFile={handleUploadFile} onDeleteFile={handleDeleteFile} isSaving={isSaving} /> }
 
              {activeTab === 'settings' && userRole === 'manager' && (
                 <div className="space-y-6">
-                     {/* Bonus Management */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                            <h4 className="text-base font-semibold text-white">Bonus Management</h4>
                            <div className="mt-4 space-y-4">
@@ -412,68 +384,36 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                                     <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
                                     <div className="mt-2 flex items-center space-x-4">
                                         <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
-                                        <input
-                                            type="number"
-                                            value={bonusStreak}
-                                            onChange={(e) => setBonusStreak(e.target.value)}
-                                            className="w-24 bg-gray-700 rounded-md p-1 text-white"
-                                            min="0"
-                                        />
+                                        <input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" min="0" />
                                         <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
                                     </div>
                                 </div>
                                 <div className="border-t border-gray-700 mt-4 pt-4">
                                     <div className="flex items-center justify-between">
-                                        <div>
-                                            <h5 className="font-medium text-white">Attendance Bonus</h5>
-                                            <p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p>
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            id="bonus-eligible-toggle"
-                                            role="switch"
-                                            checked={isBonusEligible}
-                                            onChange={handleToggleBonusEligibility}
-                                            disabled={isSaving}
-                                            className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"
-                                        />
+                                        <div><h5 className="font-medium text-white">Attendance Bonus</h5><p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p></div>
+                                        <input type="checkbox" id="bonus-eligible-toggle" role="switch" checked={isBonusEligible} onChange={handleToggleBonusEligibility} disabled={isSaving} className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
                                     </div>
                                 </div>
                            </div>
                         </div>
 
-                     {/* Staff UID */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                         <h4 className="text-base font-semibold text-white">Staff Information</h4>
                         <div className="mt-4">
                             <label htmlFor="staffUid" className="block text-sm font-medium text-gray-400 mb-1">Staff User ID (UID)</label>
-                            <input 
-                                type="text" 
-                                id="staffUid"
-                                readOnly 
-                                value={staff.id} 
-                                className="w-full mt-1 px-3 py-2 bg-gray-900 text-gray-400 rounded-md border border-gray-700 select-all"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">For database lookups.</p>
+                            <input type="text" id="staffUid" readOnly value={staff.id} className="w-full mt-1 px-3 py-2 bg-gray-900 text-gray-400 rounded-md border border-gray-700 select-all" />
                         </div>
                      </div>
                      
-                     {/* Staff Actions */}
                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
                          <h4 className="text-base font-semibold text-white">Staff Actions</h4>
                          <div>
-                            {isActive ? (
-                                <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button>
-                            ) : (
-                                <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button>
-                            )}
+                            {isActive ? ( <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button> ) : ( <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button> )}
                          </div>
-                         <div>
-                             <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Reset password"> <Key className="h-4 w-4 mr-2" /> Reset Password </button>
-                         </div>
+                         <div><button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password"> <Key className="h-4 w-4 mr-2" /> Reset Password </button></div>
                          {!isActive && (
                             <div className="pt-4 border-t border-gray-700">
-                                 <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed" title="Delete staff permanently"> <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently </button>
+                                 <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently"> <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently </button>
                                 <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
                              </div>
                          )}

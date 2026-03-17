@@ -20,29 +20,6 @@ export const ProfileActionButtons = ({
             
             {/* Left-aligned buttons */}
             <div className="flex space-x-3 w-full sm:w-auto">
-                {/* --- NEW BUTTON: Generate Resignation Letter --- */}
-                {!isEditing && staffProfile && (
-                    <button 
-                        type="button"
-                        onClick={() => setShowResignationModal(true)}
-                        className="flex items-center justify-center w-full sm:w-auto bg-blue-900/40 hover:bg-blue-800 text-blue-300 px-4 py-2 rounded-lg font-bold transition-colors border border-blue-700/50"
-                    >
-                        <FileText className="w-5 h-5 mr-2" />
-                        Generate Resignation Letter
-                    </button>
-                )}
-            </div>
-
-            {/* Right-aligned buttons (Close, Edit/Save/Cancel) */}
-            <div className="flex space-x-3 w-full sm:w-auto justify-end">
-                <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-6 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-white"
-                >
-                    Close
-                </button>
-
                 {/* Conditional Rendering for Save/Cancel/Edit */}
                 {!isEditing && activeTab === 'details' && (
                     <button
@@ -79,6 +56,17 @@ export const ProfileActionButtons = ({
                     </>
                 )}
                  {/* --- End Conditional Rendering --- */}
+            </div>
+
+            {/* Right-aligned buttons (Close, Edit/Save/Cancel) */}
+            <div className="flex space-x-3 w-full sm:w-auto justify-end">
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-6 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-white"
+                >
+                    Close
+                </button>
             </div>
 
             {/* --- NEW: The Hidden Print Modal --- */}

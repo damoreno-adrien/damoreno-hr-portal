@@ -18,6 +18,13 @@ export const FinancialRulesSettings = ({ db, config }) => {
                 ssoCap: config.ssoCap || 0,
                 overtimeRate: config.overtimeRate || 1.0,
                 overtimeThreshold: config.overtimeThreshold || 30,
+                
+                // --- NEW: Contract & Operational Variables ---
+                probationMonths: config.probationMonths ?? 3,
+                dailyAllowanceTHB: config.dailyAllowanceTHB ?? 50,
+                mealDiscountPercent: config.mealDiscountPercent ?? 50,
+                staffUniforms: config.staffUniforms ?? 3,
+                standardStartTime: config.standardStartTime || '14:00',
             };
             setLocalConfig(data);
             setOriginalConfig(data);
@@ -41,10 +48,17 @@ export const FinancialRulesSettings = ({ db, config }) => {
                 ssoCap: Number(localConfig.ssoCap),
                 overtimeRate: Number(localConfig.overtimeRate),
                 overtimeThreshold: Number(localConfig.overtimeThreshold),
+                
+                // --- NEW: Contract Variables ---
+                probationMonths: Number(localConfig.probationMonths),
+                dailyAllowanceTHB: Number(localConfig.dailyAllowanceTHB),
+                mealDiscountPercent: Number(localConfig.mealDiscountPercent),
+                staffUniforms: Number(localConfig.staffUniforms),
+                standardStartTime: localConfig.standardStartTime, // This is a string (time)
             };
             await updateDoc(configDocRef, dataToSave);
             
-            setOriginalConfig(localConfig); // Update original state
+            setOriginalConfig(localConfig); 
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
         } catch (error) {
@@ -74,7 +88,7 @@ export const FinancialRulesSettings = ({ db, config }) => {
                 </div>
             </div>
 
-            {/* --- NEW SECTION: Overtime Rules --- */}
+            {/* --- Overtime Rules --- */}
             <div className="mt-8 pt-6 border-t border-gray-700">
                 <h4 className="text-lg font-medium text-white mb-4">Overtime Rules</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -90,11 +104,7 @@ export const FinancialRulesSettings = ({ db, config }) => {
                             step="0.1" 
                             min="1.0"
                             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" 
-                            placeholder="e.g. 1.0 or 1.5"
                         />
-                        <p className="text-xs text-gray-500 mt-1">
-                            Default multiplier for approved overtime hours (1.0 = Normal Rate, 1.5 = Time and a half).
-                        </p>
                     </div>
                     <div>
                         <label htmlFor="overtimeThreshold" className="block text-sm font-medium text-gray-300 mb-1">
@@ -108,9 +118,35 @@ export const FinancialRulesSettings = ({ db, config }) => {
                             min="0"
                             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" 
                         />
-                        <p className="text-xs text-gray-500 mt-1">
-                            Staff must work at least this many minutes over their schedule to flag as "Potential OT".
-                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* --- NEW: Operational & Contract Rules --- */}
+            <div className="mt-8 pt-6 border-t border-gray-700">
+                <h4 className="text-lg font-medium text-white mb-4">Operational & Contract Rules</h4>
+                <p className="text-xs text-gray-400 mb-4">These variables are automatically injected when generating Staff Employment Contracts.</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label htmlFor="probationMonths" className="block text-sm font-medium text-gray-300 mb-1">Probation Period (Months)</label>
+                        <input type="number" id="probationMonths" value={localConfig.probationMonths ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                        <label htmlFor="dailyAllowanceTHB" className="block text-sm font-medium text-gray-300 mb-1">Daily Allowance (THB)</label>
+                        <input type="number" id="dailyAllowanceTHB" value={localConfig.dailyAllowanceTHB ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                        <label htmlFor="mealDiscountPercent" className="block text-sm font-medium text-gray-300 mb-1">Staff Meal Discount (%)</label>
+                        <input type="number" id="mealDiscountPercent" value={localConfig.mealDiscountPercent ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                        <label htmlFor="staffUniforms" className="block text-sm font-medium text-gray-300 mb-1">Provided Uniforms (Count)</label>
+                        <input type="number" id="staffUniforms" value={localConfig.staffUniforms ?? ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                        <label htmlFor="standardStartTime" className="block text-sm font-medium text-gray-300 mb-1">Standard Start Time</label>
+                        <input type="time" id="standardStartTime" value={localConfig.standardStartTime || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white [color-scheme:dark]" />
                     </div>
                 </div>
             </div>
@@ -120,7 +156,7 @@ export const FinancialRulesSettings = ({ db, config }) => {
                 <button
                     onClick={handleSave}
                     disabled={isSaving || !hasChanges}
-                    className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors"
                 >
                     {isSaving ? 'Saving...' : (isSaved ? <><Check className="h-5 w-5 mr-2" /> Saved</> : 'Save Changes')}
                 </button>

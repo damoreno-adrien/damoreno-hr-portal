@@ -11,6 +11,7 @@ import { LeaveEntitlementsSettings } from '../components/Settings/LeaveEntitleme
 import { PublicHolidaysSettings } from '../components/Settings/PublicHolidaysSettings';
 import { GeofenceSettings } from '../components/Settings/GeofenceSettings';
 import { DepartmentManager } from '../components/Settings/DepartmentManager';
+import { RoleDescriptionsSettings } from '../components/Settings/RoleDescriptionsSettings';
 
 export default function SettingsPage({ db, companyConfig }) {
         const handleAddDepartment = async (deptName) => { 
@@ -66,6 +67,7 @@ export default function SettingsPage({ db, companyConfig }) {
                     onAddDepartment={handleAddDepartment}
                     onDeleteDepartment={handleDeleteDepartment}
                 />
+                <RoleDescriptionsSettings db={db} config={companyConfig} />
             </div>
         </div>
     );

@@ -3,40 +3,83 @@ import Docxtemplater from 'docxtemplater';
 import { saveAs } from 'file-saver';
 import { formatCustom } from './dateUtils';
 
-// --- Helper: Translate Numbers to Words (Supports 0-999) ---
+// --- Helper: Translate Numbers to Words  ---
 const translateNumber = (num, lang) => {
-    // 1. Handle completely missing numbers
     if (num === undefined || num === null || num === '') return lang === 'TH' ? 'ศูนย์' : 'zero';
-
     const n = parseInt(num, 10);
     if (isNaN(n)) return num;
-
-    // 2. NEW: Explicitly handle Zero
     if (n === 0) return lang === 'TH' ? 'ศูนย์' : 'zero';
 
     if (lang === 'EN') {
         const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
         const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-        if (n < 20) return ones[n];
-        if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? '-' + ones[n % 10] : '');
-        return n.toString(); // Fallback for huge numbers like salary
+        const scales = ['', 'thousand', 'million'];
+
+        const convertLessThanOneThousand = (num) => {
+            let currentStr = '';
+            if (num % 100 < 20) {
+                currentStr = ones[num % 100];
+                num = Math.floor(num / 100);
+            } else {
+                currentStr = ones[num % 10];
+                num = Math.floor(num / 10);
+                currentStr = tens[num % 10] + (currentStr ? '-' + currentStr : '');
+                num = Math.floor(num / 10);
+            }
+            if (num === 0) return currentStr;
+            return ones[num] + ' hundred' + (currentStr ? ' and ' + currentStr : '');
+        };
+
+        let str = '';
+        let scaleIdx = 0;
+        let tempN = n;
+        while (tempN > 0) {
+            const chunk = tempN % 1000;
+            if (chunk > 0) {
+                const chunkStr = convertLessThanOneThousand(chunk);
+                str = chunkStr + (scales[scaleIdx] ? ' ' + scales[scaleIdx] : '') + (str ? ' ' + str : '');
+            }
+            tempN = Math.floor(tempN / 1000);
+            scaleIdx++;
+        }
+        return str.trim();
     } 
     
     if (lang === 'TH') {
-        const onesTh = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
-        const tensTh = ['', 'สิบ', 'ยี่สิบ', 'สามสิบ', 'สี่สิบ', 'ห้าสิบ', 'หกสิบ', 'เจ็ดสิบ', 'แปดสิบ', 'เก้าสิบ'];
-        if (n === 1) return 'หนึ่ง';
-        if (n === 11) return 'สิบเอ็ด';
-        if (n < 10) return onesTh[n];
-        if (n < 100) return tensTh[Math.floor(n / 10)] + (n % 10 !== 0 ? (n % 10 === 1 ? 'เอ็ด' : onesTh[n % 10]) : '');
-        return n.toString(); // Fallback for huge numbers
+        const digits = ['ศูนย์', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+        const positions = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน', 'ล้าน'];
+
+        let str = '';
+        const numStr = n.toString();
+        for (let i = 0; i < numStr.length; i++) {
+            const digit = parseInt(numStr[i]);
+            const position = numStr.length - 1 - i;
+
+            if (digit === 0) continue;
+
+            if (position % 6 === 1 && digit === 1) {
+                str += 'สิบ'; // 10
+            } else if (position % 6 === 1 && digit === 2) {
+                str += 'ยี่สิบ'; // 20
+            } else if (position % 6 === 0 && digit === 1 && i > 0 && numStr[i-1] !== '0') {
+                str += 'เอ็ด'; // Ends in 1 (e.g., 11, 21)
+            } else {
+                str += digits[digit] + positions[position % 6];
+            }
+            
+            // Handle Millions place
+            if (position > 0 && position % 6 === 0 && numStr.length > 6) {
+                 str += 'ล้าน';
+            }
+        }
+        return str;
     }
     return n.toString();
 };
 
 export const generateContract = async (staffProfile, companyConfig) => {
     try {
-        // 1. Fetch the template from the public folder (Use v2 if you renamed it!)
+        // 1. Fetch the template from the public folder
         const response = await fetch('/templates/contract_template.docx');
         if (!response.ok) throw new Error("Could not find the contract template. Make sure it is in public/templates/contract_template.docx");
         
@@ -47,33 +90,32 @@ export const generateContract = async (staffProfile, companyConfig) => {
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             linebreaks: true,
-            delimiters: { start: '{{', end: '}}' } // Fixes the double-bracket issue
+            delimiters: { start: '{{', end: '}}' }
         });
 
         // 3. Prepare the Data
-        const salaryNum = Number(staffProfile?.baseSalary || 0);
+        const salaryNum = Number(staffProfile?.jobHistory?.[0]?.baseSalary || 0);
 
         const data = {
             // Employer Variables
-            COMPANY_LEGAL_NAME: companyConfig?.legalName || "Fraternita Co. Ltd.",
-            TRADING_NAME: companyConfig?.tradingName || "Da Moreno At Town",
-            COMPANY_ADDRESS: companyConfig?.address || "8 Yaowarad Rd, Tambon Talat Yai, Mueang Phuket District, Phuket 83000",
+            COMPANY_LEGAL_NAME: companyConfig?.companyName || "COMPANY_LEGAL_NAME",
+            TRADING_NAME: companyConfig?.tradingName || "TRADING_NAME",
+            COMPANY_ADDRESS: companyConfig?.companyAddress || "COMPANY_ADDRESS",
             
             // Loop for Directors
             DIRECTORS: companyConfig?.directors || [
-                { NAME: "Marco VAIANO" },
-                { NAME: "Jeremie Cyrille Alexis PIEYRE" }
+                { NAME: "DIRECTOR_NAME" },
             ],
 
             // Staff Variables
-            STAFF_NAME: staffProfile?.fullName || staffProfile?.firstName || "Unknown",
-            JOB_TITLE: staffProfile?.jobHistory?.[0]?.title || "Staff",
-            START_DATE: staffProfile?.startDate ? formatCustom(new Date(staffProfile.startDate), 'dd MMMM yyyy') : "TBD",
+            STAFF_NAME: staffProfile?.fullName || staffProfile?.firstName + ' ' + staffProfile?.lastName || "FIRST_NAME LAST_NAME",
+            JOB_TITLE: staffProfile?.jobHistory?.[0]?.position || "STAFF_POSITION",
+            START_DATE: staffProfile?.startDate ? formatCustom(new Date(staffProfile.startDate), 'dd MMMM yyyy') : "START_DATE",
             
-            // Salary (Now handles 0 explicitly)
+            // Salary Variables (With EN/TH Translations)
             MONTHLY_SALARY: salaryNum.toLocaleString(),
-            MONTHLY_SALARY_EN: salaryNum === 0 ? 'zero' : salaryNum.toLocaleString(),
-            MONTHLY_SALARY_TH: salaryNum === 0 ? 'ศูนย์' : salaryNum.toLocaleString(),
+            MONTHLY_SALARY_EN: translateNumber(salaryNum, 'EN'),
+            MONTHLY_SALARY_TH: translateNumber(salaryNum, 'TH'),
 
             // Config Variables (With EN/TH Translations)
             ANNUAL_LEAVE_DAYS: companyConfig?.paidAnnualLeaveDays || 6,
