@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from '../../../firebase.js'; 
+import { app } from '../../../firebase.js';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { ProfileDetailsView } from './ProfileDetailsView.jsx';
 import { ProfileDetailsEdit } from './ProfileDetailsEdit';
@@ -9,14 +9,14 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut } from 'lucide-react'; 
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 
-const functionsDefault = getFunctions(app); 
+const functionsDefault = getFunctions(app);
 const functionsAsia = getFunctions(app, "asia-southeast1");
 
-const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff'); 
+const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff');
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
@@ -42,7 +42,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [error, setError] = useState('');
     const [bonusStreak, setBonusStreak] = useState(staff.bonusStreak || 0);
     const [isBonusEligible, setIsBonusEligible] = useState(staff.isAttendanceBonusEligible ?? true);
-    
+
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
 
@@ -61,7 +61,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     })[0] || {};
 
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
-    
+
     const handleInputChange = (e) => {
         const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
         setFormData(prev => ({ ...prev, [e.target.id]: value }));
@@ -88,7 +88,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
     const handleAddNewJob = async (newJobData) => {
         if (!dateUtils.parseISODateString(newJobData.startDate)) { alert("Invalid start date provided."); return; }
-        
+
         // Fix 49,999 bug by stripping commas and rounding
         if (newJobData.baseSalary) {
             newJobData.baseSalary = Math.round(Number(String(newJobData.baseSalary).replace(/,/g, '')));
@@ -98,7 +98,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { jobHistory: arrayUnion(newJobData) });
-            
+
             const oldTitle = currentJob.position || currentJob.title || "";
             const oldDept = currentJob.department || "";
             // Use fallback to position or title to match both DB schemas
@@ -109,10 +109,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             if (window.confirm(`Job role saved! Would you like to generate the ${isPromotion ? 'Promotion' : 'Salary Increase'} Addendum document for them to sign?`)) {
                 const newSalaryNum = Number(newJobData.baseSalary || 0);
                 const extraData = {
-                    NEW_JOB_TITLE: newTitle, 
+                    NEW_JOB_TITLE: newTitle,
                     NEW_DEPARTMENT: newJobData.department,
                     NEW_START_DATE: dateUtils.formatCustom(new Date(newJobData.startDate), 'dd MMMM yyyy'),
-                    NEW_SALARY: newSalaryNum.toLocaleString(), 
+                    NEW_SALARY: newSalaryNum.toLocaleString(),
                     NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'), // <--- FIXED
                     NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'), // <--- FIXED
                 };
@@ -123,7 +123,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
     const handleEditJob = async (oldJob, updatedJob) => {
         if (!dateUtils.parseISODateString(updatedJob.startDate)) { alert("Invalid start date provided."); return; }
-        
+
         if (updatedJob.baseSalary) {
             updatedJob.baseSalary = Math.round(Number(String(updatedJob.baseSalary).replace(/,/g, '')));
         }
@@ -158,7 +158,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         try {
             if (!window.confirm(`Set ${displayName} as Active?`)) return;
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await Promise.all([ updateDoc(staffDocRef, { status: 'active', endDate: null }), setStaffAuthStatus({ staffId: staff.id, disabled: false }) ]);
+            await Promise.all([updateDoc(staffDocRef, { status: 'active', endDate: null }), setStaffAuthStatus({ staffId: staff.id, disabled: false })]);
             onClose();
         } catch (err) { alert(`Failed to activate staff.`); } finally { setIsSaving(false); }
     };
@@ -174,8 +174,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             const fileMetadata = { name: fileToUpload.name, url: downloadURL, path: storageRef.fullPath, uploadedAt: Timestamp.now() };
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
-        } catch(err) {
-             alert(`Failed to upload file: ${err.message}`);
+        } catch (err) {
+            alert(`Failed to upload file: ${err.message}`);
         } finally { setIsSaving(false); }
     };
 
@@ -184,7 +184,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsSaving(true); setError('');
         try {
             const storage = getStorage();
-            if (!fileToDelete.path) throw new Error("File path is missing."); 
+            if (!fileToDelete.path) throw new Error("File path is missing.");
             const fileRef = ref(storage, fileToDelete.path);
             await deleteObject(fileRef);
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
@@ -208,31 +208,31 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     };
 
     const handleSetBonusStreak = async () => {
-         const staffDocRef = doc(db, 'staff_profiles', staff.id);
-         const streakValue = Number(bonusStreak);
-         if (isNaN(streakValue) || streakValue < 0) {
-             alert("Please enter a valid non-negative number for the bonus streak.");
-             return;
-         }
-         setIsSaving(true); setError('');
-         try {
-             await updateDoc(staffDocRef, { bonusStreak: streakValue });
-             alert(`Bonus streak for ${displayName} has been set to ${streakValue}.`);
-         } catch (err) {
-             alert("Failed to update bonus streak.");
-         } finally { setIsSaving(false); }
-     };
+        const staffDocRef = doc(db, 'staff_profiles', staff.id);
+        const streakValue = Number(bonusStreak);
+        if (isNaN(streakValue) || streakValue < 0) {
+            alert("Please enter a valid non-negative number for the bonus streak.");
+            return;
+        }
+        setIsSaving(true); setError('');
+        try {
+            await updateDoc(staffDocRef, { bonusStreak: streakValue });
+            alert(`Bonus streak for ${displayName} has been set to ${streakValue}.`);
+        } catch (err) {
+            alert("Failed to update bonus streak.");
+        } finally { setIsSaving(false); }
+    };
 
     const handleToggleBonusEligibility = async (e) => {
         const newValue = e.target.checked;
-        setIsBonusEligible(newValue); 
+        setIsBonusEligible(newValue);
         setIsSaving(true); setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { isAttendanceBonusEligible: newValue });
         } catch (err) {
             alert("Failed to update bonus eligibility.");
-            setIsBonusEligible(!newValue); 
+            setIsBonusEligible(!newValue);
         } finally { setIsSaving(false); }
     };
 
@@ -243,13 +243,13 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsGenerating(false);
     };
 
-const triggerDocumentForm = (docType) => {
+    const triggerDocumentForm = (docType) => {
         let extraData = {};
-        
+
         // --- NEW: Manual Promotion or Salary Increase ---
         if (docType === 'promotion' || docType === 'salary_increase') {
             const sortedJobs = [...(staff.jobHistory || [])].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0));
-            
+
             if (sortedJobs.length < 2) {
                 alert("Cannot generate automatically: Staff needs at least 2 job history entries (an old one and a new one) to calculate the changes.");
                 return;
@@ -288,25 +288,25 @@ const triggerDocumentForm = (docType) => {
     };
 
     const getTabClasses = (tabName) => {
-         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`;
-     };
+        return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`;
+    };
     const isActive = staff.status === 'active' || staff.status === undefined || staff.status === null;
 
     return (
         <div className="space-y-6 relative">
-            
+
             {isOffboardingModalOpen && (
-                <OffboardingModal 
-                    db={db} staff={staff} companyConfig={companyConfig} 
-                    onClose={() => setIsOffboardingModalOpen(false)} 
+                <OffboardingModal
+                    db={db} staff={staff} companyConfig={companyConfig}
+                    onClose={() => setIsOffboardingModalOpen(false)}
                     onSuccess={async (shouldDisableImmediately) => {
                         setIsOffboardingModalOpen(false);
-                        if (shouldDisableImmediately) { try { await setStaffAuthStatus({ staffId: staff.id, disabled: true }); } catch(e) {} }
-                        if(window.confirm("Staff member archived! Would you like to print the Resignation Letter for them to sign?")) {
+                        if (shouldDisableImmediately) { try { await setStaffAuthStatus({ staffId: staff.id, disabled: true }); } catch (e) { } }
+                        if (window.confirm("Staff member archived! Would you like to print the Resignation Letter for them to sign?")) {
                             await handleGenerate('resignation', { RESIGNATION_NOTICE_DATE: dateUtils.formatCustom(new Date(), 'dd MMMM yyyy'), LAST_WORKING_DAY: dateUtils.formatCustom(new Date(staff.endDate || new Date()), 'dd MMMM yyyy') });
                         }
                         onClose();
-                    }} 
+                    }}
                 />
             )}
 
@@ -333,7 +333,7 @@ const triggerDocumentForm = (docType) => {
                         <h3 className="text-xl font-semibold text-white">Official HR Documents</h3>
                         <p className="text-sm text-gray-400 mt-1">Select a document to automatically populate it with this staff member's data.</p>
                     </div>
-                    
+
                     {/* Category 1: Employment & Legal */}
                     <div>
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Employment & Legal</h4>
@@ -357,7 +357,7 @@ const triggerDocumentForm = (docType) => {
                                     <p className="text-xs text-gray-400 mt-1">Proof of employment letter for visas/loans</p>
                                 </div>
                             </button>
-                            
+
                             <button onClick={() => triggerDocumentForm('salary_increase')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-emerald-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
                                 <div className="bg-emerald-900/50 p-3 rounded-lg mr-4 group-hover:bg-emerald-600 transition-colors">
                                     <FileText className="h-6 w-6 text-emerald-300 group-hover:text-white transition-colors" />
@@ -434,55 +434,66 @@ const triggerDocumentForm = (docType) => {
                 </div>
             )}
 
-            {activeTab === 'details' && ( <div className="space-y-6"> {isEditing ? <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} /> : <ProfileDetailsView staff={staff} currentJob={currentJob} />} </div> )}
-            {activeTab === 'job' && ( <div className="space-y-6"> <JobHistoryManager jobHistory={staff.jobHistory} departments={departments} onAddNewJob={handleAddNewJob} onEditJob={handleEditJob} onDeleteJob={handleDeleteJob} /> </div> )}
-            {activeTab === 'documents' && <DocumentManager documents={staff.documents} onUploadFile={handleUploadFile} onDeleteFile={handleDeleteFile} isSaving={isSaving} /> }
-
-             {activeTab === 'settings' && userRole === 'manager' && (
+            {activeTab === 'details' && (<div className="space-y-6"> {isEditing ? <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} /> : <ProfileDetailsView staff={staff} currentJob={currentJob} />} </div>)}
+            {activeTab === 'job' && (
                 <div className="space-y-6">
-                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                           <h4 className="text-base font-semibold text-white">Bonus Management</h4>
-                           <div className="mt-4 space-y-4">
-                                <div>
-                                    <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
-                                    <div className="mt-2 flex items-center space-x-4">
-                                        <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
-                                        <input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" min="0" />
-                                        <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
-                                    </div>
-                                </div>
-                                <div className="border-t border-gray-700 mt-4 pt-4">
-                                    <div className="flex items-center justify-between">
-                                        <div><h5 className="font-medium text-white">Attendance Bonus</h5><p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p></div>
-                                        <input type="checkbox" id="bonus-eligible-toggle" role="switch" checked={isBonusEligible} onChange={handleToggleBonusEligibility} disabled={isSaving} className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
-                                    </div>
-                                </div>
-                           </div>
-                        </div>
+                    <JobHistoryManager
+                        jobHistory={staff.jobHistory}
+                        departments={departments}
+                        roleTemplates={Object.keys(companyConfig?.roleDescriptions || {})}
+                        onAddNewJob={handleAddNewJob}
+                        onEditJob={handleEditJob}
+                        onDeleteJob={handleDeleteJob}
+                    />
+                </div>
+            )}
+            {activeTab === 'documents' && <DocumentManager documents={staff.documents} onUploadFile={handleUploadFile} onDeleteFile={handleDeleteFile} isSaving={isSaving} />}
 
-                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            {activeTab === 'settings' && userRole === 'manager' && (
+                <div className="space-y-6">
+                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                        <h4 className="text-base font-semibold text-white">Bonus Management</h4>
+                        <div className="mt-4 space-y-4">
+                            <div>
+                                <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
+                                <div className="mt-2 flex items-center space-x-4">
+                                    <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
+                                    <input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" min="0" />
+                                    <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
+                                </div>
+                            </div>
+                            <div className="border-t border-gray-700 mt-4 pt-4">
+                                <div className="flex items-center justify-between">
+                                    <div><h5 className="font-medium text-white">Attendance Bonus</h5><p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p></div>
+                                    <input type="checkbox" id="bonus-eligible-toggle" role="switch" checked={isBonusEligible} onChange={handleToggleBonusEligibility} disabled={isSaving} className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                         <h4 className="text-base font-semibold text-white">Staff Information</h4>
                         <div className="mt-4">
                             <label htmlFor="staffUid" className="block text-sm font-medium text-gray-400 mb-1">Staff User ID (UID)</label>
                             <input type="text" id="staffUid" readOnly value={staff.id} className="w-full mt-1 px-3 py-2 bg-gray-900 text-gray-400 rounded-md border border-gray-700 select-all" />
                         </div>
-                     </div>
-                     
-                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
-                         <h4 className="text-base font-semibold text-white">Staff Actions</h4>
-                         <div>
-                            {isActive ? ( <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button> ) : ( <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button> )}
-                         </div>
-                         <div><button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password"> <Key className="h-4 w-4 mr-2" /> Reset Password </button></div>
-                         {!isActive && (
+                    </div>
+
+                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
+                        <h4 className="text-base font-semibold text-white">Staff Actions</h4>
+                        <div>
+                            {isActive ? (<button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button>) : (<button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button>)}
+                        </div>
+                        <div><button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password"> <Key className="h-4 w-4 mr-2" /> Reset Password </button></div>
+                        {!isActive && (
                             <div className="pt-4 border-t border-gray-700">
-                                 <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently"> <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently </button>
+                                <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently"> <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently </button>
                                 <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
-                             </div>
-                         )}
-                     </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
-             )}
+            )}
 
             <ProfileActionButtons
                 isEditing={isEditing}

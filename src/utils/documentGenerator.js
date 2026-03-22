@@ -108,7 +108,10 @@ export const generateDocument = async (docType, staffProfile, companyConfig, ext
         // Smart Salary Selection: Look for baseSalary first, then rate, then fallback to 0
         const salaryNum = Number(currentJob.baseSalary || currentJob.rate || 0);
         
-        const responsibilities = companyConfig?.roleDescriptions?.[currentJob.position || currentJob.title] || 'ROLE_RESPONSIBILITIES';
+        // --- MODIFIED: Look for the chosen template first, then fallback to the exact job title ---
+        const templateName = currentJob.roleTemplate || currentJob.position || currentJob.title;
+        const responsibilities = companyConfig?.roleDescriptions?.[templateName] || '[ ROLE_RESPONSIBILITIES_MISSING - PLEASE TYPE MANUALLY ]';
+        
         const fullName = staffProfile?.fullName || (staffProfile?.firstName ? `${staffProfile?.firstName} ${staffProfile?.lastName}` : "STAFF_NAME");
 
         const data = {

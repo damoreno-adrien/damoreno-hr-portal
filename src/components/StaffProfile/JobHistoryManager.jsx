@@ -13,7 +13,7 @@ const formatRate = (job) => {
     return typeof salary === 'number' ? `${salary.toLocaleString()} THB / mo (${hours}h/day)` : 'N/A';
 };
 
-export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJob, onEditJob, onDeleteJob }) => {
+export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAddNewJob, onEditJob, onDeleteJob }) => {
     const [isAddingJob, setIsAddingJob] = useState(false);
     const [originalJobToEdit, setOriginalJobToEdit] = useState(null);
     
@@ -24,7 +24,8 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
         payType: 'Salary', 
         baseSalary: '',    
         standardDayHours: 8,
-        hourlyRate: ''     
+        hourlyRate: '',
+        roleTemplate: ''     
     });
     
     const [isSaving, setIsSaving] = useState(false);
@@ -32,19 +33,17 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
 
     const handleNewJobChange = (e) => setNewJob(prev => ({ ...prev, [e.target.id]: e.target.value }));
 
-    // --- FIX: Smarter Edit Logic ---
     const handleEditClick = (job) => {
         setOriginalJobToEdit(job);
         
         // Determine Pay Type (Backward Compatibility)
         let type = job.payType;
-        if (type === 'Monthly' || !type) type = 'Salary'; // Default old records to Salary
+        if (type === 'Monthly' || !type) type = 'Salary'; 
 
         // Determine Rates
         let salary = '';
         let hourly = '';
         if (type === 'Salary') {
-            // Use baseSalary if available, otherwise fall back to 'rate'
             salary = job.baseSalary !== undefined ? job.baseSalary : job.rate;
         } else {
             hourly = job.hourlyRate !== undefined ? job.hourlyRate : job.rate;
@@ -56,12 +55,12 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
             startDate: dateUtils.formatISODate(dateUtils.fromFirestore(job.startDate)),
             payType: type,
             baseSalary: salary,
-            standardDayHours: job.standardDayHours || 8, // Default to 8 for old records
+            standardDayHours: job.standardDayHours || 8, 
             hourlyRate: hourly,
+            roleTemplate: job.roleTemplate || '',
         });
         setIsAddingJob(true);
     };
-    // -------------------------------
 
     const handleCancel = () => {
         setIsAddingJob(false);
@@ -74,7 +73,8 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
             payType: 'Salary', 
             baseSalary: '', 
             standardDayHours: 8,
-            hourlyRate: '' 
+            hourlyRate: '',
+            roleTemplate: '', 
         });
     };
 
@@ -88,7 +88,8 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
             position: newJob.position,
             department: newJob.department,
             startDate: newJob.startDate,
-            payType: newJob.payType
+            payType: newJob.payType,
+            roleTemplate: newJob.roleTemplate || null
         };
 
         if (newJob.payType === 'Salary') {
@@ -182,6 +183,22 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
                         )}
                     </div>
 
+                    <div className="mt-4">
+                        <label className="text-sm text-gray-300">Contract Responsibility Template</label>
+                        <select 
+                            id="roleTemplate" 
+                            value={newJob.roleTemplate || ''} 
+                            onChange={handleNewJobChange} 
+                            className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-transparent focus:border-indigo-500"
+                        >
+                            <option value="">-- No specific template (Requires manual entry) --</option>
+                            {roleTemplates && roleTemplates.map(template => (
+                                <option key={template} value={template}>{template}</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-gray-400 mt-1">This will inject the standard duties into their printed HR documents.</p>
+                    </div>
+
                     <div className="flex justify-end space-x-2 pt-2">
                         <button onClick={handleCancel} className="px-4 py-1 rounded-md bg-gray-500 hover:bg-gray-400 text-white">Cancel</button>
                         <button onClick={handleSaveNewJob} disabled={isSaving} className="px-4 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white disabled:bg-gray-600">
@@ -203,8 +220,13 @@ export const JobHistoryManager = ({ jobHistory = [], departments = [], onAddNewJ
                 {sortedJobHistory.map((job, index) => (
                     <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group">
                         <div>
-                            <p className="font-bold text-white">{job.position} <span className="text-sm text-gray-400">({job.department})</span></p>
+                            <p className="font-bold text-white">
+                                {job.position} <span className="text-sm text-gray-400">({job.department})</span>
+                            </p>
                             <p className="text-sm text-amber-400 font-mono">{formatRate(job)}</p>
+                            {job.roleTemplate && (
+                                <p className="text-xs text-indigo-300 mt-1">Template: {job.roleTemplate}</p>
+                            )}
                         </div>
                         <div className="flex items-center space-x-1">
                             <p className="text-sm text-gray-300 mr-2">{dateUtils.formatDisplayDate(job.startDate)}</p>
