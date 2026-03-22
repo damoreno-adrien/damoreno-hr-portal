@@ -4,7 +4,7 @@ import { saveAs } from 'file-saver';
 import { formatCustom } from './dateUtils';
 
 // --- Helper: Translate Numbers to Words (Upgraded for Salaries) ---
-const translateNumber = (num, lang) => {
+export const translateNumber = (num, lang) => {
     if (num === undefined || num === null || num === '') return lang === 'TH' ? 'ศูนย์' : 'zero';
     const n = parseInt(num, 10);
     if (isNaN(n)) return num;

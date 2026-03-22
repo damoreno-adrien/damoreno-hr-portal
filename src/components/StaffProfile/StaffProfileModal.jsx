@@ -11,9 +11,7 @@ import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
 import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut } from 'lucide-react'; 
 import * as dateUtils from '../../utils/dateUtils.js';
-
-// Import the new Universal Generator
-import { generateDocument } from '../../utils/documentGenerator';
+import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 
 const functionsDefault = getFunctions(app); 
 const functionsAsia = getFunctions(app, "asia-southeast1");
@@ -111,9 +109,12 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             if (window.confirm(`Job role saved! Would you like to generate the ${isPromotion ? 'Promotion' : 'Salary Increase'} Addendum document for them to sign?`)) {
                 const newSalaryNum = Number(newJobData.baseSalary || 0);
                 const extraData = {
-                    NEW_JOB_TITLE: newTitle, NEW_DEPARTMENT: newJobData.department,
+                    NEW_JOB_TITLE: newTitle, 
+                    NEW_DEPARTMENT: newJobData.department,
                     NEW_START_DATE: dateUtils.formatCustom(new Date(newJobData.startDate), 'dd MMMM yyyy'),
-                    NEW_SALARY: newSalaryNum.toLocaleString(), NEW_SALARY_EN: newSalaryNum.toLocaleString(), NEW_SALARY_TH: newSalaryNum.toLocaleString(),
+                    NEW_SALARY: newSalaryNum.toLocaleString(), 
+                    NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'), // <--- FIXED
+                    NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'), // <--- FIXED
                 };
                 await handleGenerate(docType, extraData);
             }
@@ -242,8 +243,34 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsGenerating(false);
     };
 
-    const triggerDocumentForm = (docType) => {
+const triggerDocumentForm = (docType) => {
         let extraData = {};
+        
+        // --- NEW: Manual Promotion or Salary Increase ---
+        if (docType === 'promotion' || docType === 'salary_increase') {
+            const sortedJobs = [...(staff.jobHistory || [])].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0));
+            
+            if (sortedJobs.length < 2) {
+                alert("Cannot generate automatically: Staff needs at least 2 job history entries (an old one and a new one) to calculate the changes.");
+                return;
+            }
+
+            const newJob = sortedJobs[0]; // The current active job
+            const oldJob = sortedJobs[1]; // The previous job
+
+            const newSalaryNum = Number(newJob.baseSalary || newJob.rate || 0);
+
+            extraData = {
+                NEW_JOB_TITLE: newJob.position || newJob.title || "",
+                NEW_DEPARTMENT: newJob.department || "",
+                NEW_START_DATE: dateUtils.formatCustom(new Date(newJob.startDate), 'dd MMMM yyyy'),
+                NEW_SALARY: newSalaryNum.toLocaleString(),
+                NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'), // <--- FIXED
+                NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'), // <--- FIXED
+                ORIGINAL_START_DATE: dateUtils.formatCustom(new Date(oldJob.startDate), 'dd MMMM yyyy')
+            };
+        }
+
         if (docType === 'warning') {
             const level = window.prompt("What level is this warning? (e.g., 1st Warning, Final Warning)"); if (!level) return;
             const incident = window.prompt("Date of the incident? (e.g., 15 March 2026)"); if (!incident) return;
@@ -301,72 +328,108 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {/* --- NEW TAB: HR Forms UI --- */}
             {activeTab === 'forms' && userRole === 'manager' && (
-                <div className="space-y-4">
-                    <div className="mb-6">
+                <div className="space-y-8">
+                    <div>
                         <h3 className="text-xl font-semibold text-white">Official HR Documents</h3>
                         <p className="text-sm text-gray-400 mt-1">Select a document to automatically populate it with this staff member's data.</p>
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <button onClick={() => handleGenerate('contract')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-indigo-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                            <div className="bg-indigo-900/50 p-3 rounded-lg mr-4 group-hover:bg-indigo-600 transition-colors">
-                                {isGenerating ? <Loader2 className="h-6 w-6 text-indigo-300 animate-spin" /> : <FileBadge className="h-6 w-6 text-indigo-300 group-hover:text-white transition-colors" />}
-                            </div>
-                            <div>
-                                <h4 className="text-white font-medium">Main Employment Contract</h4>
-                                <p className="text-xs text-gray-400 mt-1">Standard bilingual contract & rules</p>
-                            </div>
-                        </button>
+                    {/* Category 1: Employment & Legal */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Employment & Legal</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button onClick={() => handleGenerate('contract')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-indigo-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-indigo-900/50 p-3 rounded-lg mr-4 group-hover:bg-indigo-600 transition-colors">
+                                    {isGenerating ? <Loader2 className="h-6 w-6 text-indigo-300 animate-spin" /> : <FileBadge className="h-6 w-6 text-indigo-300 group-hover:text-white transition-colors" />}
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Main Employment Contract</h4>
+                                    <p className="text-xs text-gray-400 mt-1">Standard bilingual contract & rules</p>
+                                </div>
+                            </button>
 
-                        <button onClick={() => handleGenerate('certificate')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-blue-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                            <div className="bg-blue-900/50 p-3 rounded-lg mr-4 group-hover:bg-blue-600 transition-colors">
-                                <FileText className="h-6 w-6 text-blue-300 group-hover:text-white transition-colors" />
-                            </div>
-                            <div>
-                                <h4 className="text-white font-medium">Certificate of Employment</h4>
-                                <p className="text-xs text-gray-400 mt-1">Proof of employment letter for visas/loans</p>
-                            </div>
-                        </button>
+                            <button onClick={() => handleGenerate('certificate')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-blue-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-blue-900/50 p-3 rounded-lg mr-4 group-hover:bg-blue-600 transition-colors">
+                                    <FileText className="h-6 w-6 text-blue-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Certificate of Employment</h4>
+                                    <p className="text-xs text-gray-400 mt-1">Proof of employment letter for visas/loans</p>
+                                </div>
+                            </button>
+                            
+                            <button onClick={() => triggerDocumentForm('salary_increase')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-emerald-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-emerald-900/50 p-3 rounded-lg mr-4 group-hover:bg-emerald-600 transition-colors">
+                                    <FileText className="h-6 w-6 text-emerald-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Salary Increase Addendum</h4>
+                                    <p className="text-xs text-gray-400 mt-1">For raises without title changes</p>
+                                </div>
+                            </button>
 
-                        <button onClick={() => triggerDocumentForm('leave')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                            <div className="bg-green-900/50 p-3 rounded-lg mr-4 group-hover:bg-green-600 transition-colors">
-                                <PlaneTakeoff className="h-6 w-6 text-green-300 group-hover:text-white transition-colors" />
-                            </div>
-                            <div>
-                                <h4 className="text-white font-medium">Special Leave Request</h4>
-                                <p className="text-xs text-gray-400 mt-1">Form for extended or unpaid leave</p>
-                            </div>
-                        </button>
+                            <button onClick={() => triggerDocumentForm('promotion')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-yellow-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-yellow-900/50 p-3 rounded-lg mr-4 group-hover:bg-yellow-600 transition-colors">
+                                    <FileBadge className="h-6 w-6 text-yellow-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Promotion Addendum</h4>
+                                    <p className="text-xs text-gray-400 mt-1">For new job titles & responsibilities</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
 
-                        <button onClick={() => triggerDocumentForm('warning')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-amber-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                            <div className="bg-amber-900/50 p-3 rounded-lg mr-4 group-hover:bg-amber-600 transition-colors">
-                                <ShieldAlert className="h-6 w-6 text-amber-300 group-hover:text-white transition-colors" />
-                            </div>
-                            <div>
-                                <h4 className="text-white font-medium">Disciplinary Warning</h4>
-                                <p className="text-xs text-gray-400 mt-1">Issue official 1st, 2nd, or Final warnings</p>
-                            </div>
-                        </button>
+                    {/* Category 2: Operations & Requests */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Operations & Requests</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button onClick={() => triggerDocumentForm('leave')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-green-900/50 p-3 rounded-lg mr-4 group-hover:bg-green-600 transition-colors">
+                                    <PlaneTakeoff className="h-6 w-6 text-green-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Special Leave Request</h4>
+                                    <p className="text-xs text-gray-400 mt-1">Form for extended or unpaid leave</p>
+                                </div>
+                            </button>
 
-                        <button onClick={() => handleGenerate('uniform')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                            <div className="bg-purple-900/50 p-3 rounded-lg mr-4 group-hover:bg-purple-600 transition-colors">
-                                <Shirt className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" />
-                            </div>
-                            <div>
-                                <h4 className="text-white font-medium">Uniform Deduction Form</h4>
-                                <p className="text-xs text-gray-400 mt-1">Authorization for lost/extra uniform costs</p>
-                            </div>
-                        </button>
+                            <button onClick={() => handleGenerate('uniform')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-purple-900/50 p-3 rounded-lg mr-4 group-hover:bg-purple-600 transition-colors">
+                                    <Shirt className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Uniform Deduction Form</h4>
+                                    <p className="text-xs text-gray-400 mt-1">Authorization for lost/extra uniform costs</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
 
-                        <button onClick={() => handleGenerate('resignation')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-red-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                            <div className="bg-red-900/50 p-3 rounded-lg mr-4 group-hover:bg-red-600 transition-colors">
-                                <LogOut className="h-6 w-6 text-red-300 group-hover:text-white transition-colors" />
-                            </div>
-                            <div>
-                                <h4 className="text-white font-medium">Resignation Letter</h4>
-                                <p className="text-xs text-gray-400 mt-1">Voluntary resignation and waiver form</p>
-                            </div>
-                        </button>
+                    {/* Category 3: Performance & Offboarding */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Performance & Offboarding</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button onClick={() => triggerDocumentForm('warning')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-amber-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-amber-900/50 p-3 rounded-lg mr-4 group-hover:bg-amber-600 transition-colors">
+                                    <ShieldAlert className="h-6 w-6 text-amber-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Disciplinary Warning</h4>
+                                    <p className="text-xs text-gray-400 mt-1">Issue official 1st, 2nd, or Final warnings</p>
+                                </div>
+                            </button>
+
+                            <button onClick={() => handleGenerate('resignation')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-red-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
+                                <div className="bg-red-900/50 p-3 rounded-lg mr-4 group-hover:bg-red-600 transition-colors">
+                                    <LogOut className="h-6 w-6 text-red-300 group-hover:text-white transition-colors" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-medium">Resignation Letter</h4>
+                                    <p className="text-xs text-gray-400 mt-1">Voluntary resignation and waiver form</p>
+                                </div>
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
