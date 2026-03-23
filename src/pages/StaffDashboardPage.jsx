@@ -11,7 +11,7 @@ import { formatCustom, formatISODate, addDays, fromFirestore, isStaffActiveOnDat
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 
-export default function DashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
+export default function StaffDashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');

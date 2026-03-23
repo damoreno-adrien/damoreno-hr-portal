@@ -14,7 +14,7 @@ import PlanningPage from './pages/PlanningPage';
 import LeaveManagementPage from './pages/LeaveManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import AttendancePage from './pages/AttendancePage';
-import DashboardPage from './pages/DashboardPage';
+import StaffDashboardPage from './pages/StaffDashboardPage';
 import AttendanceReportsPage from './pages/AttendanceReportsPage';
 import MySchedulePage from './pages/MySchedulePage';
 import TeamSchedulePage from './pages/TeamSchedulePage';
@@ -156,7 +156,7 @@ export default function App() {
      const renderPageContent = () => {
          if (currentPage === 'dashboard') {
              if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-             if (userRole === 'staff') return <DashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
+             if (userRole === 'staff') return <StaffDashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
          }
          
          // --- NEW: Ironclad Manager Firewall ---
