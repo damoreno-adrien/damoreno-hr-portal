@@ -53,7 +53,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsEditing(false); setError('');
     }, [staff]);
 
-    // Smart Job Selection: Sort history by startDate (newest first)
     const currentJob = [...(staff.jobHistory || [])].sort((a, b) => {
         const dateA = new Date(b.startDate || 0);
         const dateB = new Date(a.startDate || 0);
@@ -89,7 +88,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const handleAddNewJob = async (newJobData) => {
         if (!dateUtils.parseISODateString(newJobData.startDate)) { alert("Invalid start date provided."); return; }
 
-        // Fix 49,999 bug by stripping commas and rounding
         if (newJobData.baseSalary) {
             newJobData.baseSalary = Math.round(Number(String(newJobData.baseSalary).replace(/,/g, '')));
         }
@@ -101,7 +99,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             const oldTitle = currentJob.position || currentJob.title || "";
             const oldDept = currentJob.department || "";
-            // Use fallback to position or title to match both DB schemas
             const newTitle = newJobData.position || newJobData.title || "";
             const isPromotion = (newTitle !== oldTitle || newJobData.department !== oldDept);
             const docType = isPromotion ? 'promotion' : 'salary_increase';
@@ -113,8 +110,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     NEW_DEPARTMENT: newJobData.department,
                     NEW_START_DATE: dateUtils.formatCustom(new Date(newJobData.startDate), 'dd MMMM yyyy'),
                     NEW_SALARY: newSalaryNum.toLocaleString(),
-                    NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'), // <--- FIXED
-                    NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'), // <--- FIXED
+                    NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'),
+                    NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'),
                 };
                 await handleGenerate(docType, extraData);
             }
@@ -163,15 +160,29 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         } catch (err) { alert(`Failed to activate staff.`); } finally { setIsSaving(false); }
     };
 
-    const handleUploadFile = async (fileToUpload) => {
+    const handleUploadFile = async (fileToUpload, metadata) => {
         setIsSaving(true); setError('');
         try {
             const storage = getStorage();
+            
+            // Still use a safe, unique filename for the Google Cloud Storage bucket
             const safeFileName = fileToUpload.name.replace(/\s+/g, '_');
             const storageRef = ref(storage, `staff_documents/${staff.id}/${Date.now()}_${safeFileName}`);
+            
             await uploadBytes(storageRef, fileToUpload);
             const downloadURL = await getDownloadURL(storageRef);
-            const fileMetadata = { name: fileToUpload.name, url: downloadURL, path: storageRef.fullPath, uploadedAt: Timestamp.now() };
+            
+            // Build the final object combining Storage data with our custom Metadata
+            const fileMetadata = { 
+                name: metadata.customName, // The clean, renamed display name
+                category: metadata.category, // e.g., 'Visa', 'Passport'
+                expiryDate: metadata.expiryDate, // "2026-10-15" or null
+                isVisibleToStaff: metadata.isVisibleToStaff,
+                url: downloadURL, 
+                path: storageRef.fullPath, 
+                uploadedAt: Timestamp.now()
+            };
+            
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
         } catch (err) {
@@ -192,6 +203,33 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         } catch (error) {
             alert(`Failed to delete file: ${error.message}`);
         } finally { setIsSaving(false); }
+    };
+    
+    // --- NEW: Edit Document Metadata ---
+    const handleEditDocument = async (docPath, updatedMetadata) => {
+        setIsSaving(true); setError('');
+        try {
+            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+            
+            const updatedDocuments = staff.documents.map(d => {
+                if (d.path === docPath) {
+                    return { 
+                        ...d, 
+                        name: updatedMetadata.customName,
+                        category: updatedMetadata.category,
+                        expiryDate: updatedMetadata.expiryDate,
+                        isVisibleToStaff: updatedMetadata.isVisibleToStaff 
+                    };
+                }
+                return d;
+            });
+
+            await updateDoc(staffDocRef, { documents: updatedDocuments });
+        } catch (error) {
+            alert(`Failed to update document: ${error.message}`);
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     const handleResetPassword = async (staffId) => {
@@ -246,7 +284,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const triggerDocumentForm = (docType) => {
         let extraData = {};
 
-        // --- NEW: Manual Promotion or Salary Increase ---
         if (docType === 'promotion' || docType === 'salary_increase') {
             const sortedJobs = [...(staff.jobHistory || [])].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0));
 
@@ -255,8 +292,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 return;
             }
 
-            const newJob = sortedJobs[0]; // The current active job
-            const oldJob = sortedJobs[1]; // The previous job
+            const newJob = sortedJobs[0];
+            const oldJob = sortedJobs[1];
 
             const newSalaryNum = Number(newJob.baseSalary || newJob.rate || 0);
 
@@ -265,8 +302,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 NEW_DEPARTMENT: newJob.department || "",
                 NEW_START_DATE: dateUtils.formatCustom(new Date(newJob.startDate), 'dd MMMM yyyy'),
                 NEW_SALARY: newSalaryNum.toLocaleString(),
-                NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'), // <--- FIXED
-                NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'), // <--- FIXED
+                NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'),
+                NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'),
                 ORIGINAL_START_DATE: dateUtils.formatCustom(new Date(oldJob.startDate), 'dd MMMM yyyy')
             };
         }
@@ -326,7 +363,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
 
-            {/* --- NEW TAB: HR Forms UI --- */}
+            {/* --- HR Forms Tab --- */}
             {activeTab === 'forms' && userRole === 'manager' && (
                 <div className="space-y-8">
                     <div>
@@ -447,7 +484,16 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     />
                 </div>
             )}
-            {activeTab === 'documents' && <DocumentManager documents={staff.documents} onUploadFile={handleUploadFile} onDeleteFile={handleDeleteFile} isSaving={isSaving} />}
+            
+            {/* --- NEW: Document Manager handles the Vault --- */}
+            {activeTab === 'documents' && (
+                <DocumentManager 
+                    documents={staff.documents} 
+                    onUploadFile={handleUploadFile} 
+                    onDeleteFile={handleDeleteFile}
+                    onEditDocument={handleEditDocument}
+                />
+            )}
 
             {activeTab === 'settings' && userRole === 'manager' && (
                 <div className="space-y-6">
