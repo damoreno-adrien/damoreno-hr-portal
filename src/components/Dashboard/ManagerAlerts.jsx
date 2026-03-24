@@ -1,70 +1,60 @@
-/* src/components/Dashboard/ManagerAlerts.jsx */
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../../../firebase"; 
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, getDocs } from "firebase/firestore";
-import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, ShieldAlert, ChevronDown, ChevronUp, Zap, RefreshCw, CheckSquare } from 'lucide-react';
-import { formatDisplayTime, formatDisplayDate } from '../../utils/dateUtils';
+import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, ShieldAlert, CheckSquare, Search, DollarSign } from 'lucide-react';
+import { formatDisplayTime, formatDisplayDate, formatISODate, addDays } from '../../utils/dateUtils';
 
 const functions = getFunctions(app, "asia-southeast1");
 const autoFixShiftFunc = httpsCallable(functions, 'autoFixSingleShift');
-const runOperationalScanFunc = httpsCallable(functions, 'runOperationalScan');
+const runUnifiedHRScanFunc = httpsCallable(functions, 'runUnifiedHRScan');
 
+// ============================================================================
+// COMPONENT 1: MISSING CHECK-OUTS (THE RAW DATA CLEANUP)
+// ============================================================================
 const MissingCheckoutItem = ({ alert, onManualFix }) => {
     const [isFixing, setIsFixing] = useState(false);
     const [error, setError] = useState(null);
-    const [success, setSuccess] = useState(null);
+    const [scheduledEndStr, setScheduledEndStr] = useState("23:00");
+    const [isLoadingTime, setIsLoadingTime] = useState(true);
 
     const checkInTime = alert.checkInTime?.toDate();
     const formattedCheckIn = checkInTime ? formatDisplayTime(checkInTime) : 'Unknown';
-    
-    // --- NEW: Dynamic End Time Formatting ---
-    const scheduledEndStr = alert.scheduledEndTime || "23:00";
     const displayEndTime = scheduledEndStr.replace(':', 'h');
 
-    // Auto-Resolve Listener
+    // Fetch the schedule for this specific item in the background
     useEffect(() => {
-        if (!alert.attendanceDocId) return;
-        const unsub = onSnapshot(doc(db, "attendance", alert.attendanceDocId), async (docSnap) => {
-            if (!docSnap.exists()) return;
-            if (isFixing) return; 
-
-            const data = docSnap.data();
-            if (data.checkOutTime || data.status === 'completed') {
-                try {
-                    await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'resolved' });
-                } catch (e) { 
-                    if (e.code !== 'not-found') {
-                         console.error("Auto-resolve failed", e); 
-                    }
+        const fetchScheduleTime = async () => {
+            try {
+                const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
+                const schedSnap = await getDocs(schedQ);
+                if (!schedSnap.empty) {
+                    setScheduledEndStr(schedSnap.docs[0].data().endTime || "23:00");
                 }
+            } catch (err) {
+                console.error("Failed to fetch schedule for alert", err);
+            } finally {
+                setIsLoadingTime(false);
             }
-        });
-        return () => unsub();
-    }, [alert.attendanceDocId, alert.id, isFixing]); 
+        };
+        fetchScheduleTime();
+    }, [alert.staffId, alert.date]);
 
     const handleAutoFix = async () => {
-        setIsFixing(true); setError(null);
+        setIsFixing(true); 
+        setError(null);
         try {
-            // --- NEW: Send the dynamic time to the backend ---
-            const result = await autoFixShiftFunc({ 
+            await autoFixShiftFunc({ 
                 attendanceDocId: alert.attendanceDocId, 
-                alertId: alert.id,
+                alertId: "local_dummy_id", // Safely ignored by backend
                 scheduledEndTime: scheduledEndStr
             });
-            setSuccess(result.data.result || "Shift fixed!");
+            // No need to set isFixing(false) here because the component will instantly unmount!
         } catch (err) {
             setError(err.message || "Failed to fix.");
             setIsFixing(false);
         }
     };
-
-    if (success) return (
-        <li className="flex items-center justify-between p-3 bg-green-900/50 rounded-lg border border-green-700/50">
-            <div className="flex items-center gap-3"><CheckCircle className="h-5 w-5 text-green-400" /><p className="text-sm text-gray-300"><span className="font-semibold text-white">{alert.staffName}</span> fixed.</p></div>
-        </li>
-    );
 
     return (
         <li className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-800 rounded-lg gap-3 border-l-4 border-amber-500 transition-all hover:bg-gray-750">
@@ -72,13 +62,13 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
                 <div className="bg-amber-900/30 p-2 rounded-full"><Clock className="h-5 w-5 text-amber-400" /></div>
                 <div>
                     <p className="text-sm text-white font-medium">{alert.staffName} missed check-out</p>
-                    <p className="text-xs text-gray-400">{alert.date} • Checked in at {formattedCheckIn}</p>
+                    <p className="text-xs text-gray-400">{formatDisplayDate(alert.date)} • In at {formattedCheckIn}</p>
                 </div>
             </div>
             <div className="flex items-center justify-end gap-2 w-full sm:w-auto">
-                <button onClick={() => onManualFix(alert)} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-indigo-600 hover:text-white text-gray-200 rounded-md transition-colors">Fix Manually</button>
-                <button onClick={handleAutoFix} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-md flex items-center gap-1.5 transition-colors">
-                    {isFixing ? <Loader2 className="h-3 w-3 animate-spin" /> : `Auto-Fix (${displayEndTime})`}
+                <button onClick={() => onManualFix({ ...alert, id: null })} disabled={isFixing} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-indigo-600 hover:text-white text-gray-200 rounded-md transition-colors">Manual Fix</button>
+                <button onClick={handleAutoFix} disabled={isFixing || isLoadingTime} className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-md flex items-center gap-1.5 transition-colors min-w-[120px] justify-center">
+                    {isFixing || isLoadingTime ? <Loader2 className="h-3 w-3 animate-spin" /> : `Auto-Fix (${displayEndTime})`}
                 </button>
             </div>
             {error && <p className="text-xs text-red-400 w-full text-center sm:text-left">{error}</p>}
@@ -86,197 +76,129 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
     );
 };
 
-const IntensityAlertItem = ({ alert }) => (
-    <li className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-800 rounded-lg gap-3 border-l-4 border-red-600">
-        <div className="flex items-center gap-3">
-            <div className="bg-red-900/30 p-2 rounded-full"><Zap className="h-5 w-5 text-red-500" /></div>
-            <div>
-                <p className="text-sm text-white font-medium">High Intensity: {alert.staffName}</p>
-                <p className="text-xs text-gray-400">Active for {alert.hours} hours. Check if they forgot to clock out.</p>
-            </div>
-        </div>
-    </li>
-);
+// ============================================================================
+// COMPONENT 2: HR ALERTS (LATENESS, ABSENCES, OVERTIME)
+// ============================================================================
+const HRAlertItem = ({ alert }) => {
+    const [isProcessing, setIsProcessing] = useState(false);
 
-const RiskAlertItem = ({ alert }) => {
-    const [isAcknowledging, setIsAcknowledging] = useState(false);
-    const [isExpanded, setIsExpanded] = useState(false);
-    const [isValidating, setIsValidating] = useState(false);
+    let icon, borderColor, bgColor, title, actionText, actionColor;
+    
+    if (alert.type === 'risk_absence') {
+        icon = <AlertOctagon className="h-5 w-5 text-red-400" />;
+        borderColor = "border-red-500"; bgColor = "bg-red-900/10";
+        title = alert.message || "Unexcused Absence"; actionText = "Enforce Penalty"; actionColor = "bg-red-600 hover:bg-red-500";
+    } else if (alert.type === 'risk_late') {
+        icon = <ShieldAlert className="h-5 w-5 text-yellow-400" />;
+        borderColor = "border-yellow-500"; bgColor = "bg-yellow-900/10";
+        title = alert.message || `Late Check-in (${alert.minutesLate}m)`; actionText = "Enforce Penalty"; actionColor = "bg-red-600 hover:bg-red-500";
+    } else if (alert.type === 'overtime_request') {
+        icon = <DollarSign className="h-5 w-5 text-green-400" />;
+        borderColor = "border-green-500"; bgColor = "bg-green-900/10";
+        title = alert.message || `Overtime Pending (${alert.extraMinutes}m)`; actionText = "Approve OT"; actionColor = "bg-green-600 hover:bg-green-500";
+    }
 
-    useEffect(() => {
-        const validateAlert = async () => {
-            if (alert.type === 'risk_late') return; 
-
-            if (!alert.details || alert.details.length === 0 || !alert.staffId) return;
-            
-            setIsValidating(true);
-            try {
-                let allFixed = true;
-                
-                for (const incident of alert.details) {
-                    if (!incident.date) continue;
-                    
-                    const q = query(
-                        collection(db, "attendance"), 
-                        where("staffId", "==", alert.staffId),
-                        where("date", "==", incident.date)
-                    );
-                    const snap = await getDocs(q);
-                    
-                    if (snap.empty) {
-                        allFixed = false;
-                        break;
-                    }
-                    const data = snap.docs[0].data();
-                    if (!data.checkInTime || !data.checkOutTime) {
-                        allFixed = false;
-                        break;
-                    }
-                }
-
-                if (allFixed) {
-                    await updateDoc(doc(db, "manager_alerts", alert.id), { 
-                        status: 'resolved', 
-                        resolvedMethod: 'auto_validation' 
-                    });
-                }
-            } catch (e) {
-                console.error("Validation failed", e);
-            } finally {
-                setIsValidating(false);
-            }
-        };
-
-        validateAlert();
-    }, [alert]);
-
-    const handleAcknowledge = async () => {
-        if (!window.confirm("Acknowledge and save to staff history?")) return;
-        setIsAcknowledging(true);
-        try { 
-            await updateDoc(doc(db, "manager_alerts", alert.id), {
-                status: 'archived',
-                acknowledgedAt: new Date(),
-                acknowledgedBy: "Manager" 
-            }); 
-        } catch (err) { setIsAcknowledging(false); }
+    const handleDismiss = async () => {
+        setIsProcessing(true);
+        try { await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'dismissed' }); } 
+        catch (err) { setIsProcessing(false); }
     };
 
-    const isAbsence = alert.type === 'risk_absence';
-    const icon = isAbsence ? <AlertOctagon className="h-5 w-5 text-red-400" /> : <ShieldAlert className="h-5 w-5 text-yellow-400" />;
-    const borderColor = isAbsence ? "border-red-500" : "border-yellow-500";
-    const bgColor = isAbsence ? "bg-red-900/10" : "bg-yellow-900/10";
-    const incidents = alert.details || [];
+    const handleEnforce = async () => {
+        setIsProcessing(true);
+        try {
+            if (alert.type === 'overtime_request') {
+                await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'approved' });
+            } else {
+                await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'enforced' });
+            }
+        } catch (err) { setIsProcessing(false); }
+    };
 
     return (
-        <li className={`bg-gray-800 rounded-lg border-l-4 ${borderColor} overflow-hidden transition-opacity ${isValidating ? 'opacity-50' : 'opacity-100'}`}>
+        <li className={`bg-gray-800 rounded-lg border-l-4 ${borderColor} overflow-hidden transition-opacity`}>
             <div className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <div className={`p-2 rounded-full ${bgColor}`}>{icon}</div>
                     <div>
-                        <p className="text-sm text-white font-medium">{alert.message || "Attention Required"}</p>
-                        <p className="text-xs text-gray-400">{alert.staffName} • {alert.count} incidents</p>
+                        <p className="text-sm text-white font-medium">{title}</p>
+                        <p className="text-xs text-gray-400">{alert.staffName} • {formatDisplayDate(alert.date)}</p>
                     </div>
                 </div>
-                
                 <div className="flex items-center justify-end gap-2 w-full sm:w-auto">
-                    {incidents.length > 0 && (
-                        <button onClick={() => setIsExpanded(!isExpanded)} className="px-2 py-1.5 text-xs font-medium text-gray-400 hover:text-white rounded-md flex items-center gap-1 transition-colors">
-                            {isExpanded ? "Hide" : "View"} Log {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        </button>
-                    )}
-                    <button onClick={handleAcknowledge} disabled={isAcknowledging} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-md disabled:opacity-50 transition-colors">
-                        {isAcknowledging ? "..." : "Dismiss"}
+                    <button onClick={handleDismiss} disabled={isProcessing} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-md transition-colors">
+                        Dismiss
+                    </button>
+                    <button onClick={handleEnforce} disabled={isProcessing} className={`px-3 py-1.5 text-xs font-medium text-white rounded-md transition-colors ${actionColor}`}>
+                        {isProcessing ? "Processing..." : actionText}
                     </button>
                 </div>
             </div>
-
-            {isExpanded && incidents.length > 0 && (
-                <div className="bg-gray-900/50 px-4 py-3 border-t border-gray-700/50 text-sm">
-                    <p className="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">Incident Log:</p>
-                    <ul className="space-y-1">
-                        {incidents.map((item, idx) => (
-                            <li key={idx} className="flex justify-between text-gray-300 text-xs border-b border-gray-700/50 last:border-0 pb-1 last:pb-0">
-                                <span>{item.date ? formatDisplayDate(item.date) : 'Unknown Date'}</span>
-                                <span>
-                                    {item.minutes !== undefined ? (
-                                        <span className="text-yellow-400 font-mono">{item.minutes}m late ({item.time})</span>
-                                    ) : item.shift ? (
-                                        <span className="text-red-400 font-mono">Shift: {item.shift}</span>
-                                    ) : (
-                                        <span className="text-gray-500 italic">No details</span>
-                                    )}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
         </li>
     );
 };
 
+// ============================================================================
+// MAIN DASHBOARD COMPONENT
+// ============================================================================
 export default function ManagerAlerts({ onManualFix }) {
-    const [alerts, setAlerts] = useState([]);
+    const [hrAlerts, setHrAlerts] = useState([]);
+    const [missingCheckouts, setMissingCheckouts] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [isScanning, setIsScanning] = useState(false);
-    
-    // --- NEW: State for fixing all at once ---
     const [isFixingAll, setIsFixingAll] = useState(false);
-    
-    const scanRan = useRef(false);
 
-    useEffect(() => {
-        const runScan = async () => {
-            const lastRun = localStorage.getItem('lastOperationalScan');
-            const now = Date.now();
-            if (lastRun && (now - parseInt(lastRun)) < 1 * 60 * 1000) return; 
-
-            if (scanRan.current) return;
-            scanRan.current = true;
-            try { await runOperationalScanFunc(); localStorage.setItem('lastOperationalScan', now.toString()); } 
-            catch (err) { console.error("Scan trigger failed:", err); }
-        };
-        runScan();
-    }, []);
-
+    // 1. Listen for Pending HR Actions (Lateness, Absences, OT)
     useEffect(() => {
         const q = query(collection(db, "manager_alerts"), where("status", "==", "pending"), orderBy("createdAt", "desc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const pendingAlerts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setAlerts(pendingAlerts);
-            setLoading(false);
-        }, (err) => {
-            console.error("Error fetching alerts:", err);
-            setError("Could not load alerts.");
+            setHrAlerts(pendingAlerts.filter(a => a.type !== 'missing_checkout'));
             setLoading(false);
         });
         return () => unsubscribe();
     }, []);
 
-    const handleForceScan = async () => {
-        setIsScanning(true);
-        try { await runOperationalScanFunc(); localStorage.setItem('lastOperationalScan', Date.now().toString()); } 
-        catch (err) { console.error("Manual scan failed:", err); } 
-        finally { setIsScanning(false); }
-    };
+    // 2. Synchronous Snapshot for Missing Check-outs (Instant Updates)
+    useEffect(() => {
+        const yesterday = addDays(new Date(), -1);
+        const dayBefore = addDays(new Date(), -2);
+        const datesToScan = [formatISODate(yesterday), formatISODate(dayBefore)];
 
-    // --- NEW: Function to loop through all missing checkouts ---
+        const q = query(collection(db, "attendance"), where("date", "in", datesToScan));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const missing = [];
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                if (data.checkInTime && !data.checkOutTime) {
+                    missing.push({
+                        id: `local_missing_${docSnap.id}`, 
+                        type: 'missing_checkout',
+                        staffId: data.staffId,
+                        staffName: data.staffName,
+                        date: data.date,
+                        attendanceDocId: docSnap.id,
+                        checkInTime: data.checkInTime
+                    });
+                }
+            });
+            missing.sort((a, b) => b.date.localeCompare(a.date));
+            setMissingCheckouts(missing);
+        });
+        return () => unsubscribe();
+    }, []);
+
     const handleFixAll = async () => {
-        const missingCheckouts = alerts.filter(a => a.type === 'missing_checkout' || !a.type);
-        if (missingCheckouts.length === 0) return;
-        if (!window.confirm(`Are you sure you want to auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`)) return;
-
+        if (!window.confirm(`Auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`)) return;
         setIsFixingAll(true);
         try {
-            const promises = missingCheckouts.map(alert => {
-                const scheduledEndStr = alert.scheduledEndTime || "23:00";
-                return autoFixShiftFunc({ 
-                    attendanceDocId: alert.attendanceDocId, 
-                    alertId: alert.id,
-                    scheduledEndTime: scheduledEndStr
-                });
+            const promises = missingCheckouts.map(async (alert) => {
+                // Fetch the specific schedule right before firing the function
+                const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
+                const schedSnap = await getDocs(schedQ);
+                const scheduledEndStr = !schedSnap.empty ? (schedSnap.docs[0].data().endTime || "23:00") : "23:00";
+                
+                return autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr });
             });
             await Promise.allSettled(promises);
         } catch (err) {
@@ -286,43 +208,75 @@ export default function ManagerAlerts({ onManualFix }) {
         }
     };
 
-    if (loading) return <div className="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700"><p className="text-sm text-gray-300 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading pending actions...</p></div>;
-    if (error) return <div className="p-4 text-red-400 text-sm bg-gray-800 rounded-lg border border-red-900">{error}</div>;
-    if (alerts.length === 0) return null;
+    const handleRunHRScan = async () => {
+        if (missingCheckouts.length > 0) {
+            alert("Please fix all missing check-outs before running the HR Scan to ensure accurate math.");
+            return;
+        }
+        setIsScanning(true);
+        try { 
+            const result = await runUnifiedHRScanFunc({}); 
+            alert(`Scan complete. Found ${result.data.alertsCreated} new HR items.`);
+        } 
+        catch (err) { console.error("HR Scan failed:", err); alert("Scan failed. Check console."); } 
+        finally { setIsScanning(false); }
+    };
 
-    const missingCheckoutCount = alerts.filter(a => a.type === 'missing_checkout' || !a.type).length;
+    if (loading) return <div className="bg-gray-800 p-4 rounded-lg flex items-center text-gray-300"><Loader2 className="h-4 w-4 animate-spin mr-2" />Loading pending actions...</div>;
+    
+    if (missingCheckouts.length === 0 && hrAlerts.length === 0) return (
+        <div className="bg-gray-800 p-6 rounded-lg text-center border border-gray-700 shadow-lg">
+            <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
+            <h3 className="text-white font-medium">All clear!</h3>
+            <p className="text-sm text-gray-400 mb-4">No missing check-outs or pending HR approvals.</p>
+            <button onClick={handleRunHRScan} disabled={isScanning} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center">
+                {isScanning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                {isScanning ? "Scanning Database..." : "Run Unified HR Scan"}
+            </button>
+        </div>
+    );
 
     return (
-        <div className="space-y-4 animate-fadeIn">
-            <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <AlertTriangle className="h-5 w-5 text-amber-500" />
-                    Attention Required ({alerts.length})
-                </h3>
-                
-                <div className="flex items-center gap-3">
-                    {/* --- NEW: The Fix All Button --- */}
-                    {missingCheckoutCount > 1 && (
-                        <button onClick={handleFixAll} disabled={isFixingAll || isScanning} className="flex items-center gap-1.5 text-xs font-bold bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 px-3 py-1.5 rounded transition-colors disabled:opacity-50">
-                            {isFixingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
-                            {isFixingAll ? "Fixing All..." : `Fix All Check-outs (${missingCheckoutCount})`}
-                        </button>
-                    )}
-                    
-                    <button onClick={handleForceScan} disabled={isScanning || isFixingAll} className="flex items-center gap-2 text-[10px] uppercase font-bold text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50">
-                        {isScanning ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                        {isScanning ? "Scanning..." : "Re-Scan"}
+        <div className="space-y-6 animate-fadeIn">
+            {/* SECTION 1: RAW DATA CLEANUP */}
+            {missingCheckouts.length > 0 && (
+                <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-amber-500" />
+                            Missing Check-outs ({missingCheckouts.length})
+                        </h3>
+                        {missingCheckouts.length > 1 && (
+                            <button onClick={handleFixAll} disabled={isFixingAll} className="flex items-center justify-center gap-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
+                                {isFixingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+                                {isFixingAll ? "Fixing All..." : `Auto-Fix All (${missingCheckouts.length})`}
+                            </button>
+                        )}
+                    </div>
+                    <ul className="space-y-2">
+                        {missingCheckouts.map(alert => <MissingCheckoutItem key={alert.id} alert={alert} onManualFix={onManualFix} />)}
+                    </ul>
+                </div>
+            )}
+
+            {/* SECTION 2: HR AUDIT & SCAN */}
+            <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2 border-b border-gray-700 pb-2">
+                    <h3 className="text-lg font-bold text-white">HR & Disciplinary Actions</h3>
+                    <button onClick={handleRunHRScan} disabled={isScanning || missingCheckouts.length > 0} className="flex items-center justify-center gap-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                        {isScanning ? "Scanning..." : "Run Unified HR Scan"}
                     </button>
                 </div>
+                
+                {hrAlerts.length > 0 ? (
+                    <ul className="space-y-2">
+                        {hrAlerts.map(alert => <HRAlertItem key={alert.id} alert={alert} />)}
+                    </ul>
+                ) : (
+                    <p className="text-sm text-gray-500 italic">No HR actions pending. Click the scan button to audit yesterday's data.</p>
+                )}
             </div>
-            <ul className="space-y-3">
-                {alerts.map(alert => {
-                    if (alert.type === 'high_intensity') return <IntensityAlertItem key={alert.id} alert={alert} />;
-                    if (alert.type === 'missing_checkout' || !alert.type) return <MissingCheckoutItem key={alert.id} alert={alert} onManualFix={onManualFix} />;
-                    else if (alert.type.startsWith('risk_')) return <RiskAlertItem key={alert.id} alert={alert} />;
-                    return null;
-                })}
-            </ul>
         </div>
     );
 }

@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-// 1. ADD 'doc' to imports
 import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
-import OvertimeRequests from '../components/Dashboard/OvertimeRequests';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -71,7 +69,6 @@ export default function AttendancePage({ db, staffList }) {
     const [alertToFix, setAlertToFix] = useState(null);
     const [companyConfig, setCompanyConfig] = useState(null);
     
-    // NEW: Refresh key to force child components to update
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
@@ -138,18 +135,6 @@ export default function AttendancePage({ db, staffList }) {
                 checkInTime: alert.checkInTime?.toDate ? alert.checkInTime.toDate() : alert.checkInTime
             },
             alertId: alert.id
-        };
-        setAlertToFix(recordForModal);
-    };
-
-    // --- NEW: FUNCTION TO HANDLE OT LIST EDITING ---
-    const handleManualFix = (req) => {
-        const recordForModal = {
-            id: req.attendanceDocId,
-            staffId: req.staffId,
-            staffName: req.staffName,
-            date: req.date,
-            fullRecord: req, // Passing the full attendance object from OT list
         };
         setAlertToFix(recordForModal);
     };
@@ -240,7 +225,7 @@ export default function AttendancePage({ db, staffList }) {
                 </Modal>
             )}
 
-            {/* Manager Alerts / OT List Manual Fix Modal */}
+            {/* Manager Alerts Manual Fix Modal */}
             {alertToFix && (
                 <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
                     <EditAttendanceModal
@@ -262,18 +247,10 @@ export default function AttendancePage({ db, staffList }) {
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
 
-            {/* 1. Missing Check-outs (Alerts) */}
-            <div className="mb-4">
+            {/* Unified Alerts Section (Replaces the old two separate components) */}
+            <div className="mb-6">
                 <ManagerAlerts onManualFix={handleOpenManualFix} />
             </div>
-
-            {/* 2. Overtime Approvals (Money) */}
-            <OvertimeRequests
-                key={`ot-center-${refreshTrigger}`}
-                db={db}
-                companyConfig={companyConfig}
-                onManualFix={handleManualFix} 
-            />
 
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />
