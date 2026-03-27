@@ -182,7 +182,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
             }
         }
 
-        if (alertsCreated > 0) await batch.commit();
+        if (alertsCreated > 0 || !staleAlertsSnap.empty) await batch.commit();
         return { success: true, alertsCreated: alertsCreated };
 
     } catch (error) { throw new HttpsError("internal", error.message); }
