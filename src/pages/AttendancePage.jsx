@@ -5,6 +5,7 @@ import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
+import HRActionLog from '../components/Dashboard/HRActionLog';
 
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
@@ -70,6 +71,7 @@ export default function AttendancePage({ db, staffList }) {
     const [companyConfig, setCompanyConfig] = useState(null);
     
     const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const [activeAlertTab, setActiveAlertTab] = useState('pending'); // 'pending' or 'history'
 
     const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
 
@@ -247,10 +249,32 @@ export default function AttendancePage({ db, staffList }) {
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
 
-            {/* Unified Alerts Section (Replaces the old two separate components) */}
-            <div className="mb-6">
-                <ManagerAlerts onManualFix={handleOpenManualFix} />
+            {/* --- NEW: Tabbed HR Command Center --- */}
+            <div className="mb-8 bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
+                <div className="flex border-b border-gray-700">
+                    <button
+                        onClick={() => setActiveAlertTab('pending')}
+                        className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'pending' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}
+                    >
+                        Pending HR Actions
+                    </button>
+                    <button
+                        onClick={() => setActiveAlertTab('history')}
+                        className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'history' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}
+                    >
+                        Action History Log
+                    </button>
+                </div>
+
+                <div className="p-4">
+                    {activeAlertTab === 'pending' ? (
+                        <ManagerAlerts onManualFix={handleOpenManualFix} />
+                    ) : (
+                        <HRActionLog db={db} />
+                    )}
+                </div>
             </div>
+            {/* ------------------------------------- */}
 
             <div className="mb-6">
                 <UpcomingBirthdaysCard staffList={staffToDisplay} />

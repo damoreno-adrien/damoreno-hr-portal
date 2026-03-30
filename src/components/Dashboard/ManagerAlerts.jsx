@@ -22,7 +22,6 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
     const formattedCheckIn = checkInTime ? formatDisplayTime(checkInTime) : 'Unknown';
     const displayEndTime = scheduledEndStr.replace(':', 'h');
 
-    // Fetch the schedule for this specific item in the background
     useEffect(() => {
         const fetchScheduleTime = async () => {
             try {
@@ -46,10 +45,9 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
         try {
             await autoFixShiftFunc({ 
                 attendanceDocId: alert.attendanceDocId, 
-                alertId: "local_dummy_id", // Safely ignored by backend
+                alertId: "local_dummy_id",
                 scheduledEndTime: scheduledEndStr
             });
-            // No need to set isFixing(false) here because the component will instantly unmount!
         } catch (err) {
             setError(err.message || "Failed to fix.");
             setIsFixing(false);
@@ -122,7 +120,7 @@ const HRAlertItem = ({ alert }) => {
                     <div className={`p-2 rounded-full ${bgColor}`}>{icon}</div>
                     <div>
                         <p className="text-sm text-white font-medium">{title}</p>
-                        <p className="text-xs text-gray-400">{alert.staffName} • {formatDisplayDate(alert.date)}</p>
+                        <p className="text-xs text-gray-400">{formatDisplayDate(alert.date)}</p>
                     </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 w-full sm:w-auto">
@@ -147,8 +145,9 @@ export default function ManagerAlerts({ onManualFix }) {
     const [loading, setLoading] = useState(true);
     const [isScanning, setIsScanning] = useState(false);
     const [isFixingAll, setIsFixingAll] = useState(false);
+    const [scanStart, setScanStart] = useState('');
+    const [scanEnd, setScanEnd] = useState('');
 
-    // 1. Listen for Pending HR Actions (Lateness, Absences, OT)
     useEffect(() => {
         const q = query(collection(db, "manager_alerts"), where("status", "==", "pending"), orderBy("createdAt", "desc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -159,7 +158,6 @@ export default function ManagerAlerts({ onManualFix }) {
         return () => unsubscribe();
     }, []);
 
-    // 2. Synchronous Snapshot for Missing Check-outs (Instant Updates)
     useEffect(() => {
         const yesterday = addDays(new Date(), -1);
         const dayBefore = addDays(new Date(), -2);
@@ -193,7 +191,6 @@ export default function ManagerAlerts({ onManualFix }) {
         setIsFixingAll(true);
         try {
             const promises = missingCheckouts.map(async (alert) => {
-                // Fetch the specific schedule right before firing the function
                 const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
                 const schedSnap = await getDocs(schedQ);
                 const scheduledEndStr = !schedSnap.empty ? (schedSnap.docs[0].data().endTime || "23:00") : "23:00";
@@ -215,24 +212,42 @@ export default function ManagerAlerts({ onManualFix }) {
         }
         setIsScanning(true);
         try { 
-            const result = await runUnifiedHRScanFunc({}); 
-            alert(`Scan complete. Found ${result.data.alertsCreated} new HR items.`);
+            const payload = {};
+            if (scanStart) payload.startDate = scanStart;
+            if (scanEnd) payload.endDate = scanEnd;
+
+            const result = await runUnifiedHRScanFunc(payload); 
+            alert(`Scan complete. Scanned ${result.data.daysScanned} day(s). Found ${result.data.alertsCreated} new HR items.`);
         } 
         catch (err) { console.error("HR Scan failed:", err); alert("Scan failed. Check console."); } 
         finally { setIsScanning(false); }
     };
 
+    // --- NEW: Group alerts by Staff Name ---
+    const groupedAlerts = hrAlerts.reduce((acc, alert) => {
+        const name = alert.staffName || 'Unknown Staff';
+        if (!acc[name]) acc[name] = [];
+        acc[name].push(alert);
+        return acc;
+    }, {});
+
     if (loading) return <div className="bg-gray-800 p-4 rounded-lg flex items-center text-gray-300"><Loader2 className="h-4 w-4 animate-spin mr-2" />Loading pending actions...</div>;
     
     if (missingCheckouts.length === 0 && hrAlerts.length === 0) return (
-        <div className="bg-gray-800 p-6 rounded-lg text-center border border-gray-700 shadow-lg">
+        <div className="bg-gray-800 p-6 rounded-lg text-center border border-gray-700 shadow-lg flex flex-col items-center">
             <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
             <h3 className="text-white font-medium">All clear!</h3>
-            <p className="text-sm text-gray-400 mb-4">No missing check-outs or pending HR approvals.</p>
-            <button onClick={handleRunHRScan} disabled={isScanning} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center">
-                {isScanning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                {isScanning ? "Scanning Database..." : "Run Unified HR Scan"}
-            </button>
+            <p className="text-sm text-gray-400 mb-6">No missing check-outs or pending HR approvals.</p>
+            
+            <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-2 rounded-lg border border-gray-700">
+                <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-2 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                <span className="text-gray-400 text-sm font-medium">to</span>
+                <input type="date" value={scanEnd} onChange={e => setScanEnd(e.target.value)} className="bg-gray-800 text-white rounded p-2 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                <button onClick={handleRunHRScan} disabled={isScanning} className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors inline-flex justify-center items-center whitespace-nowrap">
+                    {isScanning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                    {isScanning ? "Scanning..." : "Run Range Scan"}
+                </button>
+            </div>
         </div>
     );
 
@@ -261,20 +276,43 @@ export default function ManagerAlerts({ onManualFix }) {
 
             {/* SECTION 2: HR AUDIT & SCAN */}
             <div className="space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2 border-b border-gray-700 pb-2">
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-2 border-b border-gray-700 pb-4">
                     <h3 className="text-lg font-bold text-white">HR & Disciplinary Actions</h3>
-                    <button onClick={handleRunHRScan} disabled={isScanning || missingCheckouts.length > 0} className="flex items-center justify-center gap-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                        {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                        {isScanning ? "Scanning..." : "Run Unified HR Scan"}
-                    </button>
+                    
+                    <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-1.5 rounded-lg border border-gray-700 w-full xl:w-auto">
+                        <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                        <span className="text-gray-400 text-sm font-medium">to</span>
+                        <input type="date" value={scanEnd} onChange={e => setScanEnd(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                        <button onClick={handleRunHRScan} disabled={isScanning || missingCheckouts.length > 0} className="w-full sm:w-auto flex items-center justify-center gap-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                            {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                            {isScanning ? "Scanning..." : "Run Scan"}
+                        </button>
+                    </div>
                 </div>
                 
+                {/* --- NEW: Grouped Rendering UI --- */}
                 {hrAlerts.length > 0 ? (
-                    <ul className="space-y-2">
-                        {hrAlerts.map(alert => <HRAlertItem key={alert.id} alert={alert} />)}
-                    </ul>
+                    <div className="space-y-5 mt-4">
+                        {Object.keys(groupedAlerts).sort().map(staffName => (
+                            <div key={staffName} className="bg-gray-900/40 rounded-xl border border-gray-700 overflow-hidden shadow-sm">
+                                <div className="bg-gray-800 px-4 py-2.5 border-b border-gray-700 flex justify-between items-center">
+                                    <h4 className="font-bold text-gray-200">{staffName}</h4>
+                                    <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-md border border-indigo-500/30">
+                                        {groupedAlerts[staffName].length} Action{groupedAlerts[staffName].length > 1 ? 's' : ''}
+                                    </span>
+                                </div>
+                                <div className="p-3">
+                                    <ul className="space-y-2">
+                                        {groupedAlerts[staffName].map(alert => (
+                                            <HRAlertItem key={alert.id} alert={alert} />
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 ) : (
-                    <p className="text-sm text-gray-500 italic">No HR actions pending. Click the scan button to audit yesterday's data.</p>
+                    <p className="text-sm text-gray-500 italic mt-4">No HR actions pending. Click the scan button to audit data.</p>
                 )}
             </div>
         </div>

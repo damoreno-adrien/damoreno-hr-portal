@@ -15,16 +15,28 @@ const timeZone = "Asia/Bangkok";
 
 exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Auth required");
-    console.log("Running Unified HR Scan (Option 3 Hybrid + Reality Sync)...");
+    console.log("Running Unified HR Scan (Date Range Upgrade)...");
 
     try {
         const now = DateTime.now().setZone(timeZone);
-        const targetDateStr = request.data.targetDate || now.minus({ days: 1 }).toISODate();
         
-        const targetDateObj = DateTime.fromISO(targetDateStr, { zone: timeZone });
-        const startOfMonthStr = targetDateObj.startOf('month').toISODate();
-        const threeMonthsAgoStr = targetDateObj.minus({ months: 3 }).toISODate();
-        const oneMonthAgoStr = targetDateObj.minus({ months: 1 }).toISODate();
+        // --- DATE RANGE SETUP ---
+        const startDateStr = request.data.startDate || now.minus({ days: 1 }).toISODate();
+        const endDateStr = request.data.endDate || startDateStr; // Default to single day if no end date
+        
+        // Generate an array of all dates to scan
+        const targetDates = [];
+        let currDate = DateTime.fromISO(startDateStr, { zone: timeZone });
+        const endDate = DateTime.fromISO(endDateStr, { zone: timeZone });
+        
+        while (currDate <= endDate) {
+            targetDates.push(currDate.toISODate());
+            currDate = currDate.plus({ days: 1 });
+        }
+
+        // We use the EARLIEST date to set our global 3-month lookback window
+        const startTargetObj = DateTime.fromISO(startDateStr, { zone: timeZone });
+        const globalThreeMonthsAgoStr = startTargetObj.minus({ months: 3 }).toISODate();
 
         const configSnap = await db.collection("settings").doc("company_config").get();
         const config = configSnap.data() || {};
@@ -45,23 +57,14 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
 
         const batch = db.batch();
         let alertsCreated = 0;
+        let staleAlertsDeleted = 0;
 
         // ====================================================================
-        // REALITY SYNC: Delete all existing PENDING alerts for this target date
+        // DATA FETCH: Grab everything ONCE to save database reads
         // ====================================================================
-        const staleAlertsSnap = await db.collection("manager_alerts")
-            .where("date", "==", targetDateStr)
-            .where("status", "==", "pending")
-            .get();
-
-        staleAlertsSnap.docs.forEach(docSnap => {
-            batch.delete(docSnap.ref); // Vaporize the old tickets
-        });
-
-        // Gather 3 Months of Data
         const [schedulesSnap, attendanceSnap, leaveSnap] = await Promise.all([
-            db.collection("schedules").where("date", ">=", threeMonthsAgoStr).where("date", "<=", targetDateStr).get(),
-            db.collection("attendance").where("date", ">=", threeMonthsAgoStr).where("date", "<=", targetDateStr).get(),
+            db.collection("schedules").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
+            db.collection("attendance").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
             db.collection("leave_requests").where("status", "==", "approved").get()
         ]);
 
@@ -71,119 +74,171 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
             attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
         });
 
-        const staffStats = {};
-
-        for (const schedDoc of schedulesSnap.docs) {
-            const shift = schedDoc.data();
-            const staffId = shift.staffId;
-            const shiftDate = shift.date;
+        // ====================================================================
+        // THE RANGE LOOP: Process each day individually
+        // ====================================================================
+        for (const targetDateStr of targetDates) {
+            console.log(`Scanning Date: ${targetDateStr}`);
             
-            if (!staffStats[staffId]) {
-                staffStats[staffId] = { 
-                    name: shift.staffName, 
-                    bonusIncidentsThisMonth: 0, bonusMinsThisMonth: 0,
-                    strikesLast1Month: 0, strikesLast3Months: 0,
-                    strikeToday: false, anyLateToday: false, lateMinsToday: 0, todayAttendanceId: null
-                };
-            }
+            // 1. REALITY SYNC: Delete existing PENDING alerts for THIS specific date
+            const staleAlertsSnap = await db.collection("manager_alerts")
+                .where("date", "==", targetDateStr)
+                .where("status", "==", "pending")
+                .get();
 
-            const attendance = attendanceMap.get(`${staffId}_${shiftDate}`);
-            
-            if (shiftDate === targetDateStr) {
-                const hasLeave = leaveSnap.docs.some(lDoc => {
-                    const l = lDoc.data();
-                    return l.staffId === staffId && l.startDate <= targetDateStr && l.endDate >= targetDateStr;
-                });
+            staleAlertsSnap.docs.forEach(docSnap => {
+                batch.delete(docSnap.ref);
+                staleAlertsDeleted++;
+            });
 
-                if (!attendance && !hasLeave) {
-                    const alertRef = db.collection("manager_alerts").doc();
-                    batch.set(alertRef, { type: "risk_absence", status: "pending", staffId: staffId, staffName: shift.staffName, date: targetDateStr, createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" });
-                    alertsCreated++;
+            // 2. Setup the specific time windows for THIS specific date
+            const targetDateObj = DateTime.fromISO(targetDateStr, { zone: timeZone });
+            const startOfMonthStr = targetDateObj.startOf('month').toISODate();
+            const threeMonthsAgoStr = targetDateObj.minus({ months: 3 }).toISODate();
+            const oneMonthAgoStr = targetDateObj.minus({ months: 1 }).toISODate();
+
+            const staffStats = {};
+
+            // 3. Process the math exactly as it was, but scoped to the current date loop
+            for (const schedDoc of schedulesSnap.docs) {
+                const shift = schedDoc.data();
+                const staffId = shift.staffId;
+                const shiftDate = shift.date;
+                
+                // CRITICAL FILTER: Don't look at shifts from the future relative to the day we are currently scanning!
+                if (shiftDate > targetDateStr) continue;
+                if (shiftDate < threeMonthsAgoStr) continue;
+                
+                if (!staffStats[staffId]) {
+                    staffStats[staffId] = { 
+                        name: shift.staffName, 
+                        bonusIncidentsThisMonth: 0, bonusMinsThisMonth: 0,
+                        strikesLast1Month: 0, strikesLast3Months: 0,
+                        strikeToday: false, anyLateToday: false, lateMinsToday: 0, todayAttendanceId: null
+                    };
                 }
-            }
 
-            if (attendance && attendance.checkInTime && shift.startTime) {
-                const checkInDate = attendance.checkInTime.toDate();
-                const scheduledStart = DateTime.fromISO(`${shiftDate}T${shift.startTime}`, { zone: timeZone });
-                const actualStart = DateTime.fromJSDate(checkInDate).setZone(timeZone);
+                const attendance = attendanceMap.get(`${staffId}_${shiftDate}`);
                 
-                const lateDiffMins = actualStart.diff(scheduledStart, 'minutes').minutes;
-                
-                // ====================================================================
-                // OPTION 3 (HYBRID): Every minute counts for Bonus, but Grace Period protects Strikes
-                // ====================================================================
-                if (lateDiffMins > 0) {
-                    
-                    // 1. Add to Monthly Bonus Bank (NO GRACE PERIOD HERE)
-                    if (shiftDate >= startOfMonthStr) {
-                        staffStats[staffId].bonusMinsThisMonth += lateDiffMins;
-                        staffStats[staffId].bonusIncidentsThisMonth += 1;
+                if (shiftDate === targetDateStr) {
+                    const hasLeave = leaveSnap.docs.some(lDoc => {
+                        const l = lDoc.data();
+                        return l.staffId === staffId && l.startDate <= targetDateStr && l.endDate >= targetDateStr;
+                    });
+
+                    if (!attendance && !hasLeave) {
+                        const alertRef = db.collection("manager_alerts").doc();
+                        batch.set(alertRef, { type: "risk_absence", status: "pending", staffId: staffId, staffName: shift.staffName, date: targetDateStr, createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" });
+                        alertsCreated++;
                     }
+                }
 
-                    // 2. Add to Disciplinary Strikes (GRACE PERIOD APPLIES HERE)
-                    if (lateDiffMins > hrRules.gracePeriodMins) {
-                        if (shiftDate >= threeMonthsAgoStr) staffStats[staffId].strikesLast3Months += 1;
-                        if (shiftDate >= oneMonthAgoStr) staffStats[staffId].strikesLast1Month += 1;
+                if (attendance && attendance.checkInTime && shift.startTime) {
+                    const checkInDate = attendance.checkInTime.toDate();
+                    const scheduledStart = DateTime.fromISO(`${shiftDate}T${shift.startTime}`, { zone: timeZone });
+                    const actualStart = DateTime.fromJSDate(checkInDate).setZone(timeZone);
+                    
+                    const lateDiffMins = actualStart.diff(scheduledStart, 'minutes').minutes;
+                    
+                    if (lateDiffMins > 0) {
+                        if (shiftDate >= startOfMonthStr) {
+                            staffStats[staffId].bonusMinsThisMonth += lateDiffMins;
+                            staffStats[staffId].bonusIncidentsThisMonth += 1;
+                        }
+
+                        if (lateDiffMins > hrRules.gracePeriodMins) {
+                            if (shiftDate >= threeMonthsAgoStr) staffStats[staffId].strikesLast3Months += 1;
+                            if (shiftDate >= oneMonthAgoStr) staffStats[staffId].strikesLast1Month += 1;
+                            
+                            if (shiftDate === targetDateStr) staffStats[staffId].strikeToday = true;
+                        }
+
+                        if (shiftDate === targetDateStr) {
+                            staffStats[staffId].anyLateToday = true;
+                            staffStats[staffId].lateMinsToday = lateDiffMins;
+                            staffStats[staffId].todayAttendanceId = attendance.id;
+                        }
+                    }
+                }
+
+                if (shiftDate === targetDateStr && attendance && attendance.checkOutTime && attendance.checkInTime && shift.endTime && shift.startTime) {
+                    if (attendance.otStatus !== "approved") {
+                        const safeStartTime = shift.startTime.padStart(5, '0');
+                        const safeEndTime = shift.endTime.padStart(5, '0');
+
+                        const scheduledStart = DateTime.fromISO(`${shiftDate}T${safeStartTime}`, { zone: timeZone });
+                        let scheduledEnd = DateTime.fromISO(`${targetDateStr}T${safeEndTime}`, { zone: timeZone });
                         
-                        if (shiftDate === targetDateStr) staffStats[staffId].strikeToday = true;
-                    }
+                        if (scheduledEnd < scheduledStart) {
+                            scheduledEnd = scheduledEnd.plus({ days: 1 });
+                        }
 
-                    if (shiftDate === targetDateStr) {
-                        staffStats[staffId].anyLateToday = true;
-                        staffStats[staffId].lateMinsToday = lateDiffMins;
-                        staffStats[staffId].todayAttendanceId = attendance.id;
+                        const actualStart = DateTime.fromJSDate(attendance.checkInTime.toDate()).setZone(timeZone);
+                        const actualEnd = DateTime.fromJSDate(attendance.checkOutTime.toDate()).setZone(timeZone);
+                        
+                        if (actualEnd.isValid && scheduledEnd.isValid && actualStart.isValid) {
+                            let totalExtraMins = 0;
+
+                            if (actualEnd > scheduledEnd) totalExtraMins += actualEnd.diff(scheduledEnd, 'minutes').minutes;
+                            if (actualStart < scheduledStart) totalExtraMins += scheduledStart.diff(actualStart, 'minutes').minutes;
+                            
+                            const otThreshold = Number(hrRules.minOTMins) || 30;
+                            
+                            if (totalExtraMins >= otThreshold) {
+                                const alertRef = db.collection("manager_alerts").doc();
+                                batch.set(alertRef, { 
+                                    type: "overtime_request", 
+                                    status: "pending", 
+                                    staffId: staffId, 
+                                    staffName: shift.staffName, 
+                                    date: targetDateStr, 
+                                    extraMinutes: Math.round(totalExtraMins), 
+                                    multiplier: hrRules.otMultiplier, 
+                                    attendanceDocId: attendance.id, 
+                                    createdAt: Timestamp.now(), 
+                                    message: `Pending OT Approval (${Math.round(totalExtraMins)} mins)` 
+                                });
+                                alertsCreated++;
+                            }
+                        }
                     }
                 }
-            }
+            } // End of SchedDoc loop
 
-            if (shiftDate === targetDateStr && attendance && attendance.checkOutTime && shift.endTime) {
-                const checkOutDate = attendance.checkOutTime.toDate();
-                const scheduledEnd = DateTime.fromISO(`${targetDateStr}T${shift.endTime}`, { zone: timeZone });
-                const actualEnd = DateTime.fromJSDate(checkOutDate).setZone(timeZone);
-                const extraMins = actualEnd.diff(scheduledEnd, 'minutes').minutes;
-                
-                if (extraMins >= hrRules.minOTMins) {
-                    const alertRef = db.collection("manager_alerts").doc();
-                    batch.set(alertRef, { type: "overtime_request", status: "pending", staffId: staffId, staffName: shift.staffName, date: targetDateStr, extraMinutes: Math.round(extraMins), multiplier: hrRules.otMultiplier, attendanceDocId: attendance.id, createdAt: Timestamp.now(), message: `Pending OT Approval (${Math.round(extraMins)} mins)` });
-                    alertsCreated++;
-                }
-            }
-        }
-
-        for (const [staffId, stats] of Object.entries(staffStats)) {
-            if (stats.anyLateToday) {
-                const lostBonus = (stats.bonusIncidentsThisMonth > hrRules.maxLateIncidents || stats.bonusMinsThisMonth > hrRules.maxLateMins);
-                
-                // Only alert the manager if they actually crossed a line (Strike or Lost Bonus)
-                if (stats.strikeToday || lostBonus) {
-                    let severityTitle = "Late Check-in";
-                    let recommendedAction = "Warning";
+            for (const [staffId, stats] of Object.entries(staffStats)) {
+                if (stats.anyLateToday) {
+                    const lostBonus = (stats.bonusIncidentsThisMonth > hrRules.maxLateIncidents || stats.bonusMinsThisMonth > hrRules.maxLateMins);
                     
-                    if (stats.strikesLast3Months >= tier3.strikes) {
-                        severityTitle = `${stats.strikesLast3Months}rd Lateness (Last 90 Days)`;
-                        recommendedAction = `Recommend: ${tier3.name}`;
-                    } else if (stats.strikesLast1Month >= tier2.strikes) {
-                        severityTitle = `${stats.strikesLast1Month}nd Lateness (Last 30 Days)`;
-                        recommendedAction = `Recommend: ${tier2.name}`;
-                    } else if (stats.strikesLast1Month >= tier1.strikes) {
-                        severityTitle = `${stats.strikesLast1Month}st Lateness`;
-                        recommendedAction = `Recommend: ${tier1.name}`;
-                    } else if (lostBonus && !stats.strikeToday) {
-                        severityTitle = `Micro-Lateness Accumulation`;
-                        recommendedAction = `Under Grace Period, but Bonus Bank Reached`;
+                    if (stats.strikeToday || lostBonus) {
+                        let severityTitle = "Late Check-in";
+                        let recommendedAction = "Warning";
+                        
+                        if (stats.strikesLast3Months >= tier3.strikes) {
+                            severityTitle = `${stats.strikesLast3Months}rd Lateness (Last 90 Days)`;
+                            recommendedAction = `Recommend: ${tier3.name}`;
+                        } else if (stats.strikesLast1Month >= tier2.strikes) {
+                            severityTitle = `${stats.strikesLast1Month}nd Lateness (Last 30 Days)`;
+                            recommendedAction = `Recommend: ${tier2.name}`;
+                        } else if (stats.strikesLast1Month >= tier1.strikes) {
+                            severityTitle = `${stats.strikesLast1Month}st Lateness`;
+                            recommendedAction = `Recommend: ${tier1.name}`;
+                        } else if (lostBonus && !stats.strikeToday) {
+                            severityTitle = `Micro-Lateness Accumulation`;
+                            recommendedAction = `Under Grace Period, but Bonus Bank Reached`;
+                        }
+
+                        if (lostBonus) recommendedAction += " & Revoke Bonus";
+
+                        const alertRef = db.collection("manager_alerts").doc();
+                        batch.set(alertRef, { type: "risk_late", status: "pending", staffId: staffId, staffName: stats.name, date: targetDateStr, minutesLate: Math.round(stats.lateMinsToday), attendanceDocId: stats.todayAttendanceId, createdAt: Timestamp.now(), message: `${severityTitle} - ${recommendedAction}` });
+                        alertsCreated++;
                     }
-
-                    if (lostBonus) recommendedAction += " & Revoke Bonus";
-
-                    const alertRef = db.collection("manager_alerts").doc();
-                    batch.set(alertRef, { type: "risk_late", status: "pending", staffId: staffId, staffName: stats.name, date: targetDateStr, minutesLate: Math.round(stats.lateMinsToday), attendanceDocId: stats.todayAttendanceId, createdAt: Timestamp.now(), message: `${severityTitle} - ${recommendedAction}` });
-                    alertsCreated++;
                 }
             }
-        }
+        } // END OF RANGE LOOP
 
-        if (alertsCreated > 0 || !staleAlertsSnap.empty) await batch.commit();
-        return { success: true, alertsCreated: alertsCreated };
+        if (alertsCreated > 0 || staleAlertsDeleted > 0) await batch.commit();
+        return { success: true, alertsCreated: alertsCreated, daysScanned: targetDates.length };
 
     } catch (error) { throw new HttpsError("internal", error.message); }
 });

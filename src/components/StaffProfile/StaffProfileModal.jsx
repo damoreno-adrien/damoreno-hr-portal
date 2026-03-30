@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from '../../../firebase.js';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -9,7 +9,7 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut } from 'lucide-react';
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 
@@ -33,6 +33,140 @@ const getInitialFormData = (staff) => {
     const nameParts = (staff.fullName || '').split(' ');
     return { ...initialData, firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '', nickname: staff.nickname || '' };
 };
+
+// ============================================================================
+// NEW COMPONENT: The Lifetime HR Records Dashboard
+// ============================================================================
+const StaffHRRecords = ({ db, staffId }) => {
+    const [records, setRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchRecords = async () => {
+            try {
+                const q = query(collection(db, 'manager_alerts'), where('staffId', '==', staffId));
+                const snap = await getDocs(q);
+                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                // Sort newest first
+                data.sort((a, b) => new Date(b.date) - new Date(a.date));
+                setRecords(data);
+            } catch (error) {
+                console.error("Failed to fetch HR records", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchRecords();
+    }, [db, staffId]);
+
+    if (loading) return <div className="p-8 text-center text-gray-400"><Loader2 className="h-6 w-6 animate-spin mx-auto mb-2"/> Loading HR history...</div>;
+
+    // --- Calculate Lifetime Stats ---
+    const lates = records.filter(r => r.type === 'risk_late');
+    const absences = records.filter(r => r.type === 'risk_absence');
+    const overtimes = records.filter(r => r.type === 'overtime_request');
+
+    const stats = {
+        totalLateFlags: lates.length,
+        totalLateMins: lates.reduce((sum, r) => sum + (r.minutesLate || 0), 0),
+        enforcedLates: lates.filter(r => r.status === 'enforced').length,
+        
+        totalAbsenceFlags: absences.length,
+        enforcedAbsences: absences.filter(r => r.status === 'enforced').length,
+        
+        totalOTRequests: overtimes.length,
+        approvedOTMins: overtimes.filter(r => r.status === 'approved').reduce((sum, r) => sum + (r.extraMinutes || 0), 0)
+    };
+
+    return (
+        <div className="space-y-6">
+            <h3 className="text-xl font-bold text-white mb-4 flex items-center"><History className="mr-2 text-indigo-400"/> Lifetime Punctuality & HR Stats</h3>
+            
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                        <ShieldAlert className="h-5 w-5 text-amber-400" />
+                        <h4 className="font-bold text-gray-300">Lateness</h4>
+                    </div>
+                    <p className="text-2xl font-bold text-white mb-1">{stats.totalLateFlags} <span className="text-sm font-normal text-gray-400">times flagged</span></p>
+                    <p className="text-sm text-gray-400 mb-2">Total Time: <span className="font-bold text-amber-400">{Math.floor(stats.totalLateMins / 60)}h {stats.totalLateMins % 60}m</span></p>
+                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50">
+                        Manager Enforced: <span className="font-bold text-white">{stats.enforcedLates}</span>
+                    </div>
+                </div>
+
+                <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                        <AlertOctagon className="h-5 w-5 text-red-400" />
+                        <h4 className="font-bold text-gray-300">Absences</h4>
+                    </div>
+                    <p className="text-2xl font-bold text-white mb-1">{stats.totalAbsenceFlags} <span className="text-sm font-normal text-gray-400">times flagged</span></p>
+                    <p className="text-sm text-gray-400 mb-2 invisible">Placeholder</p>
+                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50 mt-auto">
+                        Manager Enforced: <span className="font-bold text-white">{stats.enforcedAbsences}</span>
+                    </div>
+                </div>
+
+                <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                        <Clock className="h-5 w-5 text-green-400" />
+                        <h4 className="font-bold text-gray-300">Overtime</h4>
+                    </div>
+                    <p className="text-2xl font-bold text-white mb-1">{stats.totalOTRequests} <span className="text-sm font-normal text-gray-400">requests</span></p>
+                    <p className="text-sm text-gray-400 mb-2">Total Paid: <span className="font-bold text-green-400">{Math.floor(stats.approvedOTMins / 60)}h {stats.approvedOTMins % 60}m</span></p>
+                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50">
+                        Manager Approved: <span className="font-bold text-white">{overtimes.filter(r => r.status === 'approved').length}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Detailed History Table */}
+            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mt-6">
+                <div className="p-4 border-b border-gray-700 bg-gray-900/50">
+                    <h4 className="font-bold text-gray-300 uppercase tracking-wider text-xs">Complete Chronological Log</h4>
+                </div>
+                <div className="overflow-y-auto max-h-96">
+                    {records.length > 0 ? (
+                        <table className="min-w-full divide-y divide-gray-700">
+                            <thead className="bg-gray-800 sticky top-0">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Date</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Event</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Details</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Final Decision</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700 bg-gray-800/50">
+                                {records.map(r => (
+                                    <tr key={r.id} className="hover:bg-gray-700/50">
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{r.date}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                                            {r.type === 'risk_late' && <span className="text-amber-400 flex items-center"><ShieldAlert className="h-4 w-4 mr-1"/> Late</span>}
+                                            {r.type === 'risk_absence' && <span className="text-red-400 flex items-center"><AlertOctagon className="h-4 w-4 mr-1"/> Absence</span>}
+                                            {r.type === 'overtime_request' && <span className="text-green-400 flex items-center"><Clock className="h-4 w-4 mr-1"/> Overtime</span>}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-400 max-w-xs truncate" title={r.message}>{r.message}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                            {r.status === 'approved' || r.status === 'enforced' ? <span className="px-2 py-1 bg-green-900/50 text-green-400 rounded text-xs border border-green-700/50 flex items-center w-max"><CheckCircle className="w-3 h-3 mr-1"/> {r.status.toUpperCase()}</span> : 
+                                             r.status === 'dismissed' ? <span className="px-2 py-1 bg-gray-800 text-gray-400 rounded text-xs border border-gray-600 flex items-center w-max"><XCircle className="w-3 h-3 mr-1"/> DISMISSED</span> :
+                                             r.status === 'revoked' ? <span className="px-2 py-1 bg-red-900/50 text-red-400 rounded text-xs border border-red-700/50 flex items-center w-max"><RotateCcw className="w-3 h-3 mr-1"/> REVOKED</span> :
+                                             <span className="px-2 py-1 bg-yellow-900/50 text-yellow-400 rounded text-xs border border-yellow-700/50">PENDING</span>}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <div className="p-8 text-center text-gray-500 italic">No HR events on record for this staff member.</div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+// ============================================================================
+
 
 export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole }) {
     const [activeTab, setActiveTab] = useState('details');
@@ -165,18 +299,16 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         try {
             const storage = getStorage();
             
-            // Still use a safe, unique filename for the Google Cloud Storage bucket
             const safeFileName = fileToUpload.name.replace(/\s+/g, '_');
             const storageRef = ref(storage, `staff_documents/${staff.id}/${Date.now()}_${safeFileName}`);
             
             await uploadBytes(storageRef, fileToUpload);
             const downloadURL = await getDownloadURL(storageRef);
             
-            // Build the final object combining Storage data with our custom Metadata
             const fileMetadata = { 
-                name: metadata.customName, // The clean, renamed display name
-                category: metadata.category, // e.g., 'Visa', 'Passport'
-                expiryDate: metadata.expiryDate, // "2026-10-15" or null
+                name: metadata.customName, 
+                category: metadata.category, 
+                expiryDate: metadata.expiryDate, 
                 isVisibleToStaff: metadata.isVisibleToStaff,
                 url: downloadURL, 
                 path: storageRef.fullPath, 
@@ -205,7 +337,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         } finally { setIsSaving(false); }
     };
     
-    // --- NEW: Edit Document Metadata ---
     const handleEditDocument = async (docPath, updatedMetadata) => {
         setIsSaving(true); setError('');
         try {
@@ -348,10 +479,18 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             )}
 
             <div className="border-b border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
-                <nav className="-mb-px flex space-x-6 overflow-x-auto w-full" aria-label="Tabs">
+                <nav className="-mb-px flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-1 w-full" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>Profile Details</button>
                     <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
+                    
+                    {/* --- NEW TAB BUTTON --- */}
+                    {userRole === 'manager' && (
+                        <button onClick={() => setActiveTab('hr-records')} className={getTabClasses('hr-records')}>
+                            <span className="flex items-center gap-2"><History className="h-4 w-4" /> HR Records</span>
+                        </button>
+                    )}
+                    
                     {userRole === 'manager' && (
                         <button onClick={() => setActiveTab('forms')} className={getTabClasses('forms')}>
                             <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> HR Forms</span>
@@ -362,6 +501,11 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             </div>
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
+
+            {/* --- NEW RENDER BLOCK FOR THE HR DASHBOARD --- */}
+            {activeTab === 'hr-records' && userRole === 'manager' && (
+                <StaffHRRecords db={db} staffId={staff.id} />
+            )}
 
             {/* --- HR Forms Tab --- */}
             {activeTab === 'forms' && userRole === 'manager' && (
@@ -485,7 +629,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 </div>
             )}
             
-            {/* --- NEW: Document Manager handles the Vault --- */}
             {activeTab === 'documents' && (
                 <DocumentManager 
                     documents={staff.documents} 
