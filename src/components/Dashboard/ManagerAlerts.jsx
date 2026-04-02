@@ -223,11 +223,21 @@ export default function ManagerAlerts({ onManualFix }) {
         finally { setIsScanning(false); }
     };
 
-    // --- NEW: Group alerts by Staff Name ---
+    // --- UPDATED: Group alerts by Staff Name with Dept/Pos ---
     const groupedAlerts = hrAlerts.reduce((acc, alert) => {
-        const name = alert.staffName || 'Unknown Staff';
-        if (!acc[name]) acc[name] = [];
-        acc[name].push(alert);
+        let nameDisplay = alert.staffName || 'Unknown Staff';
+        
+        // Build the extra info like "(Service - Waitress)"
+        const parts = [];
+        if (alert.department && alert.department !== 'N/A') parts.push(alert.department);
+        if (alert.position && alert.position !== 'N/A') parts.push(alert.position);
+        
+        if (parts.length > 0) {
+            nameDisplay += ` (${parts.join(' - ')})`;
+        }
+
+        if (!acc[nameDisplay]) acc[nameDisplay] = [];
+        acc[nameDisplay].push(alert);
         return acc;
     }, {});
 

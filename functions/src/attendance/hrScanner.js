@@ -62,10 +62,11 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
         // ====================================================================
         // DATA FETCH: Grab everything ONCE to save database reads
         // ====================================================================
-        const [schedulesSnap, attendanceSnap, leaveSnap] = await Promise.all([
+        const [schedulesSnap, attendanceSnap, leaveSnap, staffSnap] = await Promise.all([
             db.collection("schedules").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
             db.collection("attendance").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
-            db.collection("leave_requests").where("status", "==", "approved").get()
+            db.collection("leave_requests").where("status", "==", "approved").get(),
+            db.collection("staff_profiles").get()
         ]);
 
         const attendanceMap = new Map();
@@ -74,11 +75,24 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
             attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
         });
 
+        // --- Map Staff Profiles to easily grab Dept & Position ---
+        const staffProfilesMap = new Map();
+        staffSnap.docs.forEach(doc => {
+            const data = doc.data();
+            let dept = '';
+            let pos = '';
+            if (data.jobHistory && data.jobHistory.length > 0) {
+                const currentJob = [...data.jobHistory].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0))[0];
+                dept = currentJob.department || '';
+                pos = currentJob.position || currentJob.title || '';
+            }
+            staffProfilesMap.set(doc.id, { department: dept, position: pos });
+        });
+
         // ====================================================================
         // THE RANGE LOOP: Process each day individually
         // ====================================================================
         for (const targetDateStr of targetDates) {
-            console.log(`Scanning Date: ${targetDateStr}`);
             
             // 1. REALITY SYNC: Delete existing PENDING alerts for THIS specific date
             const staleAlertsSnap = await db.collection("manager_alerts")
@@ -127,8 +141,18 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                     });
 
                     if (!attendance && !hasLeave) {
+                        const profile = staffProfilesMap.get(staffId) || {}; // <--- FIX IS HERE
                         const alertRef = db.collection("manager_alerts").doc();
-                        batch.set(alertRef, { type: "risk_absence", status: "pending", staffId: staffId, staffName: shift.staffName, date: targetDateStr, createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" });
+                        batch.set(alertRef, { 
+                            type: "risk_absence", 
+                            status: "pending", 
+                            staffId: staffId, 
+                            staffName: shift.staffName, 
+                            department: profile.department || null,
+                            position: profile.position || null,
+                            date: targetDateStr, 
+                            createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" 
+                        });
                         alertsCreated++;
                     }
                 }
@@ -185,12 +209,15 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                             const otThreshold = Number(hrRules.minOTMins) || 30;
                             
                             if (totalExtraMins >= otThreshold) {
+                                const profile = staffProfilesMap.get(staffId) || {};
                                 const alertRef = db.collection("manager_alerts").doc();
                                 batch.set(alertRef, { 
                                     type: "overtime_request", 
                                     status: "pending", 
                                     staffId: staffId, 
                                     staffName: shift.staffName, 
+                                    department: profile.department || null,
+                                    position: profile.position || null,
                                     date: targetDateStr, 
                                     extraMinutes: Math.round(totalExtraMins), 
                                     multiplier: hrRules.otMultiplier, 
@@ -229,8 +256,21 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
 
                         if (lostBonus) recommendedAction += " & Revoke Bonus";
 
+                        const profile = staffProfilesMap.get(staffId) || {}; // <--- FIX IS HERE
                         const alertRef = db.collection("manager_alerts").doc();
-                        batch.set(alertRef, { type: "risk_late", status: "pending", staffId: staffId, staffName: stats.name, date: targetDateStr, minutesLate: Math.round(stats.lateMinsToday), attendanceDocId: stats.todayAttendanceId, createdAt: Timestamp.now(), message: `${severityTitle} - ${recommendedAction}` });
+                        batch.set(alertRef, { 
+                            type: "risk_late", 
+                            status: "pending", 
+                            staffId: staffId, 
+                            staffName: stats.name,
+                            department: profile.department || null,
+                            position: profile.position || null, 
+                            date: targetDateStr, 
+                            minutesLate: Math.round(stats.lateMinsToday), 
+                            attendanceDocId: stats.todayAttendanceId, 
+                            createdAt: Timestamp.now(), 
+                            message: `${severityTitle} - ${recommendedAction}` 
+                        });
                         alertsCreated++;
                     }
                 }
