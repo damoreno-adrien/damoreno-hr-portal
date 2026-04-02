@@ -128,7 +128,8 @@ export const generateDocument = async (docType, staffProfile, companyConfig, ext
             START_DATE: staffProfile?.startDate ? formatCustom(new Date(staffProfile.startDate), 'dd MMMM yyyy') : "START_DATE",
             ORIGINAL_START_DATE: staffProfile?.startDate ? formatCustom(new Date(staffProfile.startDate), 'dd MMMM yyyy') : "ORIGINAL_START_DATE",
             ROLE_RESPONSIBILITIES: responsibilities,
-            
+            ID_TYPE: staffProfile?.idType || "ID_TYPE",
+            ID_NUMBER: staffProfile?.idNumber || "ID_NUMBER",            
             MONTHLY_SALARY: salaryNum.toLocaleString(),
             MONTHLY_SALARY_EN: translateNumber(salaryNum, 'EN'),
             MONTHLY_SALARY_TH: translateNumber(salaryNum, 'TH'),
