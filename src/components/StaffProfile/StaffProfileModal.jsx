@@ -9,7 +9,7 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw } from 'lucide-react';
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 
@@ -28,6 +28,9 @@ const getInitialFormData = (staff) => {
         startDate: formattedStartDate || '', bankAccount: staff.bankAccount || '', address: staff.address || '',
         emergencyContactName: staff.emergencyContactName || '', emergencyContactPhone: staff.emergencyContactPhone || '',
         isSsoRegistered: staff.isSsoRegistered ?? true,
+        // --- NEW: Identification Documents ---
+        idType: staff.idType || 'None',
+        idNumber: staff.idNumber || '',
     };
     if (staff.firstName || staff.lastName) return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
     const nameParts = (staff.fullName || '').split(' ');
@@ -35,11 +38,15 @@ const getInitialFormData = (staff) => {
 };
 
 // ============================================================================
-// NEW COMPONENT: The Lifetime HR Records Dashboard
+// UPDATED COMPONENT: The Lifetime HR Records Dashboard (With Filters & Export)
 // ============================================================================
-const StaffHRRecords = ({ db, staffId }) => {
+const StaffHRRecords = ({ db, staffId, staffName }) => {
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
+    
+    // --- NEW: Filter States ---
+    const [filterType, setFilterType] = useState('All');
+    const [showRevoked, setShowRevoked] = useState(false);
 
     useEffect(() => {
         const fetchRecords = async () => {
@@ -47,7 +54,6 @@ const StaffHRRecords = ({ db, staffId }) => {
                 const q = query(collection(db, 'manager_alerts'), where('staffId', '==', staffId));
                 const snap = await getDocs(q);
                 const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                // Sort newest first
                 data.sort((a, b) => new Date(b.date) - new Date(a.date));
                 setRecords(data);
             } catch (error) {
@@ -61,73 +67,93 @@ const StaffHRRecords = ({ db, staffId }) => {
 
     if (loading) return <div className="p-8 text-center text-gray-400"><Loader2 className="h-6 w-6 animate-spin mx-auto mb-2"/> Loading HR history...</div>;
 
-    // --- Calculate Lifetime Stats ---
-    const lates = records.filter(r => r.type === 'risk_late');
-    const absences = records.filter(r => r.type === 'risk_absence');
-    const overtimes = records.filter(r => r.type === 'overtime_request');
+    // --- Apply Filters ---
+    const filteredRecords = records.filter(r => {
+        if (!showRevoked && r.status === 'revoked') return false;
+        if (filterType !== 'All' && !r.type.includes(filterType.toLowerCase())) return false;
+        return true;
+    });
+
+    // --- Calculate Lifetime Stats (Ignores Revoked items so math is perfectly accurate) ---
+    const validRecords = records.filter(r => r.status !== 'revoked');
+    const lates = validRecords.filter(r => r.type === 'risk_late');
+    const absences = validRecords.filter(r => r.type === 'risk_absence');
+    const overtimes = validRecords.filter(r => r.type === 'overtime_request');
 
     const stats = {
         totalLateFlags: lates.length,
         totalLateMins: lates.reduce((sum, r) => sum + (r.minutesLate || 0), 0),
         enforcedLates: lates.filter(r => r.status === 'enforced').length,
-        
         totalAbsenceFlags: absences.length,
         enforcedAbsences: absences.filter(r => r.status === 'enforced').length,
-        
         totalOTRequests: overtimes.length,
         approvedOTMins: overtimes.filter(r => r.status === 'approved').reduce((sum, r) => sum + (r.extraMinutes || 0), 0)
     };
 
+    // --- CSV Export Logic ---
+    const handleExportCSV = () => {
+        if (filteredRecords.length === 0) return alert("No records to export.");
+        const headers = ["Date", "Type", "Original Message", "Status"];
+        const rows = filteredRecords.map(r => {
+            const friendlyType = r.type === 'overtime_request' ? 'Overtime' : r.type.includes('late') ? 'Lateness' : 'Absence';
+            return [ r.date, friendlyType, `"${r.message || ''}"`, r.status.toUpperCase() ];
+        });
+        const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `${staffName.replace(/\s+/g, '_')}_HR_History.csv`);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    };
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fadeIn">
             <h3 className="text-xl font-bold text-white mb-4 flex items-center"><History className="mr-2 text-indigo-400"/> Lifetime Punctuality & HR Stats</h3>
             
-            {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                        <ShieldAlert className="h-5 w-5 text-amber-400" />
-                        <h4 className="font-bold text-gray-300">Lateness</h4>
-                    </div>
+                    <div className="flex items-center gap-2 mb-2"><ShieldAlert className="h-5 w-5 text-amber-400" /><h4 className="font-bold text-gray-300">Lateness</h4></div>
                     <p className="text-2xl font-bold text-white mb-1">{stats.totalLateFlags} <span className="text-sm font-normal text-gray-400">times flagged</span></p>
                     <p className="text-sm text-gray-400 mb-2">Total Time: <span className="font-bold text-amber-400">{Math.floor(stats.totalLateMins / 60)}h {stats.totalLateMins % 60}m</span></p>
-                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50">
-                        Manager Enforced: <span className="font-bold text-white">{stats.enforcedLates}</span>
-                    </div>
+                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50">Manager Enforced: <span className="font-bold text-white">{stats.enforcedLates}</span></div>
                 </div>
 
                 <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                        <AlertOctagon className="h-5 w-5 text-red-400" />
-                        <h4 className="font-bold text-gray-300">Absences</h4>
-                    </div>
+                    <div className="flex items-center gap-2 mb-2"><AlertOctagon className="h-5 w-5 text-red-400" /><h4 className="font-bold text-gray-300">Absences</h4></div>
                     <p className="text-2xl font-bold text-white mb-1">{stats.totalAbsenceFlags} <span className="text-sm font-normal text-gray-400">times flagged</span></p>
                     <p className="text-sm text-gray-400 mb-2 invisible">Placeholder</p>
-                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50 mt-auto">
-                        Manager Enforced: <span className="font-bold text-white">{stats.enforcedAbsences}</span>
-                    </div>
+                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50 mt-auto">Manager Enforced: <span className="font-bold text-white">{stats.enforcedAbsences}</span></div>
                 </div>
 
                 <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                        <Clock className="h-5 w-5 text-green-400" />
-                        <h4 className="font-bold text-gray-300">Overtime</h4>
-                    </div>
+                    <div className="flex items-center gap-2 mb-2"><Clock className="h-5 w-5 text-green-400" /><h4 className="font-bold text-gray-300">Overtime</h4></div>
                     <p className="text-2xl font-bold text-white mb-1">{stats.totalOTRequests} <span className="text-sm font-normal text-gray-400">requests</span></p>
                     <p className="text-sm text-gray-400 mb-2">Total Paid: <span className="font-bold text-green-400">{Math.floor(stats.approvedOTMins / 60)}h {stats.approvedOTMins % 60}m</span></p>
-                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50">
-                        Manager Approved: <span className="font-bold text-white">{overtimes.filter(r => r.status === 'approved').length}</span>
-                    </div>
+                    <div className="text-xs bg-gray-900/50 p-2 rounded text-gray-400 border border-gray-700/50">Manager Approved: <span className="font-bold text-white">{overtimes.filter(r => r.status === 'approved').length}</span></div>
                 </div>
             </div>
 
-            {/* Detailed History Table */}
+            {/* --- NEW: Filters & Export Controls --- */}
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mt-6">
-                <div className="p-4 border-b border-gray-700 bg-gray-900/50">
-                    <h4 className="font-bold text-gray-300 uppercase tracking-wider text-xs">Complete Chronological Log</h4>
+                <div className="p-4 border-b border-gray-700 bg-gray-900/50 flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-4 w-full sm:w-auto">
+                        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:ring-indigo-500 w-full sm:w-auto">
+                            <option value="All">All Events</option>
+                            <option value="overtime">Overtime Only</option>
+                            <option value="risk">Disciplinary Only</option>
+                        </select>
+                        <button onClick={() => setShowRevoked(!showRevoked)} className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${showRevoked ? 'bg-indigo-900/40 text-indigo-300 border-indigo-700' : 'bg-gray-800 text-gray-400 border-gray-600 hover:text-white'}`}>
+                            {showRevoked ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                            {showRevoked ? "Showing Revoked" : "Hide Revoked"}
+                        </button>
+                    </div>
+                    <button onClick={handleExportCSV} disabled={filteredRecords.length === 0} className="w-full sm:w-auto flex items-center justify-center gap-2 text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white px-4 py-1.5 rounded-lg transition-colors border border-gray-600 disabled:opacity-50">
+                        <Download className="h-4 w-4" /> Export CSV
+                    </button>
                 </div>
+
                 <div className="overflow-y-auto max-h-96">
-                    {records.length > 0 ? (
+                    {filteredRecords.length > 0 ? (
                         <table className="min-w-full divide-y divide-gray-700">
                             <thead className="bg-gray-800 sticky top-0">
                                 <tr>
@@ -138,8 +164,8 @@ const StaffHRRecords = ({ db, staffId }) => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-700 bg-gray-800/50">
-                                {records.map(r => (
-                                    <tr key={r.id} className="hover:bg-gray-700/50">
+                                {filteredRecords.map(r => (
+                                    <tr key={r.id} className={`hover:bg-gray-700/50 transition-colors ${r.status === 'revoked' ? 'opacity-50' : ''}`}>
                                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{r.date}</td>
                                         <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
                                             {r.type === 'risk_late' && <span className="text-amber-400 flex items-center"><ShieldAlert className="h-4 w-4 mr-1"/> Late</span>}
@@ -158,7 +184,7 @@ const StaffHRRecords = ({ db, staffId }) => {
                             </tbody>
                         </table>
                     ) : (
-                        <div className="p-8 text-center text-gray-500 italic">No HR events on record for this staff member.</div>
+                        <div className="p-8 text-center text-gray-500 italic">No HR events on record for this filter.</div>
                     )}
                 </div>
             </div>
@@ -212,6 +238,9 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 bankAccount: formData.bankAccount || null, address: formData.address || null,
                 emergencyContactName: formData.emergencyContactName || null, emergencyContactPhone: formData.emergencyContactPhone || null,
                 isSsoRegistered: formData.isSsoRegistered,
+                // --- NEW: Saving Identification ---
+                idType: formData.idType || null,
+                idNumber: formData.idNumber || null,
             };
             if (updateData.firstName) updateData.fullName = null;
             await updateDoc(staffDocRef, updateData);
@@ -298,13 +327,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsSaving(true); setError('');
         try {
             const storage = getStorage();
-            
             const safeFileName = fileToUpload.name.replace(/\s+/g, '_');
             const storageRef = ref(storage, `staff_documents/${staff.id}/${Date.now()}_${safeFileName}`);
-            
             await uploadBytes(storageRef, fileToUpload);
             const downloadURL = await getDownloadURL(storageRef);
-            
             const fileMetadata = { 
                 name: metadata.customName, 
                 category: metadata.category, 
@@ -314,7 +340,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 path: storageRef.fullPath, 
                 uploadedAt: Timestamp.now()
             };
-            
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
         } catch (err) {
@@ -341,26 +366,16 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsSaving(true); setError('');
         try {
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            
             const updatedDocuments = staff.documents.map(d => {
                 if (d.path === docPath) {
-                    return { 
-                        ...d, 
-                        name: updatedMetadata.customName,
-                        category: updatedMetadata.category,
-                        expiryDate: updatedMetadata.expiryDate,
-                        isVisibleToStaff: updatedMetadata.isVisibleToStaff 
-                    };
+                    return { ...d, name: updatedMetadata.customName, category: updatedMetadata.category, expiryDate: updatedMetadata.expiryDate, isVisibleToStaff: updatedMetadata.isVisibleToStaff };
                 }
                 return d;
             });
-
             await updateDoc(staffDocRef, { documents: updatedDocuments });
         } catch (error) {
             alert(`Failed to update document: ${error.message}`);
-        } finally { 
-            setIsSaving(false); 
-        }
+        } finally { setIsSaving(false); }
     };
 
     const handleResetPassword = async (staffId) => {
@@ -484,7 +499,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
                     
-                    {/* --- NEW TAB BUTTON --- */}
                     {userRole === 'manager' && (
                         <button onClick={() => setActiveTab('hr-records')} className={getTabClasses('hr-records')}>
                             <span className="flex items-center gap-2"><History className="h-4 w-4" /> HR Records</span>
@@ -502,9 +516,9 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
 
-            {/* --- NEW RENDER BLOCK FOR THE HR DASHBOARD --- */}
+            {/* --- HR Dashboard --- */}
             {activeTab === 'hr-records' && userRole === 'manager' && (
-                <StaffHRRecords db={db} staffId={staff.id} />
+                <StaffHRRecords db={db} staffId={staff.id} staffName={displayName} />
             )}
 
             {/* --- HR Forms Tab --- */}
@@ -515,7 +529,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         <p className="text-sm text-gray-400 mt-1">Select a document to automatically populate it with this staff member's data.</p>
                     </div>
 
-                    {/* Category 1: Employment & Legal */}
                     <div>
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Employment & Legal</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -523,92 +536,47 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                                 <div className="bg-indigo-900/50 p-3 rounded-lg mr-4 group-hover:bg-indigo-600 transition-colors">
                                     {isGenerating ? <Loader2 className="h-6 w-6 text-indigo-300 animate-spin" /> : <FileBadge className="h-6 w-6 text-indigo-300 group-hover:text-white transition-colors" />}
                                 </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Main Employment Contract</h4>
-                                    <p className="text-xs text-gray-400 mt-1">Standard bilingual contract & rules</p>
-                                </div>
+                                <div><h4 className="text-white font-medium">Main Employment Contract</h4><p className="text-xs text-gray-400 mt-1">Standard bilingual contract & rules</p></div>
                             </button>
-
                             <button onClick={() => handleGenerate('certificate')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-blue-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-blue-900/50 p-3 rounded-lg mr-4 group-hover:bg-blue-600 transition-colors">
-                                    <FileText className="h-6 w-6 text-blue-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Certificate of Employment</h4>
-                                    <p className="text-xs text-gray-400 mt-1">Proof of employment letter for visas/loans</p>
-                                </div>
+                                <div className="bg-blue-900/50 p-3 rounded-lg mr-4 group-hover:bg-blue-600 transition-colors"><FileText className="h-6 w-6 text-blue-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Certificate of Employment</h4><p className="text-xs text-gray-400 mt-1">Proof of employment letter for visas/loans</p></div>
                             </button>
-
                             <button onClick={() => triggerDocumentForm('salary_increase')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-emerald-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-emerald-900/50 p-3 rounded-lg mr-4 group-hover:bg-emerald-600 transition-colors">
-                                    <FileText className="h-6 w-6 text-emerald-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Salary Increase Addendum</h4>
-                                    <p className="text-xs text-gray-400 mt-1">For raises without title changes</p>
-                                </div>
+                                <div className="bg-emerald-900/50 p-3 rounded-lg mr-4 group-hover:bg-emerald-600 transition-colors"><FileText className="h-6 w-6 text-emerald-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Salary Increase Addendum</h4><p className="text-xs text-gray-400 mt-1">For raises without title changes</p></div>
                             </button>
-
                             <button onClick={() => triggerDocumentForm('promotion')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-yellow-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-yellow-900/50 p-3 rounded-lg mr-4 group-hover:bg-yellow-600 transition-colors">
-                                    <FileBadge className="h-6 w-6 text-yellow-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Promotion Addendum</h4>
-                                    <p className="text-xs text-gray-400 mt-1">For new job titles & responsibilities</p>
-                                </div>
+                                <div className="bg-yellow-900/50 p-3 rounded-lg mr-4 group-hover:bg-yellow-600 transition-colors"><FileBadge className="h-6 w-6 text-yellow-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Promotion Addendum</h4><p className="text-xs text-gray-400 mt-1">For new job titles & responsibilities</p></div>
                             </button>
                         </div>
                     </div>
 
-                    {/* Category 2: Operations & Requests */}
                     <div>
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Operations & Requests</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <button onClick={() => triggerDocumentForm('leave')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-green-900/50 p-3 rounded-lg mr-4 group-hover:bg-green-600 transition-colors">
-                                    <PlaneTakeoff className="h-6 w-6 text-green-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Special Leave Request</h4>
-                                    <p className="text-xs text-gray-400 mt-1">Form for extended or unpaid leave</p>
-                                </div>
+                                <div className="bg-green-900/50 p-3 rounded-lg mr-4 group-hover:bg-green-600 transition-colors"><PlaneTakeoff className="h-6 w-6 text-green-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Special Leave Request</h4><p className="text-xs text-gray-400 mt-1">Form for extended or unpaid leave</p></div>
                             </button>
-
                             <button onClick={() => handleGenerate('uniform')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-purple-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-purple-900/50 p-3 rounded-lg mr-4 group-hover:bg-purple-600 transition-colors">
-                                    <Shirt className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Uniform Deduction Form</h4>
-                                    <p className="text-xs text-gray-400 mt-1">Authorization for lost/extra uniform costs</p>
-                                </div>
+                                <div className="bg-purple-900/50 p-3 rounded-lg mr-4 group-hover:bg-purple-600 transition-colors"><Shirt className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Uniform Deduction Form</h4><p className="text-xs text-gray-400 mt-1">Authorization for lost/extra uniform costs</p></div>
                             </button>
                         </div>
                     </div>
 
-                    {/* Category 3: Performance & Offboarding */}
                     <div>
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Performance & Offboarding</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <button onClick={() => triggerDocumentForm('warning')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-amber-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-amber-900/50 p-3 rounded-lg mr-4 group-hover:bg-amber-600 transition-colors">
-                                    <ShieldAlert className="h-6 w-6 text-amber-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Disciplinary Warning</h4>
-                                    <p className="text-xs text-gray-400 mt-1">Issue official 1st, 2nd, or Final warnings</p>
-                                </div>
+                                <div className="bg-amber-900/50 p-3 rounded-lg mr-4 group-hover:bg-amber-600 transition-colors"><ShieldAlert className="h-6 w-6 text-amber-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Disciplinary Warning</h4><p className="text-xs text-gray-400 mt-1">Issue official 1st, 2nd, or Final warnings</p></div>
                             </button>
-
                             <button onClick={() => handleGenerate('resignation')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-red-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
-                                <div className="bg-red-900/50 p-3 rounded-lg mr-4 group-hover:bg-red-600 transition-colors">
-                                    <LogOut className="h-6 w-6 text-red-300 group-hover:text-white transition-colors" />
-                                </div>
-                                <div>
-                                    <h4 className="text-white font-medium">Resignation Letter</h4>
-                                    <p className="text-xs text-gray-400 mt-1">Voluntary resignation and waiver form</p>
-                                </div>
+                                <div className="bg-red-900/50 p-3 rounded-lg mr-4 group-hover:bg-red-600 transition-colors"><LogOut className="h-6 w-6 text-red-300 group-hover:text-white transition-colors" /></div>
+                                <div><h4 className="text-white font-medium">Resignation Letter</h4><p className="text-xs text-gray-400 mt-1">Voluntary resignation and waiver form</p></div>
                             </button>
                         </div>
                     </div>

@@ -1,8 +1,8 @@
 /* src/components/Attendance/EditAttendanceModal.jsx */
 
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { X, Clock, Save, Coffee, Flame, AlertCircle, Loader2, Watch } from 'lucide-react';
+import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { X, Clock, Save, Coffee, Flame, AlertCircle, Loader2, Watch, Trash2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
 export default function EditAttendanceModal({ db, record, onClose }) {
@@ -17,6 +17,7 @@ export default function EditAttendanceModal({ db, record, onClose }) {
 
     const [isLoadingData, setIsLoadingData] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
     const [docId, setDocId] = useState(record?.id || null);
 
     // --- HELPER: SAFE DATE PARSING ---
@@ -106,14 +107,12 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             let finalIncludesBreak = true;
 
             if (breakMode === 'manual') {
-                // Break usually happens after check-in
                 newBreakStart = makeDate(breakStart, newCheckIn);
                 newBreakEnd = makeDate(breakEnd, newBreakStart);
                 finalIncludesBreak = true;
             } else if (breakMode === 'none') {
                 finalIncludesBreak = false;
             } else {
-                // Auto
                 finalIncludesBreak = true;
             }
 
@@ -133,15 +132,29 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                 manuallyEdited: true
             };
 
-            // Automatically creates the document if missing, or updates if it exists!
             await setDoc(recordRef, payload, { merge: true });
-
             onClose();
         } catch (error) {
             console.error("Error updating attendance:", error);
             alert("Failed to save.");
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    // --- NEW ACTION: DELETE ---
+    const handleDelete = async () => {
+        if (!docId) return;
+        if (!window.confirm("CRITICAL WARNING: Are you sure you want to permanently delete this attendance record? This will completely remove it from payroll calculations and cannot be undone.")) return;
+
+        setIsDeleting(true);
+        try {
+            await deleteDoc(doc(db, "attendance", docId));
+            onClose();
+        } catch (error) {
+            console.error("Error deleting attendance:", error);
+            alert("Failed to delete record.");
+            setIsDeleting(false);
         }
     };
 
@@ -223,8 +236,21 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t border-gray-800">
-                        <button onClick={onClose} className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-all">Cancel</button>
-                        <button onClick={handleSave} disabled={isSaving} className="flex-[2] bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">
+                        {/* --- NEW: Delete Button --- */}
+                        {docId && (
+                            <button 
+                                onClick={handleDelete} 
+                                disabled={isSaving || isDeleting} 
+                                className="px-4 py-3 bg-red-900/30 hover:bg-red-900/50 text-red-500 font-bold rounded-xl transition-all border border-red-900/50 flex items-center justify-center disabled:opacity-50"
+                                title="Delete Record"
+                            >
+                                {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+                            </button>
+                        )}
+                        
+                        <button onClick={onClose} disabled={isSaving || isDeleting} className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-all disabled:opacity-50">Cancel</button>
+                        
+                        <button onClick={handleSave} disabled={isSaving || isDeleting} className="flex-[2] bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">
                             {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                             {isSaving ? "Saving..." : "Save Changes"}
                         </button>

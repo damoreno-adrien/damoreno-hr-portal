@@ -41,6 +41,12 @@ export const ProfileDetailsView = ({ staff, currentJob }) => {
             <InfoRow label="Seniority" value={dateUtils.formatSeniority(staff.startDate, staff.endDate)} />
             <InfoRow label="Birthdate" value={dateUtils.formatDisplayDate(staff.birthdate)} />
             
+            {/* --- NEW: Identification Display --- */}
+            <hr className="md:col-span-2 border-gray-700 my-2" />
+            <InfoRow label="Identification Type" value={(staff.idType && staff.idType !== 'None') ? staff.idType : '-'} />
+            <InfoRow label="Document No." value={staff.idNumber || '-'} />
+            <hr className="md:col-span-2 border-gray-700 my-2" />
+            
             <div className="md:col-span-2">
                 <InfoRow label="Bank Account" value={staff.bankAccount} />
             </div>

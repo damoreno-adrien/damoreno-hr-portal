@@ -11,6 +11,38 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange }) => (
         <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
         <div className="md:col-span-2"><label className="text-sm text-gray-400">Bank Account</label><input id="bankAccount" value={formData.bankAccount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
         
+        {/* --- NEW: Identification Section --- */}
+        <div className="md:col-span-2 mt-2 bg-gray-800/30 p-4 rounded-lg border border-gray-700 space-y-4">
+            <h4 className="text-sm font-bold text-gray-300 border-b border-gray-700 pb-2">Identification Document</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label className="text-sm text-gray-400">Document Type</label>
+                    <select
+                        id="idType"
+                        value={formData.idType || 'None'}
+                        onChange={handleInputChange}
+                        className="w-full mt-1 px-3 py-2 bg-gray-900 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"
+                    >
+                        <option value="None">None Selected</option>
+                        <option value="Thai ID Card">Thai ID Card</option>
+                        <option value="Passport">Passport</option>
+                        <option value="Certificate of Identity">Certificate of Identity (CI)</option>
+                        <option value="Other">Other (Manual Entry)</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="text-sm text-gray-400">Document No.</label>
+                    <input
+                        id="idNumber"
+                        value={formData.idNumber || ''}
+                        onChange={handleInputChange}
+                        placeholder={formData.idType === 'None' ? '' : 'Enter document number...'}
+                        className="w-full mt-1 px-3 py-2 bg-gray-900 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"
+                    />
+                </div>
+            </div>
+        </div>
+
         <div className="md:col-span-2">
             <label className="text-sm text-gray-400">Address</label>
             <textarea id="address" value={formData.address || ''} onChange={handleInputChange} rows="3" className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"></textarea>
@@ -24,7 +56,7 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange }) => (
             <input id="emergencyContactPhone" value={formData.emergencyContactPhone || ''} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/>
         </div>
 
-        {/* --- NEW: Grouped Compliance Section --- */}
+        {/* --- Grouped Compliance Section --- */}
         <div className="md:col-span-2 mt-4 bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-4">
             <label className="flex items-center space-x-3 cursor-pointer">
                 <input 
