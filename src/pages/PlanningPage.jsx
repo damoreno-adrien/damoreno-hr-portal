@@ -42,18 +42,16 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
 
     const [sortOrder, setSortOrder] = useState('asc'); 
     const [showBulkCreator, setShowBulkCreator] = useState(false);
-    const [bulkCreatorProps, setBulkCreatorProps] = useState({}); // Stores data for pre-filling ShiftCreator
+    const [bulkCreatorProps, setBulkCreatorProps] = useState({}); 
 
     const [actionMenu, setActionMenu] = useState(null); 
     const [selectedShift, setSelectedShift] = useState(null);
     const [selectedAttendance, setSelectedAttendance] = useState(null);
 
-    // --- HELPER: Get Department Style ---
     const getDeptStyle = (deptName) => {
         return DEPT_STYLES[deptName] || DEPT_STYLES['Unassigned'];
     };
 
-    // --- HELPER: Get Current Job ---
     const getCurrentJob = (staff) => {
         if (!staff.jobHistory || staff.jobHistory.length === 0) {
             return { department: 'Unassigned', position: 'Staff' };
@@ -98,23 +96,18 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
         return { status: 'on-time' };
     };
 
-    // --- NEW: Handle Clicking Staff Name ---
     const handleStaffNameClick = (staff) => {
-        // Pre-fill ShiftCreator with this staff member and the CURRENT viewing week
         setBulkCreatorProps({
             initialStaffId: staff.id,
-            initialStartDate: weekDates[0].dateString, // Monday of current view
-            initialEndDate: weekDates[6].dateString    // Sunday of current view
+            initialStartDate: weekDates[0].dateString,
+            initialEndDate: weekDates[6].dateString
         });
         setShowBulkCreator(true);
     };
 
-    // --- DYNAMIC GROUPING ---
     const groupedAndSortedStaff = useMemo(() => {
         if (!staffList || !weekDates || weekDates.length === 0) return {};
         
-        // --- NEW: Time-Aware Archive Check ---
-        // Checks if they are active on the Monday of the currently viewed week
         const activeStaff = staffList.filter(s => dateUtils.isStaffActiveOnDate(s, weekDates[0].dateObject));
         
         const groups = activeStaff.reduce((acc, staff) => {
@@ -134,7 +127,7 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
             });
         });
         return groups;
-    }, [staffList, sortOrder, weekDates]); // <-- Added weekDates to dependencies
+    }, [staffList, sortOrder, weekDates]); 
 
     const categories = useMemo(() => {
         const configDepts = companyConfig?.departments || [];
@@ -204,7 +197,6 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
                                         </tr>
                                         {groupedAndSortedStaff[category].map(staff => (
                                             <tr key={staff.id} className="hover:bg-indigo-500/5 transition-colors group text-sm">
-                                                {/* Staff Name Column - Now Clickable! */}
                                                 <td 
                                                     onClick={() => handleStaffNameClick(staff)}
                                                     className={`p-4 sticky left-0 z-20 bg-gray-800 group-hover:bg-[#1f2937] transition-colors shadow-[4px_0_10px_rgba(0,0,0,0.3)] ${style.border} cursor-pointer hover:brightness-110 active:scale-[0.98]`}
@@ -259,7 +251,14 @@ export default function PlanningPage({ db, staffList, companyConfig }) {
                                                                         <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono font-black">
                                                                             <span className="text-green-400">{dateUtils.formatCustom(attendance.checkInTime?.toDate?.() || attendance.checkInTime, 'HH:mm')}</span>
                                                                             <span className="text-gray-600">→</span>
-                                                                            {attendance.checkOutTime ? <span className="text-green-400">{dateUtils.formatCustom(attendance.checkOutTime?.toDate?.() || attendance.checkOutTime, 'HH:mm')}</span> : <span className="text-amber-400 animate-pulse uppercase">On</span>}
+                                                                            {/* --- NEW: 'ON BREAK' LOGIC --- */}
+                                                                            {attendance.checkOutTime ? (
+                                                                                <span className="text-green-400">{dateUtils.formatCustom(attendance.checkOutTime?.toDate?.() || attendance.checkOutTime, 'HH:mm')}</span>
+                                                                            ) : (attendance.breakStart && !attendance.breakEnd) ? (
+                                                                                <span className="text-orange-500 animate-pulse uppercase tracking-tighter">On Break</span>
+                                                                            ) : (
+                                                                                <span className="text-amber-400 animate-pulse uppercase">On</span>
+                                                                            )}
                                                                         </div>
                                                                     </div>
                                                                 )}

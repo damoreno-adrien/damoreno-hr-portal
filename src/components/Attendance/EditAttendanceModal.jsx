@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { X, Clock, Save, Coffee, Flame, AlertCircle, Loader2, Watch, Trash2 } from 'lucide-react';
+import { X, Clock, Save, Coffee, Flame, AlertCircle, Loader2, Watch, Trash2, ShieldAlert } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
 export default function EditAttendanceModal({ db, record, onClose }) {
@@ -10,10 +10,13 @@ export default function EditAttendanceModal({ db, record, onClose }) {
     const [checkIn, setCheckIn] = useState('14:00');
     const [checkOut, setCheckOut] = useState('');
     
-    // New State for Break Management
-    const [breakMode, setBreakMode] = useState('auto'); // 'auto' | 'manual' | 'none'
+    // Break Management
+    const [breakMode, setBreakMode] = useState('auto'); 
     const [breakStart, setBreakStart] = useState('');
     const [breakEnd, setBreakEnd] = useState('');
+
+    // Manager Override State
+    const [otOverride, setOtOverride] = useState('');
 
     const [isLoadingData, setIsLoadingData] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -58,15 +61,20 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                 if (data.checkInTime) setCheckIn(parseTimeFromVal(data.checkInTime));
                 if (data.checkOutTime) setCheckOut(parseTimeFromVal(data.checkOutTime));
 
-                // --- DETECT BREAK MODE ---
-                if (data.breakStart && data.breakEnd) {
+                // --- FIX: DETECT BREAK MODE EVEN IF INCOMPLETE ---
+                if (data.breakStart || data.breakEnd) {
                     setBreakMode('manual');
-                    setBreakStart(parseTimeFromVal(data.breakStart));
-                    setBreakEnd(parseTimeFromVal(data.breakEnd));
+                    if (data.breakStart) setBreakStart(parseTimeFromVal(data.breakStart));
+                    if (data.breakEnd) setBreakEnd(parseTimeFromVal(data.breakEnd));
                 } else if (data.includesBreak === false) {
                     setBreakMode('none');
                 } else {
                     setBreakMode('auto');
+                }
+
+                // Load existing OT Override if already approved
+                if (data.otStatus === 'approved') {
+                    setOtOverride(data.otApprovedMinutes?.toString() || '');
                 }
 
             } catch (error) {
@@ -88,19 +96,17 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             const dateStr = record.date || new Date().toISOString().split('T')[0];
             const baseDateObj = new Date(dateStr);
 
-            // Construct Date Objects
             const makeDate = (timeStr, referenceDate) => {
                 if (!timeStr) return null;
                 const [h, m] = timeStr.split(':').map(Number);
                 const d = new Date(baseDateObj);
                 d.setHours(h, m, 0);
-                // Handle Overnight: If time is earlier than CheckIn (or reference), assume next day
                 if (referenceDate && d < referenceDate) d.setDate(d.getDate() + 1);
                 return d;
             };
 
             const newCheckIn = makeDate(checkIn);
-            const newCheckOut = makeDate(checkOut, newCheckIn); // Pass newCheckIn as reference to detect overnight
+            const newCheckOut = makeDate(checkOut, newCheckIn); 
 
             let newBreakStart = null;
             let newBreakEnd = null;
@@ -132,6 +138,14 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                 manuallyEdited: true
             };
 
+            // Inject OT Override
+            if (otOverride !== '') {
+                payload.otApprovedMinutes = parseInt(otOverride) || 0;
+                payload.otStatus = "approved";
+                payload.otIsProcessed = true;
+                payload.otDecisionDate = serverTimestamp();
+            }
+
             await setDoc(recordRef, payload, { merge: true });
             onClose();
         } catch (error) {
@@ -142,7 +156,7 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         }
     };
 
-    // --- NEW ACTION: DELETE ---
+    // --- ACTION: DELETE ---
     const handleDelete = async () => {
         if (!docId) return;
         if (!window.confirm("CRITICAL WARNING: Are you sure you want to permanently delete this attendance record? This will completely remove it from payroll calculations and cannot be undone.")) return;
@@ -227,16 +241,33 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                                 </div>
                             </div>
                         )}
-                        
-                        {breakMode === 'none' && (
-                            <div className="flex items-center gap-2 text-amber-500 bg-amber-500/10 p-3 rounded-lg text-[10px] font-bold uppercase">
-                                <AlertCircle className="w-4 h-4" /> <span>Calculation: Paid for full shift duration.</span>
+                    </div>
+
+                    {/* Manager Overrides Section */}
+                    <div className="space-y-3 pt-4 border-t border-gray-800">
+                        <label className="text-[10px] font-black text-indigo-400 uppercase ml-1 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3" /> Manager Overrides
+                        </label>
+                        <div className="bg-gray-800/50 p-3 rounded-lg border border-indigo-900/30 flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-bold text-gray-300">Force Paid Overtime</p>
+                                <p className="text-[10px] text-gray-500">Manually grant OT minutes (bypasses scanner)</p>
                             </div>
-                        )}
+                            <div className="flex items-center gap-2">
+                                <input 
+                                    type="number" 
+                                    value={otOverride} 
+                                    onChange={(e) => setOtOverride(e.target.value)} 
+                                    placeholder="0" 
+                                    className="w-16 bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-center text-sm focus:border-indigo-500 outline-none" 
+                                    min="0" 
+                                />
+                                <span className="text-xs text-gray-500 font-bold">mins</span>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="flex gap-3 pt-4 border-t border-gray-800">
-                        {/* --- NEW: Delete Button --- */}
                         {docId && (
                             <button 
                                 onClick={handleDelete} 

@@ -203,8 +203,11 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                         if (actualEnd.isValid && scheduledEnd.isValid && actualStart.isValid) {
                             let totalExtraMins = 0;
 
-                            if (actualEnd > scheduledEnd) totalExtraMins += actualEnd.diff(scheduledEnd, 'minutes').minutes;
-                            if (actualStart < scheduledStart) totalExtraMins += scheduledStart.diff(actualStart, 'minutes').minutes;
+                            // ONLY count staying late towards automatic overtime. 
+                            // Ignore early check-ins (staff arriving early to hang out/eat).
+                            if (actualEnd > scheduledEnd) {
+                                totalExtraMins += actualEnd.diff(scheduledEnd, 'minutes').minutes;
+                            }
                             
                             const otThreshold = Number(hrRules.minOTMins) || 30;
                             

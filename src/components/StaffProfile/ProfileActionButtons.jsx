@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Save, Edit, X, FileText } from 'lucide-react'; // Added FileText
-import ResignationLetterGenerator from '../ManageStaff/ResignationLetterGenerator'; // Added import
 
 export const ProfileActionButtons = ({
     staffProfile, // <-- ADDED PROP: Make sure the parent component passes this!
@@ -68,13 +67,6 @@ export const ProfileActionButtons = ({
                     Close
                 </button>
             </div>
-
-            {/* --- NEW: The Hidden Print Modal --- */}
-            <ResignationLetterGenerator 
-                staff={staffProfile} 
-                isOpen={showResignationModal} 
-                onClose={() => setShowResignationModal(false)} 
-            />
         </div>
     );
 };

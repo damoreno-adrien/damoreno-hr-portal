@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
-import ImportConfirmationModal from '../components/common/ImportConfirmationModal';
-import { Plus, Download, Upload, FileText } from 'lucide-react'; 
+import { Plus, Download, FileText } from 'lucide-react'; 
 import { 
     fromFirestore, 
     differenceInCalendarMonths, 
@@ -59,20 +58,12 @@ const StatusBadge = ({ staff }) => {
     );
 };
 
-
 export default function StaffManagementPage({ auth, db, staffList, departments, userRole, companyConfig }) {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
-    const [isImporting, setIsImporting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [isConfirmingImport, setIsConfirmingImport] = useState(false);
-    const [importResult, setImportResult] = useState(null);
-    const [analysisResult, setAnalysisResult] = useState(null);
-    const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-    const [csvDataToConfirm, setCsvDataToConfirm] = useState(null);
-    const fileInputRef = useRef(null);
 
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
@@ -84,7 +75,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return staff.fullName || 'Unknown';
     };
 
-    // --- FIX: Robust Job Retrieval ---
+    // --- Robust Job Retrieval ---
     const getCurrentJob = (staff) => {
         if (!staff?.jobHistory || staff.jobHistory.length === 0) {
             return { position: 'N/A', department: 'Unassigned', displayRate: 0, payType: 'Salary' };
@@ -97,7 +88,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
              return dateA - dateB;
         })[0];
 
-        // Determine correct rate to display based on new structure
+        // Determine correct rate to display based on structure
         let rate = 0;
         if (latestJob.payType === 'Hourly') {
             rate = latestJob.hourlyRate || latestJob.rate || 0;
@@ -113,7 +104,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         const normalizedQuery = searchQuery.toLowerCase().trim();
 
         const filteredList = staffList.filter(staff => {
-            // --- NEW: Time-Aware Archive Check ---
             // A staff member is only hidden if their end date has actually passed
             const isHistoricallyArchived = !isStaffActiveOnDate(staff, new Date());
             
@@ -121,7 +111,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 return false;
             }
             
-            // --- Existing Search Logic ---
+            // Search Logic
             if (normalizedQuery) {
                 const name = getDisplayName(staff).toLowerCase();
                 const nickname = (staff.nickname || '').toLowerCase();
@@ -237,104 +227,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         }
     };
 
-    const handleImportClick = () => {
-        if (fileInputRef.current) {
-            setImportResult(null);
-            setAnalysisResult(null);
-            setCsvDataToConfirm(null);
-            fileInputRef.current.click();
-        }
-    };
-
-    const handleFileSelected = (event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        event.target.value = '';
-
-         if (!file.name.toLowerCase().endsWith('.csv') || file.type !== 'text/csv') {
-            alert("Invalid file type. Please upload a CSV file (.csv).");
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const csvData = e.target?.result;
-            if (typeof csvData !== 'string') {
-                alert("Could not read file content.");
-                return;
-            }
-            setIsImporting(true);
-            setAnalysisResult(null);
-            setImportResult(null);
-            try {
-                const functions = getFunctions();
-                const importStaffData = httpsCallable(functions, 'importStaffData');
-                const result = await importStaffData({ csvData, confirm: false });
-                if (result.data && result.data.analysis) {
-                    setAnalysisResult(result.data.analysis);
-                    setCsvDataToConfirm(csvData);
-                    setIsConfirmModalOpen(true);
-                } else {
-                     setImportResult({
-                         message: result.data?.result || "Analysis failed or returned no data.",
-                         errors: result.data?.errors || ["Unknown analysis error."]
-                     });
-                }
-            } catch (error) {
-                 const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
-                setImportResult({
-                    message: `Import analysis failed: ${error.message}`,
-                    errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
-                });
-            } finally {
-                setIsImporting(false);
-            }
-        };
-        reader.onerror = () => {
-            alert("Error reading file.");
-            setIsImporting(false);
-        };
-        reader.readAsText(file);
-    };
-
-    const handleConfirmImport = async () => {
-        if (!csvDataToConfirm) {
-            alert("No CSV data to confirm.");
-            return;
-        }
-        setIsConfirmingImport(true);
-        setIsConfirmModalOpen(false);
-        setImportResult(null);
-        try {
-            const functions = getFunctions();
-            const importStaffData = httpsCallable(functions, 'importStaffData');
-            const result = await importStaffData({ csvData: csvDataToConfirm, confirm: true });
-            setImportResult({
-                message: result.data.result,
-                errors: result.data.errors || [],
-                password: result.data.defaultPassword || null
-            });
-        } catch (error) {
-            console.error("Error confirming import call:", error);
-            const errorDetails = error.details || `Code: ${error.code}, Message: ${error.message}`;
-            setImportResult({
-                message: `Import confirmation failed: ${error.message}`,
-                errors: Array.isArray(errorDetails) ? errorDetails : [String(errorDetails)]
-            });
-        } finally {
-            setIsConfirmingImport(false);
-            setCsvDataToConfirm(null);
-            setAnalysisResult(null);
-        }
-    };
-
-    const handleCancelImport = () => {
-        setIsConfirmModalOpen(false);
-        setAnalysisResult(null);
-        setCsvDataToConfirm(null);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-
     return (
         <div>
             <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
@@ -353,14 +245,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     />
                 </Modal>
             )}
-
-             <ImportConfirmationModal
-                isOpen={isConfirmModalOpen}
-                onClose={handleCancelImport}
-                analysis={analysisResult}
-                onConfirm={handleConfirmImport}
-                isLoading={isConfirmingImport}
-            />
 
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
@@ -386,54 +270,22 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     </div>
                     
                     <div className="flex space-x-2">
-                        <button onClick={handleExport} disabled={isExporting || isImporting || isConfirmingImport} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
+                        <button onClick={handleExport} disabled={isExporting} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                             <Download className="h-5 w-5 mr-2" />
                             {isExporting ? 'Exporting...' : 'CSV'}
                         </button>
-                        <button onClick={handleExportPDF} disabled={isExporting || isImporting} className="flex items-center bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
+                        <button onClick={handleExportPDF} disabled={isExporting} className="flex items-center bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                             <FileText className="h-5 w-5 mr-2" />
                             PDF
                         </button>
                     </div>
 
-                    <button onClick={handleImportClick} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <Upload className="h-5 w-5 mr-2" />
-                        {isImporting ? 'Analyzing...' : (isConfirmingImport ? 'Importing...' : 'Import CSV')}
-                    </button>
-                    <button onClick={() => setIsAddModalOpen(true)} disabled={isImporting || isConfirmingImport || isExporting} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
+                    <button onClick={() => setIsAddModalOpen(true)} disabled={isExporting} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
                         <Plus className="h-5 w-5 mr-2" />
                         Invite Staff
                     </button>
-                     <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleFileSelected}
-                        accept=".csv, text/csv"
-                        style={{ display: 'none' }}
-                    />
                 </div>
             </div>
-
-             {importResult && (
-                <div className={`p-4 rounded-lg mb-6 ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
-                    <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}>
-                        Import Result: {importResult.message}
-                    </p>
-                    {importResult.password && (
-                        <p className="text-sm text-amber-300 mt-2">
-                            New staff created with temporary password: <span className="font-bold">{importResult.password}</span> (Manager must reset this).
-                        </p>
-                    )}
-                    {importResult.errors?.length > 0 && (
-                        <div className="mt-3">
-                            <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered during final import:</p>
-                            <ul className="list-disc list-inside text-sm text-red-400 space-y-1 max-h-40 overflow-y-auto">
-                                {importResult.errors.map((err, index) => <li key={index}>{err}</li>)}
-                            </ul>
-                        </div>
-                    )}
-                </div>
-             )}
 
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
@@ -468,7 +320,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
                                     return (
                                         <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
-                                            {/* --- NEW: THE "LEAVING SOON" BADGE --- */}
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
                                                 <div className="flex items-center">
                                                     <span>{getDisplayName(staff)}</span>
