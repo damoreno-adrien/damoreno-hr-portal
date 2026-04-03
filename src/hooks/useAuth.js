@@ -5,6 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 export default function useAuth(auth, db) {
     const [user, setUser] = useState(null);
     const [userRole, setUserRole] = useState(null);
+    const [hasStaffProfile, setHasStaffProfile] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
@@ -15,14 +16,22 @@ export default function useAuth(auth, db) {
 
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
+                // 1. Get Security Role
                 const userDocRef = doc(db, 'users', currentUser.uid);
                 const userDocSnap = await getDoc(userDocRef);
                 const role = userDocSnap.exists() ? userDocSnap.data().role : null;
+                
+                // 2. Check for Staff Profile existence
+                const staffDocRef = doc(db, 'staff_profiles', currentUser.uid);
+                const staffDocSnap = await getDoc(staffDocRef);
+                
                 setUser(currentUser);
                 setUserRole(role);
+                setHasStaffProfile(staffDocSnap.exists());
             } else {
                 setUser(null);
                 setUserRole(null);
+                setHasStaffProfile(false);
             }
             setIsLoading(false);
         });
@@ -31,5 +40,5 @@ export default function useAuth(auth, db) {
         return () => unsubscribe();
     }, [auth, db]);
 
-    return { user, userRole, isLoading };
+    return { user, userRole, hasStaffProfile, isLoading };
 }

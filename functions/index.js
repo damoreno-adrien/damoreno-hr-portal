@@ -38,3 +38,4 @@ exports.exportAttendanceData = exportAttendanceDataHandler;
 exports.importAttendanceData = importAttendanceDataHandler;
 exports.cleanupBadAttendanceIds = cleanupBadAttendanceIdsHandler;
 exports.onManagerAlertUpdated = onManagerAlertUpdated;
+exports.updateStaffEmail = require('./src/staff/updateStaffEmail').updateStaffEmailHandler;

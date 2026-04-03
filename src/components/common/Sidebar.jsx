@@ -1,14 +1,13 @@
 import React from 'react';
-// --- This is the new import line ---
 import { 
     User, Users, Briefcase, Calendar, Send, Settings, LogOut, 
     BarChart, DollarSign, X, ChevronLeft, ChevronRight, 
-    ChevronDown, ChevronUp 
+    ChevronDown, ChevronUp, RefreshCw 
 } from 'lucide-react';
 
 const settingsSections = [
     { id: 'company-info', title: 'Company Information' },
-    { id: 'role-descriptions', title: 'Role Descriptions' }, // <-- NEW SECTION
+    { id: 'role-descriptions', title: 'Role Descriptions' }, 
     { id: 'attendance-bonus', title: 'Attendance Bonus' },
     { id: 'financial-rules', title: 'Financial & Payroll Rules' },
     { id: 'leave-entitlements', title: 'Leave Entitlements' },
@@ -30,7 +29,7 @@ const NavLink = ({ icon, label, page, badgeCount, isSidebarCollapsed, setCurrent
 );
 
 export default function Sidebar({
-    user, userRole, handleLogout, currentPage, setCurrentPage,
+    user, userRole, activeRole, setActiveRole, hasStaffProfile, handleLogout, currentPage, setCurrentPage,
     isMobileMenuOpen, setIsMobileMenuOpen, isSidebarCollapsed, setIsSidebarCollapsed,
     pendingLeaveCount, pendingAdvanceCount, unreadLeaveUpdatesCount, unreadAdvanceUpdatesCount,
     isFinancialsMenuOpen, setIsFinancialsMenuOpen, isSettingsMenuOpen, setIsSettingsMenuOpen
@@ -44,19 +43,31 @@ export default function Sidebar({
         }
     };
 
+    // --- NEW: Toggle Role Logic ---
+    const handleToggleRole = () => {
+        if (activeRole === 'manager') {
+            setActiveRole('staff');
+            setCurrentPage('dashboard');
+        } else {
+            setActiveRole('manager');
+            setCurrentPage('dashboard');
+        }
+        if (isMobileMenuOpen) setIsMobileMenuOpen(false);
+    };
+
     return (
         <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
             <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4">
                 <div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
                     <h1 className="text-2xl font-bold text-white whitespace-nowrap">Da Moreno HR</h1>
-                    <p className="text-sm text-amber-400 capitalize">{userRole} Portal</p>
+                    <p className="text-sm text-amber-400 capitalize">{activeRole} Portal</p>
                 </div>
                 <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white">
                     <X className="h-6 w-6" />
                 </button>
             </div>
             <nav className="flex-1 space-y-2 px-4 overflow-y-auto">
-                {userRole === 'manager' && (
+                {activeRole === 'manager' && (
                     <>
                         <NavLink page="dashboard" label="Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         <NavLink page="staff" label="Manage Staff" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
@@ -101,7 +112,7 @@ export default function Sidebar({
                         </div>
                     </>
                 )}
-                {userRole === 'staff' && (
+                {activeRole === 'staff' && (
                     <>
                         <NavLink page="dashboard" label="My Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         <NavLink page="my-profile" label="My Profile" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
@@ -132,6 +143,19 @@ export default function Sidebar({
                 )}
             </nav>
             <div className="mt-auto p-4">
+                {/* --- NEW: The Toggle Button --- */}
+                {userRole === 'manager' && hasStaffProfile && (
+                    <button 
+                        onClick={handleToggleRole} 
+                        className={`flex items-center justify-center w-full px-4 py-3 mb-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors`}
+                    >
+                        <RefreshCw className="h-5 w-5" />
+                        <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
+                            {activeRole === 'manager' ? 'Switch to Staff' : 'Switch to Manager'}
+                        </span>
+                    </button>
+                )}
+
                 <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
                     <p className="text-sm text-gray-400 truncate">{user.email}</p>
                 </div>

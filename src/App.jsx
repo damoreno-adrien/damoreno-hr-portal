@@ -36,6 +36,9 @@ export default function App() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     
+    // --- NEW: Active View State ---
+    const [activeRole, setActiveRole] = useState(null);
+
     // Balance State
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0, personal: 0 });
 
@@ -46,12 +49,21 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
-    const { user, userRole, isLoading: isAuthLoading } = useAuth(auth, db); 
+    // --- UPDATED: useAuth Hook ---
+    const { user, userRole, hasStaffProfile, isLoading: isAuthLoading } = useAuth(auth, db); 
     const companyConfig = useCompanyConfig(db, user); 
     const staffList = useStaffList(db, user); 
-    
+
+    // --- NEW: Sync activeRole on initial load ---
     useEffect(() => {
-        if (userRole === 'staff' && db && user) {
+        if (userRole && !activeRole) {
+            setActiveRole(userRole);
+        }
+    }, [userRole, activeRole]);
+    
+    // --- UPDATED: Fetch staff profile if they have one (regardless of current active view) ---
+    useEffect(() => {
+        if (hasStaffProfile && db && user) {
             const staffProfileRef = doc(db, 'staff_profiles', user.uid);
             const unsubscribe = onSnapshot(staffProfileRef, (staffProfileSnap) => {
                 if (staffProfileSnap.exists()) {
@@ -62,7 +74,7 @@ export default function App() {
         } else {
             setStaffProfile(null);
         }
-    }, [db, user, userRole]);
+    }, [db, user, hasStaffProfile]);
 
     useEffect(() => {
         if (!db) return;
@@ -92,9 +104,9 @@ export default function App() {
         }
     }, [userRole, db, user]);
 
-    // --- CLEANED UP: Single Source of Truth for Leave Balances ---
+    // --- UPDATED: Use hasStaffProfile ---
     useEffect(() => {
-        if (userRole === 'staff' && db && user && companyConfig && staffProfile) {
+        if (hasStaffProfile && db && user && companyConfig && staffProfile) {
             const q = query(
                 collection(db, 'leave_requests'), 
                 where('staffId', '==', user.uid), 
@@ -103,8 +115,6 @@ export default function App() {
             
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 const requests = snapshot.docs.map(doc => doc.data());
-                
-                // Use the master calculator utility
                 const balances = calculateStaffLeaveBalances(staffProfile, requests, companyConfig);
                 
                 if (balances) {
@@ -119,7 +129,7 @@ export default function App() {
         } else { 
             setLeaveBalances({ annual: 0, publicHoliday: 0, personal: 0 }); 
         }
-    }, [db, user, userRole, companyConfig, staffProfile]);
+    }, [db, user, hasStaffProfile, companyConfig, staffProfile]);
 
     const handleLogin = async (email, password) => {
         setLoginError('');
@@ -138,9 +148,11 @@ export default function App() {
         if (!auth) return; 
         await signOut(auth); 
         setCurrentPage('dashboard');
+        setActiveRole(null);
     };
 
-    const isLoading = !auth || !db || isAuthLoading || (user && companyConfig === null);
+    // --- UPDATED: Wait for activeRole to set before rendering ---
+    const isLoading = !auth || !db || isAuthLoading || (user && companyConfig === null) || (userRole && !activeRole);
     
     if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
 
@@ -154,12 +166,13 @@ export default function App() {
     }
 
      const renderPageContent = () => {
+         // View Logic uses 'activeRole'
          if (currentPage === 'dashboard') {
-             if (userRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
-             if (userRole === 'staff') return <StaffDashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
+             if (activeRole === 'manager') return <AttendancePage db={db} staffList={staffList} />;
+             if (activeRole === 'staff') return <StaffDashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
          }
          
-         // --- NEW: Ironclad Manager Firewall ---
+         // Security Firewall uses 'userRole' (True Identity)
          const requireManager = (Component) => {
              if (userRole !== 'manager') {
                  return (
@@ -173,17 +186,15 @@ export default function App() {
          };
 
          switch(currentPage) {
-             // Shared Pages (Role logic is handled inside these specific components)
-             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={companyConfig} />;
-             case 'planning': return userRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={userRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} companyConfig={companyConfig} />;
+             case 'staff': return <StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={activeRole} companyConfig={companyConfig} />;
+             case 'planning': return activeRole === 'manager' ? <PlanningPage db={db} staffList={staffList} userRole={activeRole} departments={companyConfig?.departments || []} /> : <MySchedulePage db={db} user={user} companyConfig={companyConfig} />;
              case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={companyConfig} />;
-             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
+             case 'leave': return <LeaveManagementPage db={db} user={user} userRole={activeRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
              case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
              case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={companyConfig} />;
              case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={companyConfig} />; 
              case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
              
-             // --- STRICT MANAGER ONLY PAGES ---
              case 'reports': return requireManager(<AttendanceReportsPage db={db} staffList={staffList} />);
              case 'financials': return requireManager(<FinancialsPage db={db} staffList={staffList} />);
              case 'payroll': return requireManager(<PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />);
@@ -200,6 +211,9 @@ export default function App() {
             <Sidebar 
                 user={user}
                 userRole={userRole}
+                activeRole={activeRole}
+                setActiveRole={setActiveRole}
+                hasStaffProfile={hasStaffProfile}
                 handleLogout={handleLogout}
                 currentPage={currentPage}
                 setCurrentPage={setCurrentPage}

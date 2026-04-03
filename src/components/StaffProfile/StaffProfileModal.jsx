@@ -1,3 +1,5 @@
+/* src/components/StaffProfile/StaffProfileModal.jsx */
+
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove, Timestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -20,6 +22,9 @@ const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff');
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
+// --- NEW: Import our Email Sync Function ---
+const updateStaffEmailFunc = httpsCallable(functionsDefault, 'updateStaffEmail');
+
 const getInitialFormData = (staff) => {
     const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
     const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
@@ -28,7 +33,6 @@ const getInitialFormData = (staff) => {
         startDate: formattedStartDate || '', bankAccount: staff.bankAccount || '', address: staff.address || '',
         emergencyContactName: staff.emergencyContactName || '', emergencyContactPhone: staff.emergencyContactPhone || '',
         isSsoRegistered: staff.isSsoRegistered ?? true,
-        // --- NEW: Identification Documents ---
         idType: staff.idType || 'None',
         idNumber: staff.idNumber || '',
     };
@@ -38,13 +42,12 @@ const getInitialFormData = (staff) => {
 };
 
 // ============================================================================
-// UPDATED COMPONENT: The Lifetime HR Records Dashboard (With Filters & Export)
+// HR Records Dashboard
 // ============================================================================
 const StaffHRRecords = ({ db, staffId, staffName }) => {
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     
-    // --- NEW: Filter States ---
     const [filterType, setFilterType] = useState('All');
     const [showRevoked, setShowRevoked] = useState(false);
 
@@ -67,14 +70,12 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
 
     if (loading) return <div className="p-8 text-center text-gray-400"><Loader2 className="h-6 w-6 animate-spin mx-auto mb-2"/> Loading HR history...</div>;
 
-    // --- Apply Filters ---
     const filteredRecords = records.filter(r => {
         if (!showRevoked && r.status === 'revoked') return false;
         if (filterType !== 'All' && !r.type.includes(filterType.toLowerCase())) return false;
         return true;
     });
 
-    // --- Calculate Lifetime Stats (Ignores Revoked items so math is perfectly accurate) ---
     const validRecords = records.filter(r => r.status !== 'revoked');
     const lates = validRecords.filter(r => r.type === 'risk_late');
     const absences = validRecords.filter(r => r.type === 'risk_absence');
@@ -90,7 +91,6 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
         approvedOTMins: overtimes.filter(r => r.status === 'approved').reduce((sum, r) => sum + (r.extraMinutes || 0), 0)
     };
 
-    // --- CSV Export Logic ---
     const handleExportCSV = () => {
         if (filteredRecords.length === 0) return alert("No records to export.");
         const headers = ["Date", "Type", "Original Message", "Status"];
@@ -133,7 +133,6 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
                 </div>
             </div>
 
-            {/* --- NEW: Filters & Export Controls --- */}
             <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mt-6">
                 <div className="p-4 border-b border-gray-700 bg-gray-900/50 flex flex-col sm:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
@@ -226,6 +225,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setFormData(prev => ({ ...prev, [e.target.id]: value }));
     };
 
+    // --- UPDATED: The Save Details logic with Email Sync ---
     const handleSaveDetails = async () => {
         setIsSaving(true); setError('');
         try {
@@ -238,14 +238,41 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 bankAccount: formData.bankAccount || null, address: formData.address || null,
                 emergencyContactName: formData.emergencyContactName || null, emergencyContactPhone: formData.emergencyContactPhone || null,
                 isSsoRegistered: formData.isSsoRegistered,
-                // --- NEW: Saving Identification ---
                 idType: formData.idType || null,
                 idNumber: formData.idNumber || null,
             };
             if (updateData.firstName) updateData.fullName = null;
+
+            // --- THE SMART EMAIL SYNC CHECK ---
+            const oldEmail = staff.email || '';
+            const newEmail = formData.email || '';
+
+            if (newEmail && newEmail !== oldEmail) {
+                const confirmAuthUpdate = window.confirm(
+                    `You changed the email from ${oldEmail || 'None'} to ${newEmail}.\n\nDo you want to securely update their actual LOGIN email to match? (Highly Recommended)`
+                );
+
+                if (confirmAuthUpdate) {
+                    try {
+                        // Call our new Cloud Function
+                        await updateStaffEmailFunc({ targetUid: staff.id, newEmail: newEmail });
+                    } catch (funcError) {
+                        console.error(funcError);
+                        // If it fails (e.g., email already exists), stop everything and show the error.
+                        throw new Error(funcError.message || 'Failed to update login email. Profile was not changed.');
+                    }
+                }
+            }
+
+            // If the sync succeeded (or if they declined it), update the Profile database.
             await updateDoc(staffDocRef, updateData);
             setIsEditing(false);
-        } catch (err) { setError("Failed to save profile details."); } finally { setIsSaving(false); }
+            
+        } catch (err) { 
+            setError(err.message || "Failed to save profile details."); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     const handleAddNewJob = async (newJobData) => {
