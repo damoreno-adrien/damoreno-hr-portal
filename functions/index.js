@@ -39,3 +39,5 @@ exports.importAttendanceData = importAttendanceDataHandler;
 exports.cleanupBadAttendanceIds = cleanupBadAttendanceIdsHandler;
 exports.onManagerAlertUpdated = onManagerAlertUpdated;
 exports.updateStaffEmail = require('./src/staff/updateStaffEmail').updateStaffEmailHandler;
+exports.inviteAdmin = require('./src/users/accessControl').inviteAdminHandler;
+exports.updateUserRole = require('./src/users/accessControl').updateUserRoleHandler;

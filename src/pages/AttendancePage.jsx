@@ -1,3 +1,5 @@
+/* src/pages/AttendancePage.jsx */
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import Modal from '../components/common/Modal';
@@ -14,31 +16,35 @@ const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
+const getStaffDepartment = (staff) => {
+    if (!staff) return 'Unassigned';
+    if (staff.department) return staff.department; 
+    if (staff.jobHistory && staff.jobHistory.length > 0) {
+        const sortedJobs = [...staff.jobHistory].sort((a, b) => {
+            const dateA = dateUtils.fromFirestore(a.startDate) || new Date(0);
+            const dateB = dateUtils.fromFirestore(b.startDate) || new Date(0);
+            return dateB - dateA; 
+        });
+        if (sortedJobs[0].department) return sortedJobs[0].department;
+    }
+    return 'Unassigned';
+};
+
 const UpcomingBirthdaysCard = ({ staffList }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
-
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-
         const birthDate = dateUtils.fromFirestore(staff.birthdate);
         if (!birthDate) return null;
 
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
-        if (nextBirthday < today) {
-            nextBirthday.setFullYear(today.getFullYear() + 1);
-        }
+        if (nextBirthday < today) nextBirthday.setFullYear(today.getFullYear() + 1);
 
         const diffTime = nextBirthday - today;
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-        if (diffDays <= 30) {
-            return {
-                ...staff,
-                nextBirthday,
-                daysUntil: diffDays,
-            };
-        }
+        if (diffDays <= 30) return { ...staff, nextBirthday, daysUntil: diffDays };
         return null;
     }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil);
 
@@ -61,7 +67,8 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
     );
 };
 
-export default function AttendancePage({ db, staffList }) {
+// --- SECURITY UPGRADE: Receives userRole and staffProfile ---
+export default function AttendancePage({ db, staffList, userRole, staffProfile }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
     const [todaysLeave, setTodaysLeave] = useState([]);
@@ -71,57 +78,50 @@ export default function AttendancePage({ db, staffList }) {
     const [companyConfig, setCompanyConfig] = useState(null);
     
     const [refreshTrigger, setRefreshTrigger] = useState(0);
-    const [activeAlertTab, setActiveAlertTab] = useState('pending'); // 'pending' or 'history'
+    const [activeAlertTab, setActiveAlertTab] = useState('pending');
 
     const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
+    
+    const isFullManager = ['admin', 'super_admin', 'manager'].includes(userRole);
+
+    // Filter to Dept Manager's department if applicable
+    const currentUserDept = useMemo(() => {
+        if (userRole !== 'dept_manager' || !staffProfile) return null;
+        return getStaffDepartment(staffProfile);
+    }, [userRole, staffProfile]);
 
     useEffect(() => {
         if (!db) return;
         const todayStr = dateUtils.formatISODate(new Date());
 
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
-        const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => {
-            setTodaysShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
+        const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => { setTodaysShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); });
 
         const checkInQuery = query(collection(db, "attendance"), where("date", "==", todayStr));
         const unsubscribeCheckIns = onSnapshot(checkInQuery, (snapshot) => {
             const checkInMap = {};
-            snapshot.forEach(doc => {
-                checkInMap[doc.data().staffId] = { id: doc.id, ...doc.data() };
-            });
+            snapshot.forEach(doc => { checkInMap[doc.data().staffId] = { id: doc.id, ...doc.data() }; });
             setCheckIns(checkInMap);
         });
 
         const leaveQuery = query(collection(db, "leave_requests"), where("status", "==", "approved"), where("startDate", "<=", todayStr), where("endDate", ">=", todayStr));
-        const unsubscribeLeave = onSnapshot(leaveQuery, (snapshot) => {
-            setTodaysLeave(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
+        const unsubscribeLeave = onSnapshot(leaveQuery, (snapshot) => { setTodaysLeave(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); });
 
         const configRef = doc(db, 'settings', 'company_config');
-        const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
-            if (docSnap.exists()) {
-                setCompanyConfig(docSnap.data());
-            }
-        });
+        const unsubscribeConfig = onSnapshot(configRef, (docSnap) => { if (docSnap.exists()) setCompanyConfig(docSnap.data()); });
 
-        return () => {
-            unsubscribeShifts();
-            unsubscribeCheckIns();
-            unsubscribeLeave();
-            unsubscribeConfig(); 
-        };
+        return () => { unsubscribeShifts(); unsubscribeCheckIns(); unsubscribeLeave(); unsubscribeConfig(); };
     }, [db]);
 
     const handleCardClick = (staff) => {
+        // SECURITY: Dept Managers cannot click to edit time punches
+        if (!isFullManager) return; 
+
         const todayStr = dateUtils.formatISODate(new Date());
         const attendanceRecord = checkIns[staff.id];
-
         const recordForModal = {
             id: attendanceRecord ? attendanceRecord.id : `${staff.id}_${todayStr}`,
-            staffId: staff.id,
-            staffName: getDisplayName(staff),
-            date: todayStr,
+            staffId: staff.id, staffName: getDisplayName(staff), date: todayStr,
             fullRecord: attendanceRecord || null,
         };
         setEditingRecord(recordForModal);
@@ -129,26 +129,20 @@ export default function AttendancePage({ db, staffList }) {
 
     const handleOpenManualFix = (alert) => {
         const recordForModal = {
-            id: alert.attendanceDocId,
-            staffId: alert.staffId,
-            staffName: alert.staffName,
-            date: alert.date,
-            fullRecord: alert.fullRecord || {
-                checkInTime: alert.checkInTime?.toDate ? alert.checkInTime.toDate() : alert.checkInTime
-            },
-            alertId: alert.id
+            id: alert.attendanceDocId, staffId: alert.staffId, staffName: alert.staffName, date: alert.date,
+            fullRecord: alert.fullRecord || { checkInTime: alert.checkInTime?.toDate ? alert.checkInTime.toDate() : alert.checkInTime }, alertId: alert.id
         };
         setAlertToFix(recordForModal);
     };
 
-    const handleCloseManualFix = () => {
-        setAlertToFix(null);
-    };
-
     const staffToDisplay = useMemo(() => {
-        if (showArchived) return staffList;
-        return staffList.filter(staff => staff.status !== 'inactive');
-    }, [staffList, showArchived]);
+        let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive');
+        // Apply Department Filter
+        if (userRole === 'dept_manager' && currentUserDept) {
+            list = list.filter(staff => getStaffDepartment(staff) === currentUserDept);
+        }
+        return list;
+    }, [staffList, showArchived, userRole, currentUserDept]);
 
     const staffWithStatus = staffToDisplay.map(staff => {
         const checkIn = checkIns[staff.id];
@@ -183,14 +177,11 @@ export default function AttendancePage({ db, staffList }) {
             default: statusColor = 'bg-gray-900'; statusText = 'Unknown';
         }
 
-        const isClickable = staff.reason !== 'Off Today';
+        const isClickable = staff.reason !== 'Off Today' && isFullManager;
         const CardContent = () => (
             <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
                 <div className={`w-3 h-3 rounded-full ${statusColor} flex-shrink-0`}></div>
-                <div className="flex-1 overflow-hidden">
-                    <p className="font-bold text-white truncate">{getDisplayName(staff)}</p>
-                    <p className="text-xs text-gray-400 truncate">{statusText}</p>
-                </div>
+                <div className="flex-1 overflow-hidden"><p className="font-bold text-white truncate">{getDisplayName(staff)}</p><p className="text-xs text-gray-400 truncate">{statusText}</p></div>
             </div>
         );
         return isClickable ? <button onClick={onClick} className="w-full text-left">{CardContent()}</button> : <CardContent />;
@@ -216,25 +207,15 @@ export default function AttendancePage({ db, staffList }) {
 
     return (
         <div>
-            {/* Normal Edit Modal */}
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord ? "Edit Attendance Record" : "Create Attendance Record"}>
-                    <EditAttendanceModal 
-                        db={db} 
-                        record={editingRecord} 
-                        onClose={() => { setEditingRecord(null); triggerRefresh(); }} 
-                    />
+                    <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); triggerRefresh(); }} />
                 </Modal>
             )}
 
-            {/* Manager Alerts Manual Fix Modal */}
             {alertToFix && (
                 <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
-                    <EditAttendanceModal
-                        db={db}
-                        record={alertToFix}
-                        onClose={() => { setAlertToFix(null); triggerRefresh(); }}
-                    />
+                    <EditAttendanceModal db={db} record={alertToFix} onClose={() => { setAlertToFix(null); triggerRefresh(); }} />
                 </Modal>
             )}
 
@@ -249,36 +230,20 @@ export default function AttendancePage({ db, staffList }) {
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
 
-            {/* --- NEW: Tabbed HR Command Center --- */}
-            <div className="mb-8 bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
-                <div className="flex border-b border-gray-700">
-                    <button
-                        onClick={() => setActiveAlertTab('pending')}
-                        className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'pending' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}
-                    >
-                        Pending HR Actions
-                    </button>
-                    <button
-                        onClick={() => setActiveAlertTab('history')}
-                        className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'history' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}
-                    >
-                        Action History Log
-                    </button>
+            {/* SECURITY: Completely hide HR Alerts from Dept Managers */}
+            {isFullManager && (
+                <div className="mb-8 bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
+                    <div className="flex border-b border-gray-700">
+                        <button onClick={() => setActiveAlertTab('pending')} className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'pending' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}>Pending HR Actions</button>
+                        <button onClick={() => setActiveAlertTab('history')} className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'history' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}>Action History Log</button>
+                    </div>
+                    <div className="p-4">
+                        {activeAlertTab === 'pending' ? <ManagerAlerts onManualFix={handleOpenManualFix} /> : <HRActionLog db={db} />}
+                    </div>
                 </div>
+            )}
 
-                <div className="p-4">
-                    {activeAlertTab === 'pending' ? (
-                        <ManagerAlerts onManualFix={handleOpenManualFix} />
-                    ) : (
-                        <HRActionLog db={db} />
-                    )}
-                </div>
-            </div>
-            {/* ------------------------------------- */}
-
-            <div className="mb-6">
-                <UpcomingBirthdaysCard staffList={staffToDisplay} />
-            </div>
+            <div className="mb-6"><UpcomingBirthdaysCard staffList={staffToDisplay} /></div>
             <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-3 md:gap-6">
                 <StatusColumn title="On Shift" staff={onShiftAndBreak} />
                 <StatusColumn title="Not Present" staff={notPresent} />
