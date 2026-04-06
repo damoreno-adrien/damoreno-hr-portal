@@ -67,7 +67,6 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
     );
 };
 
-// --- SECURITY UPGRADE: Receives userRole and staffProfile ---
 export default function AttendancePage({ db, staffList, userRole, staffProfile }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
@@ -84,7 +83,6 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
     
     const isFullManager = ['admin', 'super_admin', 'manager'].includes(userRole);
 
-    // Filter to Dept Manager's department if applicable
     const currentUserDept = useMemo(() => {
         if (userRole !== 'dept_manager' || !staffProfile) return null;
         return getStaffDepartment(staffProfile);
@@ -114,7 +112,6 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
     }, [db]);
 
     const handleCardClick = (staff) => {
-        // SECURITY: Dept Managers cannot click to edit time punches
         if (!isFullManager) return; 
 
         const todayStr = dateUtils.formatISODate(new Date());
@@ -135,9 +132,13 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
         setAlertToFix(recordForModal);
     };
 
+    // --- FIX 1: Defined the missing close handler ---
+    const handleCloseManualFix = () => {
+        setAlertToFix(null);
+    };
+
     const staffToDisplay = useMemo(() => {
         let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive');
-        // Apply Department Filter
         if (userRole === 'dept_manager' && currentUserDept) {
             list = list.filter(staff => getStaffDepartment(staff) === currentUserDept);
         }
@@ -215,7 +216,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
 
             {alertToFix && (
                 <Modal isOpen={!!alertToFix} onClose={handleCloseManualFix} title="Manually Fix Shift">
-                    <EditAttendanceModal db={db} record={alertToFix} onClose={() => { setAlertToFix(null); triggerRefresh(); }} />
+                    <EditAttendanceModal db={db} record={alertToFix} onClose={() => { handleCloseManualFix(); triggerRefresh(); }} />
                 </Modal>
             )}
 
@@ -230,7 +231,6 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
                 <p className="text-lg text-gray-300 hidden sm:block">{dateUtils.formatCustom(new Date(), 'EEEE, dd MMMM yyyy')}</p>
             </div>
 
-            {/* SECURITY: Completely hide HR Alerts from Dept Managers */}
             {isFullManager && (
                 <div className="mb-8 bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden">
                     <div className="flex border-b border-gray-700">
@@ -251,4 +251,4 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
             </div>
         </div>
     );
-};
+}

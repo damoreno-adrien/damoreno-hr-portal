@@ -24,16 +24,19 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
     const callerUid = request.auth.uid;
     try {
         const callerDoc = await db.collection("users").doc(callerUid).get();
-        if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-            throw new HttpsError("permission-denied", "Permission denied. Only managers can run this action.");
+        
+        // --- FIX 2: Check against an array of allowed high-level roles ---
+        const allowedRoles = ["manager", "admin", "super_admin"];
+        if (!callerDoc.exists || !allowedRoles.includes(callerDoc.data().role)) {
+            throw new HttpsError("permission-denied", "Permission denied. Only managers and admins can run this action.");
         }
     } catch (error) {
         console.error("Error verifying caller role:", error);
+        if (error instanceof HttpsError) throw error;
         throw new HttpsError("internal", "Internal server error while verifying role.");
     }
 
     // --- 2. Input Validation (NEW: Grab scheduledEndTime) ---
-    // If for some reason the frontend doesn't send it, fallback to 23:00
     const { attendanceDocId, alertId, scheduledEndTime = "23:00" } = request.data;
     if (!attendanceDocId || !alertId) {
         throw new HttpsError("invalid-argument", "Missing required 'attendanceDocId' or 'alertId'.");
@@ -83,7 +86,7 @@ exports.autoFixSingleShift = onCall({ region: "asia-southeast1" }, async (reques
         // Update the attendance record
         batch.update(attendanceRef, {
             checkOutTime: finalTimestamp,
-            checkOutNote: `Auto-fixed by manager (Scheduled End: ${scheduledEndTime})` // <-- Updated Note
+            checkOutNote: `Auto-fixed by manager (Scheduled End: ${scheduledEndTime})`
         });
 
         // Delete the alert, as it's now resolved

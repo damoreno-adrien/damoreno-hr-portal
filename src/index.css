@@ -2,3 +2,43 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+/* Make the UI denser on larger screens (Tablets & Desktops) */
+@media (min-width: 768px) {
+  html { font-size: 15px; } /* Shrinks all rem-based sizes by ~6% */
+}
+
+@media (min-width: 1024px) {
+  html { font-size: 14px; } /* Shrinks all rem-based sizes by ~12.5% */
+}
+
+/* Optional: if you have ultra-wide monitors and want it even denser */
+@media (min-width: 1536px) {
+  html { font-size: 13px; } /* Shrinks all rem-based sizes by ~18% */
+}
+
+/* --- Sleek Dark Mode Scrollbars --- */
+
+/* WebKit Browsers (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 8px;  /* Vertical scrollbar width */
+  height: 8px; /* Horizontal scrollbar height */
+}
+
+::-webkit-scrollbar-track {
+  background: transparent; /* Makes the track invisible */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563; /* Tailwind gray-600 */
+  border-radius: 10px; /* Nice rounded edges */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280; /* Tailwind gray-500 on hover */
+}
+
+/* Firefox Fallback */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 transparent;
+}

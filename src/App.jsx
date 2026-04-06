@@ -52,15 +52,12 @@ export default function App() {
     const companyConfig = useCompanyConfig(db, user);
     const staffList = useStaffList(db, user);
 
-    // --- ENHANCED: Sync activeRole on initial load ---
     useEffect(() => {
         if (userRole && !activeRole) {
-            // Admins, General Managers, and Dept Managers all default to the Command Center view
             setActiveRole(userRole === 'staff' ? 'staff' : 'manager');
         }
     }, [userRole, activeRole]);
 
-    // Fetch staff profile for ANYONE who has one (Staff, Dept Managers, General Managers)
     useEffect(() => {
         if (hasStaffProfile && db && user) {
             const staffProfileRef = doc(db, 'staff_profiles', user.uid);
@@ -77,12 +74,12 @@ export default function App() {
 
     useEffect(() => {
         if (!db) return;
-        if (['manager', 'admin', 'dept_manager'].includes(userRole)) {
+        if (['manager', 'admin', 'dept_manager', 'super_admin'].includes(userRole)) {
             const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
             const unsubscribe = onSnapshot(q, (snap) => setPendingLeaveCount(snap.size));
             return () => unsubscribe();
         }
-        if (['staff', 'dept_manager', 'manager'].includes(userRole) && user) {
+        if (['staff', 'dept_manager', 'manager', 'admin', 'super_admin'].includes(userRole) && user) {
             const q = query(collection(db, 'leave_requests'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
             const unsubscribe = onSnapshot(q, (snap) => setUnreadLeaveUpdatesCount(snap.size));
             return () => unsubscribe();
@@ -91,12 +88,12 @@ export default function App() {
 
     useEffect(() => {
         if (!db) return;
-        if (['manager', 'admin'].includes(userRole)) {
+        if (['manager', 'admin', 'super_admin'].includes(userRole)) {
             const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
             const unsubscribe = onSnapshot(q, (snap) => setPendingAdvanceCount(snap.size));
             return () => unsubscribe();
         }
-        if (['staff', 'dept_manager', 'manager'].includes(userRole) && user) {
+        if (['staff', 'dept_manager', 'manager', 'admin', 'super_admin'].includes(userRole) && user) {
             const q = query(collection(db, 'salary_advances'), where('staffId', '==', user.uid), where('isReadByStaff', '==', false));
             const unsubscribe = onSnapshot(q, (snap) => setUnreadAdvanceUpdatesCount(snap.size));
             return () => unsubscribe();
@@ -142,10 +139,8 @@ export default function App() {
     if (!user) { return <LoginPage handleLogin={handleLogin} loginError={loginError} />; }
 
     const renderPageContent = () => {
-        // View Logic uses 'activeRole'
         if (currentPage === 'dashboard') {
             if (activeRole === 'manager') {
-                // FIXED: Now passing userRole and staffProfile to the AttendancePage
                 return <AttendancePage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} />;
             }
             if (activeRole === 'staff') {
@@ -153,7 +148,6 @@ export default function App() {
             }
         }
 
-        // --- FIREWALL 1: Full Access (Admins & General Managers) ---
         const requireFullManager = (Component) => {
             if (!['admin', 'super_admin', 'manager'].includes(userRole)) {
                 return (
@@ -166,7 +160,6 @@ export default function App() {
             return Component;
         };
 
-        // --- FIREWALL 2: Operations Access (Includes Dept Managers) ---
         const requireDeptManager = (Component) => {
             if (!['admin', 'super_admin', 'manager', 'dept_manager'].includes(userRole)) {
                 return (
@@ -180,28 +173,26 @@ export default function App() {
         };
 
         switch (currentPage) {
-            // Operational Routing
             case 'planning':
                 return activeRole === 'manager' ? requireDeptManager(<PlanningPage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} companyConfig={companyConfig} />) : <MySchedulePage db={db} user={user} companyConfig={companyConfig} />;
 
             case 'leave':
-                // FIXED: Routes cleanly to the newly separated components
                 return activeRole === 'manager'
                     ? requireDeptManager(<TeamLeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} />)
                     : <MyLeavePage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
-            // Staff Portal Routing
             case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={companyConfig} />;
             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={companyConfig} />;
             case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={companyConfig} />;
             case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
 
-            // Top-Tier Management Routing (Dept Managers Blocked)
             case 'staff': return requireFullManager(<StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={companyConfig} />);
             case 'reports': return requireFullManager(<AttendanceReportsPage db={db} staffList={staffList} />);
             case 'financials': return requireFullManager(<FinancialsPage db={db} staffList={staffList} />);
             case 'payroll': return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />);
-            case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} />);
+            
+            // --- FIXED: ADDED userRole={userRole} HERE ---
+            case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} />);
 
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }

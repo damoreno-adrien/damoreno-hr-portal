@@ -7,18 +7,6 @@ import {
     ChevronDown, ChevronUp, RefreshCw 
 } from 'lucide-react';
 
-const settingsSections = [
-    { id: 'access-control', title: 'Access Control' }, 
-    { id: 'company-info', title: 'Company Information' },
-    { id: 'role-descriptions', title: 'Role Descriptions' }, 
-    { id: 'attendance-bonus', title: 'Attendance Bonus' },
-    { id: 'financial-rules', title: 'Financial & Payroll Rules' },
-    { id: 'leave-entitlements', title: 'Leave Entitlements' },
-    { id: 'public-holidays', title: 'Public Holidays' },
-    { id: 'geofence-config', title: 'Geofence Configuration' },
-    { id: 'manage-departments', title: 'Manage Departments' },
-];
-
 const NavLink = ({ icon, label, page, badgeCount, isSidebarCollapsed, setCurrentPage, setIsMobileMenuOpen, currentPage }) => (
     <button onClick={() => { setCurrentPage(page); setIsMobileMenuOpen(false); }} className={`flex items-center w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === page ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}>
         <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center w-full' : ''}`}>
@@ -35,13 +23,8 @@ export default function Sidebar({
     user, userRole, activeRole, setActiveRole, hasStaffProfile, handleLogout, currentPage, setCurrentPage,
     isMobileMenuOpen, setIsMobileMenuOpen, isSidebarCollapsed, setIsSidebarCollapsed,
     pendingLeaveCount, pendingAdvanceCount, unreadLeaveUpdatesCount, unreadAdvanceUpdatesCount,
-    isFinancialsMenuOpen, setIsFinancialsMenuOpen, isSettingsMenuOpen, setIsSettingsMenuOpen
+    isFinancialsMenuOpen, setIsFinancialsMenuOpen
 }) {
-    const handleSettingsClick = () => {
-        if (isSidebarCollapsed) { setIsSidebarCollapsed(false); setIsSettingsMenuOpen(true); } 
-        else { setIsSettingsMenuOpen(!isSettingsMenuOpen); }
-    };
-
     const handleToggleRole = () => {
         setActiveRole(activeRole === 'manager' ? 'staff' : 'manager');
         setCurrentPage('dashboard');
@@ -50,7 +33,6 @@ export default function Sidebar({
 
     const isFullManager = ['admin', 'manager', 'super_admin'].includes(userRole);
 
-    // --- NEW: Dynamic Branding based on actual security clearance ---
     const getRoleBranding = () => {
         if (activeRole === 'staff') return { title: 'Staff Portal', color: 'text-blue-400', bg: 'bg-blue-600', hover: 'hover:bg-blue-700' };
         switch(userRole) {
@@ -61,6 +43,14 @@ export default function Sidebar({
         }
     };
     const branding = getRoleBranding();
+
+    // --- NEW: Dynamic text for the switch button ---
+    const getSwitchText = () => {
+        if (userRole === 'super_admin') return 'Super Admin';
+        if (userRole === 'admin') return 'Director';
+        if (userRole === 'dept_manager') return 'Dept Manager';
+        return 'Manager';
+    };
 
     return (
         <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
@@ -84,21 +74,7 @@ export default function Sidebar({
                                 <NavLink page="reports" label="Reports" icon={<BarChart className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                                 <NavLink page="financials" label="Financials" icon={<DollarSign className="h-5 w-5" />} badgeCount={pendingAdvanceCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                                 <NavLink page="payroll" label="Payroll" icon={<DollarSign className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                                <div>
-                                    <button onClick={handleSettingsClick} className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg transition-colors ${currentPage === 'settings' ? 'bg-amber-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`}>
-                                        <div className="flex items-center"><Settings className="h-5 w-5" /><span className={`ml-3 whitespace-nowrap overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Settings</span></div>
-                                        {!isSidebarCollapsed && ((isSettingsMenuOpen || currentPage === 'settings') ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />)}
-                                    </button>
-                                    {(isSettingsMenuOpen || currentPage === 'settings') && !isSidebarCollapsed && (
-                                        <div className="py-2 pl-8 space-y-1">
-                                            {settingsSections.map(section => (
-                                                <a key={section.id} href={`#${section.id}`} onClick={(e) => { e.preventDefault(); setCurrentPage('settings'); setIsMobileMenuOpen(false); setTimeout(() => { document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth' }); }, 50); }} className="block text-sm text-gray-400 hover:text-white p-2 rounded-lg">
-                                                    {section.title}
-                                                </a>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
+                                <NavLink page="settings" label="Settings & Config" icon={<Settings className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                             </>
                         )}
                     </>
@@ -128,11 +104,12 @@ export default function Sidebar({
                 )}
             </nav>
             <div className="mt-auto p-4">
-                {['manager', 'dept_manager'].includes(userRole) && hasStaffProfile && (
+                {['manager', 'dept_manager', 'admin', 'super_admin'].includes(userRole) && hasStaffProfile && (
                     <button onClick={handleToggleRole} className={`flex items-center justify-center w-full px-4 py-3 mb-3 rounded-lg ${branding.bg} ${branding.hover} text-white transition-colors`}>
                         <RefreshCw className="h-5 w-5" />
                         <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
-                            {activeRole === 'manager' ? 'Switch to Staff' : 'Switch to Manager'}
+                            {/* --- UPGRADED: Dynamic Switch Text --- */}
+                            {activeRole === 'manager' ? 'Switch to Staff' : `Switch to ${getSwitchText()}`}
                         </span>
                     </button>
                 )}
