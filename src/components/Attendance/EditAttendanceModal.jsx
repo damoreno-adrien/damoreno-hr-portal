@@ -18,6 +18,9 @@ export default function EditAttendanceModal({ db, record, onClose }) {
     // Manager Override State
     const [otOverride, setOtOverride] = useState('');
 
+    // --- NEW: Staff Branch ID State ---
+    const [staffBranchId, setStaffBranchId] = useState(null);
+
     const [isLoadingData, setIsLoadingData] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -58,10 +61,17 @@ export default function EditAttendanceModal({ db, record, onClose }) {
 
                 setDocId(foundId);
                 
+                // --- NEW: Fetch the Staff's Home Branch ID ---
+                if (record.staffId) {
+                    const staffDoc = await getDoc(doc(db, "staff_profiles", record.staffId));
+                    if (staffDoc.exists()) {
+                        setStaffBranchId(staffDoc.data().branchId || null);
+                    }
+                }
+                
                 if (data.checkInTime) setCheckIn(parseTimeFromVal(data.checkInTime));
                 if (data.checkOutTime) setCheckOut(parseTimeFromVal(data.checkOutTime));
 
-                // --- FIX: DETECT BREAK MODE EVEN IF INCOMPLETE ---
                 if (data.breakStart || data.breakEnd) {
                     setBreakMode('manual');
                     if (data.breakStart) setBreakStart(parseTimeFromVal(data.breakStart));
@@ -72,7 +82,6 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     setBreakMode('auto');
                 }
 
-                // Load existing OT Override if already approved
                 if (data.otStatus === 'approved') {
                     setOtOverride(data.otApprovedMinutes?.toString() || '');
                 }
@@ -134,11 +143,11 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                 breakStart: newBreakStart,
                 breakEnd: newBreakEnd,
                 includesBreak: finalIncludesBreak,
+                branchId: staffBranchId, // <-- THE MAGIC STAMP IS HERE
                 updatedAt: serverTimestamp(),
                 manuallyEdited: true
             };
 
-            // Inject OT Override
             if (otOverride !== '') {
                 payload.otApprovedMinutes = parseInt(otOverride) || 0;
                 payload.otStatus = "approved";

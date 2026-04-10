@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+/* src/components/Dashboard/ManagerAlerts.jsx */
+
+import React, { useState, useEffect, useMemo } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../../../firebase"; 
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, getDocs } from "firebase/firestore";
@@ -9,9 +11,6 @@ const functions = getFunctions(app, "asia-southeast1");
 const autoFixShiftFunc = httpsCallable(functions, 'autoFixSingleShift');
 const runUnifiedHRScanFunc = httpsCallable(functions, 'runUnifiedHRScan');
 
-// ============================================================================
-// COMPONENT 1: MISSING CHECK-OUTS (THE RAW DATA CLEANUP)
-// ============================================================================
 const MissingCheckoutItem = ({ alert, onManualFix }) => {
     const [isFixing, setIsFixing] = useState(false);
     const [error, setError] = useState(null);
@@ -74,9 +73,6 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
     );
 };
 
-// ============================================================================
-// COMPONENT 2: HR ALERTS (LATENESS, ABSENCES, OVERTIME)
-// ============================================================================
 const HRAlertItem = ({ alert }) => {
     const [isProcessing, setIsProcessing] = useState(false);
 
@@ -136,12 +132,10 @@ const HRAlertItem = ({ alert }) => {
     );
 };
 
-// ============================================================================
-// MAIN DASHBOARD COMPONENT
-// ============================================================================
-export default function ManagerAlerts({ onManualFix }) {
-    const [hrAlerts, setHrAlerts] = useState([]);
-    const [missingCheckouts, setMissingCheckouts] = useState([]);
+// --- ADDED: userRole and adminBranchIds ---
+export default function ManagerAlerts({ onManualFix, activeBranch, branches = [], userRole, adminBranchIds = [] }) {
+    const [rawHrAlerts, setRawHrAlerts] = useState([]);
+    const [rawMissingCheckouts, setRawMissingCheckouts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isScanning, setIsScanning] = useState(false);
     const [isFixingAll, setIsFixingAll] = useState(false);
@@ -152,7 +146,7 @@ export default function ManagerAlerts({ onManualFix }) {
         const q = query(collection(db, "manager_alerts"), where("status", "==", "pending"), orderBy("createdAt", "desc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const pendingAlerts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setHrAlerts(pendingAlerts.filter(a => a.type !== 'missing_checkout'));
+            setRawHrAlerts(pendingAlerts.filter(a => a.type !== 'missing_checkout'));
             setLoading(false);
         });
         return () => unsubscribe();
@@ -176,15 +170,33 @@ export default function ManagerAlerts({ onManualFix }) {
                         staffName: data.staffName,
                         date: data.date,
                         attendanceDocId: docSnap.id,
-                        checkInTime: data.checkInTime
+                        checkInTime: data.checkInTime,
+                        branchId: data.branchId || null 
                     });
                 }
             });
             missing.sort((a, b) => b.date.localeCompare(a.date));
-            setMissingCheckouts(missing);
+            setRawMissingCheckouts(missing);
         });
         return () => unsubscribe();
     }, []);
+
+    // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+    const hrAlerts = useMemo(() => {
+        if (activeBranch === 'global') {
+            if (userRole === 'admin') return rawHrAlerts.filter(a => adminBranchIds.includes(a.branchId));
+            return rawHrAlerts; // Super admin
+        }
+        return rawHrAlerts.filter(a => a.branchId === activeBranch);
+    }, [rawHrAlerts, activeBranch, userRole, adminBranchIds]);
+
+    const missingCheckouts = useMemo(() => {
+        if (activeBranch === 'global') {
+            if (userRole === 'admin') return rawMissingCheckouts.filter(a => adminBranchIds.includes(a.branchId));
+            return rawMissingCheckouts; // Super admin
+        }
+        return rawMissingCheckouts.filter(a => a.branchId === activeBranch);
+    }, [rawMissingCheckouts, activeBranch, userRole, adminBranchIds]);
 
     const handleFixAll = async () => {
         if (!window.confirm(`Auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`)) return;
@@ -223,15 +235,18 @@ export default function ManagerAlerts({ onManualFix }) {
         finally { setIsScanning(false); }
     };
 
-    // --- UPDATED: Group alerts by Staff Name with Dept/Pos ---
     const groupedAlerts = hrAlerts.reduce((acc, alert) => {
         let nameDisplay = alert.staffName || 'Unknown Staff';
         
-        // Build the extra info like "(Service - Waitress)"
         const parts = [];
         if (alert.department && alert.department !== 'N/A') parts.push(alert.department);
         if (alert.position && alert.position !== 'N/A') parts.push(alert.position);
         
+        if (activeBranch === 'global' && alert.branchId) {
+            const bName = branches.find(b => b.id === alert.branchId)?.name || alert.branchId;
+            parts.push(bName.replace('Da Moreno ', ''));
+        }
+
         if (parts.length > 0) {
             nameDisplay += ` (${parts.join(' - ')})`;
         }
@@ -263,7 +278,6 @@ export default function ManagerAlerts({ onManualFix }) {
 
     return (
         <div className="space-y-6 animate-fadeIn">
-            {/* SECTION 1: RAW DATA CLEANUP */}
             {missingCheckouts.length > 0 && (
                 <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
@@ -279,12 +293,18 @@ export default function ManagerAlerts({ onManualFix }) {
                         )}
                     </div>
                     <ul className="space-y-2">
-                        {missingCheckouts.map(alert => <MissingCheckoutItem key={alert.id} alert={alert} onManualFix={onManualFix} />)}
+                        {missingCheckouts.map(alert => {
+                            let displayName = alert.staffName;
+                            if (activeBranch === 'global' && alert.branchId) {
+                                const bName = branches.find(b => b.id === alert.branchId)?.name || alert.branchId;
+                                displayName += ` (${bName.replace('Da Moreno ', '')})`;
+                            }
+                            return <MissingCheckoutItem key={alert.id} alert={{...alert, staffName: displayName}} onManualFix={onManualFix} />
+                        })}
                     </ul>
                 </div>
             )}
 
-            {/* SECTION 2: HR AUDIT & SCAN */}
             <div className="space-y-3">
                 <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-2 border-b border-gray-700 pb-4">
                     <h3 className="text-lg font-bold text-white">HR & Disciplinary Actions</h3>
@@ -300,7 +320,6 @@ export default function ManagerAlerts({ onManualFix }) {
                     </div>
                 </div>
                 
-                {/* --- NEW: Grouped Rendering UI --- */}
                 {hrAlerts.length > 0 ? (
                     <div className="space-y-5 mt-4">
                         {Object.keys(groupedAlerts).sort().map(staffName => (

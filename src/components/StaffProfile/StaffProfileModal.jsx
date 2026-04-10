@@ -22,7 +22,7 @@ const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff');
 const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
 
-// --- NEW: Import our Email Sync Function ---
+// --- Import our Email Sync Function ---
 const updateStaffEmailFunc = httpsCallable(functionsDefault, 'updateStaffEmail');
 
 const getInitialFormData = (staff) => {
@@ -35,6 +35,7 @@ const getInitialFormData = (staff) => {
         isSsoRegistered: staff.isSsoRegistered ?? true,
         idType: staff.idType || 'None',
         idNumber: staff.idNumber || '',
+        branchId: staff.branchId || '', // Branch ID captured here
     };
     if (staff.firstName || staff.lastName) return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
     const nameParts = (staff.fullName || '').split(' ');
@@ -205,6 +206,9 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
 
+    // --- THE FIX: We grant tab access to Managers, Admins, AND Super Admins ---
+    const isFullManager = ['manager', 'admin', 'super_admin'].includes(userRole);
+
     useEffect(() => {
         setFormData(getInitialFormData(staff));
         setBonusStreak(staff.bonusStreak || 0);
@@ -225,7 +229,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setFormData(prev => ({ ...prev, [e.target.id]: value }));
     };
 
-    // --- UPDATED: The Save Details logic with Email Sync ---
     const handleSaveDetails = async () => {
         setIsSaving(true); setError('');
         try {
@@ -240,10 +243,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 isSsoRegistered: formData.isSsoRegistered,
                 idType: formData.idType || null,
                 idNumber: formData.idNumber || null,
+                branchId: formData.branchId || null, 
             };
             if (updateData.firstName) updateData.fullName = null;
 
-            // --- THE SMART EMAIL SYNC CHECK ---
             const oldEmail = staff.email || '';
             const newEmail = formData.email || '';
 
@@ -254,17 +257,14 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
                 if (confirmAuthUpdate) {
                     try {
-                        // Call our new Cloud Function
                         await updateStaffEmailFunc({ targetUid: staff.id, newEmail: newEmail });
                     } catch (funcError) {
                         console.error(funcError);
-                        // If it fails (e.g., email already exists), stop everything and show the error.
                         throw new Error(funcError.message || 'Failed to update login email. Profile was not changed.');
                     }
                 }
             }
 
-            // If the sync succeeded (or if they declined it), update the Profile database.
             await updateDoc(staffDocRef, updateData);
             setIsEditing(false);
             
@@ -526,30 +526,31 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
                     
-                    {userRole === 'manager' && (
+                    {/* THE FIX: We use isFullManager here so Super Admins can see the tabs! */}
+                    {isFullManager && (
                         <button onClick={() => setActiveTab('hr-records')} className={getTabClasses('hr-records')}>
                             <span className="flex items-center gap-2"><History className="h-4 w-4" /> HR Records</span>
                         </button>
                     )}
                     
-                    {userRole === 'manager' && (
+                    {isFullManager && (
                         <button onClick={() => setActiveTab('forms')} className={getTabClasses('forms')}>
                             <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> HR Forms</span>
                         </button>
                     )}
-                    {userRole === 'manager' && <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>Settings & Stats</button>}
+                    {isFullManager && <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>Settings & Stats</button>}
                 </nav>
             </div>
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
 
             {/* --- HR Dashboard --- */}
-            {activeTab === 'hr-records' && userRole === 'manager' && (
+            {activeTab === 'hr-records' && isFullManager && (
                 <StaffHRRecords db={db} staffId={staff.id} staffName={displayName} />
             )}
 
             {/* --- HR Forms Tab --- */}
-            {activeTab === 'forms' && userRole === 'manager' && (
+            {activeTab === 'forms' && isFullManager && (
                 <div className="space-y-8">
                     <div>
                         <h3 className="text-xl font-semibold text-white">Official HR Documents</h3>
@@ -610,7 +611,15 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 </div>
             )}
 
-            {activeTab === 'details' && (<div className="space-y-6"> {isEditing ? <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} /> : <ProfileDetailsView staff={staff} currentJob={currentJob} />} </div>)}
+            {activeTab === 'details' && (
+                <div className="space-y-6"> 
+                    {isEditing ? 
+                        <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} branches={companyConfig?.branches} userRole={userRole} /> : 
+                        <ProfileDetailsView staff={staff} currentJob={currentJob} branches={companyConfig?.branches} />
+                    } 
+                </div>
+            )}
+
             {activeTab === 'job' && (
                 <div className="space-y-6">
                     <JobHistoryManager
@@ -633,7 +642,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 />
             )}
 
-            {activeTab === 'settings' && userRole === 'manager' && (
+            {activeTab === 'settings' && isFullManager && (
                 <div className="space-y-6">
                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                         <h4 className="text-base font-semibold text-white">Bonus Management</h4>

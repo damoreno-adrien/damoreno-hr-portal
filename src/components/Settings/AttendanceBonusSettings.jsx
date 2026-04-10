@@ -1,8 +1,10 @@
+/* src/components/Settings/AttendanceBonusSettings.jsx */
+
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check, ShieldAlert, Award } from 'lucide-react';
 
-export const AttendanceBonusSettings = ({ db, config }) => {
+export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
     const [localData, setLocalData] = useState({
         month1: 0, month2: 0, month3: 0, allowedAbsences: 0, allowedLates: 3, maxLateMinutesAllowed: 30, gracePeriodMinutes: 5,
         tier1Name: "Verbal Warning", tier1Strikes: 1, tier2Name: "Written Warning", tier2Strikes: 2, tier2Window: 1, tier3Name: "1-Day Suspension", tier3Strikes: 3, tier3Window: 3
@@ -22,7 +24,8 @@ export const AttendanceBonusSettings = ({ db, config }) => {
                 tier2Name: disc.tier2?.name || "Written Warning", tier2Strikes: disc.tier2?.strikes ?? 2, tier2Window: disc.tier2?.windowMonths ?? 1,
                 tier3Name: disc.tier3?.name || "1-Day Suspension", tier3Strikes: disc.tier3?.strikes ?? 3, tier3Window: disc.tier3?.windowMonths ?? 3,
             };
-            setLocalData(data); setOriginalData(data);
+            setLocalData(data); 
+            setOriginalData(data);
         }
     }, [config]);
 
@@ -35,31 +38,48 @@ export const AttendanceBonusSettings = ({ db, config }) => {
     const hasChanges = JSON.stringify(localData) !== JSON.stringify(originalData);
 
     const handleSave = async () => {
-        setIsSaving(true); setIsSaved(false);
+        setIsSaving(true); 
+        setIsSaved(false);
         try {
-            await updateDoc(doc(db, 'settings', 'company_config'), {
-                'attendanceBonus.month1': localData.month1, 'attendanceBonus.month2': localData.month2, 'attendanceBonus.month3': localData.month3,
-                'attendanceBonus.allowedAbsences': localData.allowedAbsences, 'attendanceBonus.allowedLates': localData.allowedLates, 'attendanceBonus.maxLateMinutesAllowed': localData.maxLateMinutesAllowed, 'attendanceBonus.gracePeriodMinutes': localData.gracePeriodMinutes,
-                'disciplinaryRules': {
+            // --- THE STAMP: Save to branchSettings.[branchId] ---
+            const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
+
+            const dataToSave = {
+                [`${prefix}attendanceBonus`]: {
+                    month1: localData.month1, month2: localData.month2, month3: localData.month3,
+                    allowedAbsences: localData.allowedAbsences, allowedLates: localData.allowedLates, 
+                    maxLateMinutesAllowed: localData.maxLateMinutesAllowed, gracePeriodMinutes: localData.gracePeriodMinutes
+                },
+                [`${prefix}disciplinaryRules`]: {
                     tier1: { name: localData.tier1Name, strikes: localData.tier1Strikes },
                     tier2: { name: localData.tier2Name, strikes: localData.tier2Strikes, windowMonths: localData.tier2Window },
                     tier3: { name: localData.tier3Name, strikes: localData.tier3Strikes, windowMonths: localData.tier3Window },
                 }
-            });
-            setOriginalData(localData); setIsSaved(true); setTimeout(() => setIsSaved(false), 2000);
-        } catch (error) { alert('Failed to save settings: ' + error.message); } finally { setIsSaving(false); }
+            };
+
+            await updateDoc(doc(db, 'settings', 'company_config'), dataToSave);
+            
+            setOriginalData(localData); 
+            setIsSaved(true); 
+            setTimeout(() => setIsSaved(false), 2000);
+        } catch (error) { 
+            alert('Failed to save settings: ' + error.message); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     return (
         <div id="attendance-bonus" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 space-y-8 border border-gray-700">
             <div>
                 <h3 className="text-xl font-semibold text-white flex items-center gap-2"><Award className="h-5 w-5 text-amber-400" /> Attendance Bonus</h3>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-900/50 p-4 rounded-lg">
+                <p className="text-gray-400 mt-2 text-sm">Configure attendance rewards for this location.</p>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
                     <div><label htmlFor="month1" className="block text-sm font-medium text-gray-300 mb-1">Month 1 Bonus (THB)</label><input type="number" id="month1" value={localData.month1} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     <div><label htmlFor="month2" className="block text-sm font-medium text-gray-300 mb-1">Month 2 Bonus (THB)</label><input type="number" id="month2" value={localData.month2} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     <div><label htmlFor="month3" className="block text-sm font-medium text-gray-300 mb-1">Month 3+ Bonus (THB)</label><input type="number" id="month3" value={localData.month3} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                 </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-900/50 p-4 rounded-lg">
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
                     <div><label htmlFor="gracePeriodMinutes" className="block text-sm font-medium text-gray-300 mb-1">Grace Period (Mins)</label><input type="number" id="gracePeriodMinutes" value={localData.gracePeriodMinutes} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     <div><label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences</label><input type="number" id="allowedAbsences" value={localData.allowedAbsences} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
                     <div><label htmlFor="allowedLates" className="block text-sm font-medium text-gray-300 mb-1">Max Late Incidents</label><input type="number" id="allowedLates" value={localData.allowedLates} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>

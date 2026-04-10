@@ -4,11 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, writeBatch, doc } from 'firebase/firestore';
 import { Save, Clock, Info, Loader2, Coffee, Flame } from 'lucide-react';
 
-export default function ShiftCreator({ db, staffList, onSuccess, initialStaffId, initialStartDate, initialEndDate }) {
-    // --- SMART DEFAULTS ---
+export default function ShiftCreator({ db, staffList, onSuccess, initialStaffId, initialStartDate, initialEndDate, activeBranch, branches = [] }) {
     const getNextWeekBounds = () => {
         const today = new Date();
-        const day = today.getDay(); // 0=Sun, 1=Mon
+        const day = today.getDay(); 
         const distToMonday = (8 - day) % 7 || 7; 
         
         const nextMonday = new Date(today);
@@ -25,30 +24,34 @@ export default function ShiftCreator({ db, staffList, onSuccess, initialStaffId,
 
     const defaults = getNextWeekBounds();
 
-    // Use Props if provided (from clicking Staff Name), otherwise use Smart Defaults
     const [selectedStaffId, setSelectedStaffId] = useState(initialStaffId || "");
     const [startDate, setStartDate] = useState(initialStartDate || defaults.start);
     const [endDate, setEndDate] = useState(initialEndDate || defaults.end);
     const [loading, setLoading] = useState(false);
 
-    // --- FILTER INACTIVE STAFF ---
+    // --- THE FIX: Filter staff list by active branch! ---
     const activeStaff = useMemo(() => {
-        return staffList?.filter(s => s.status !== 'inactive') || [];
-    }, [staffList]);
+        let filtered = staffList?.filter(s => s.status !== 'inactive') || [];
+        
+        if (activeBranch && activeBranch !== 'global') {
+            filtered = filtered.filter(s => s.branchId === activeBranch);
+        }
+        
+        return filtered;
+    }, [staffList, activeBranch]);
 
     const [weekPattern, setWeekPattern] = useState({
-        0: { active: true, start: "14:00", end: "23:00", break: true }, // Sun
-        1: { active: true, start: "14:00", end: "23:00", break: true }, // Mon
-        2: { active: true, start: "14:00", end: "23:00", break: true }, // Tue
-        3: { active: true, start: "14:00", end: "23:00", break: true }, // Wed
-        4: { active: true, start: "14:00", end: "23:00", break: true }, // Thu
-        5: { active: true, start: "14:00", end: "23:00", break: true }, // Fri
-        6: { active: true, start: "14:00", end: "23:00", break: true }, // Sat
+        0: { active: true, start: "14:00", end: "23:00", break: true }, 
+        1: { active: true, start: "14:00", end: "23:00", break: true }, 
+        2: { active: true, start: "14:00", end: "23:00", break: true }, 
+        3: { active: true, start: "14:00", end: "23:00", break: true }, 
+        4: { active: true, start: "14:00", end: "23:00", break: true }, 
+        5: { active: true, start: "14:00", end: "23:00", break: true }, 
+        6: { active: true, start: "14:00", end: "23:00", break: true }, 
     });
 
     const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-    // --- SMART DATE HANDLERS ---
     const handleStartDateChange = (e) => {
         const newStart = e.target.value;
         setStartDate(newStart);
@@ -82,7 +85,7 @@ export default function ShiftCreator({ db, staffList, onSuccess, initialStaffId,
         const start = new Date(startDate);
         const end = new Date(endDate);
         const staff = activeStaff.find(s => s.id === selectedStaffId);
-        
+
         let current = new Date(start);
         let count = 0;
 
@@ -102,6 +105,7 @@ export default function ShiftCreator({ db, staffList, onSuccess, initialStaffId,
                     endTime: pattern.end,
                     includesBreak: pattern.break, 
                     type: 'pattern_generated',
+                    branchId: staff.branchId || null, 
                     updatedAt: new Date()
                 }, { merge: true });
                 count++;
@@ -127,11 +131,15 @@ export default function ShiftCreator({ db, staffList, onSuccess, initialStaffId,
                     <label className="text-[10px] font-bold text-gray-500 uppercase">Staff Member</label>
                     <select value={selectedStaffId} onChange={e => setSelectedStaffId(e.target.value)} className="bg-gray-800 text-white rounded p-2 border border-gray-700 outline-none">
                         <option value="">Select...</option>
-                        {activeStaff.map(s => (
-                            <option key={s.id} value={s.id}>
-                                {s.nickname || s.firstName}
-                            </option>
-                        ))}
+                        {activeStaff.map(s => {
+                            const branchName = branches.find(b => b.id === s.branchId)?.name || s.branchId;
+                            return (
+                                <option key={s.id} value={s.id}>
+                                    {s.nickname || s.firstName} 
+                                    {activeBranch === 'global' && s.branchId ? ` (${branchName?.replace('Da Moreno ', '')})` : ''}
+                                </option>
+                            );
+                        })}
                     </select>
                 </div>
                 <div className="flex flex-col gap-1">

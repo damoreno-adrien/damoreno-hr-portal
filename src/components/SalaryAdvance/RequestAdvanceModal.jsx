@@ -1,5 +1,7 @@
+/* src/components/SalaryAdvance/RequestAdvanceModal.jsx */
+
 import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore';
 import Modal from '../common/Modal';
 
 export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdvance, onSuccess }) {
@@ -33,6 +35,10 @@ export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdva
         setError('');
 
         try {
+            // --- THE MAGIC STAMP: Securely get their home branch ---
+            const staffRef = await getDoc(doc(db, 'staff_profiles', user.uid));
+            const branchId = staffRef.exists() ? staffRef.data().branchId : null;
+
             const today = new Date();
             await addDoc(collection(db, 'salary_advances'), {
                 staffId: user.uid,
@@ -40,12 +46,12 @@ export default function RequestAdvanceModal({ isOpen, onClose, db, user, maxAdva
                 date: today.toISOString().split('T')[0],
                 payPeriodMonth: today.getMonth() + 1,
                 payPeriodYear: today.getFullYear(),
-                status: 'pending', // All staff requests start as pending 
+                status: 'pending', 
                 requestedBy: 'staff',
+                branchId: branchId, // <-- Stamped!
                 createdAt: serverTimestamp(),
             });
 
-            // --- KEY CHANGE: Call the onSuccess function to trigger a refresh ---
             if (onSuccess) {
                 onSuccess();
             }

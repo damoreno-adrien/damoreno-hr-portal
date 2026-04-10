@@ -1,14 +1,15 @@
+/* src/components/Payroll/PayrollGenerator.jsx */
+
 import React from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import usePayrollGenerator from '../../hooks/usePayrollGenerator';
 import * as dateUtils from '../../utils/dateUtils';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore'; // <-- NEW IMPORTS
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-// Generate years dynamically
 const generateYears = (startYear = 2025) => {
     const currentYear = dateUtils.getYear(new Date()); 
     const years = [];
@@ -19,37 +20,32 @@ const generateYears = (startYear = 2025) => {
 };
 const dynamicYears = generateYears(); 
 
-export default function PayrollGenerator({ db, staffList, companyConfig, payPeriod, setPayPeriod, onViewDetails }) {
+export default function PayrollGenerator({ db, staffList, companyConfig, payPeriod, setPayPeriod, onViewDetails, activeBranch }) {
     const {
         payrollData, isLoading, isFinalizing, error, isMonthFullyFinalized,
         selectedForPayroll, totalSelectedNetPay,
         handleGeneratePayroll, handleFinalizePayroll, handleSelectOne, handleSelectAll,
     } = usePayrollGenerator(db, staffList, companyConfig, payPeriod);
 
-    // --- NEW: Wrapper function to handle Auto-Deactivation after saving payroll ---
     const onFinalizeClick = async () => {
-        // 1. Run the normal finalization process
         await handleFinalizePayroll();
 
-        // 2. Check for staff whose offboarding date has passed
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         for (const item of payrollData) {
-            // Only process the ones we actually ran payroll for
             if (!selectedForPayroll.has(item.id)) continue; 
             
             const staff = staffList.find(s => s.id === item.id);
             if (staff && staff.offboardingSettings?.isPendingFutureOffboard) {
                 const endDateObj = dateUtils.parseISODateString(staff.endDate);
                 
-                // If their end date is today or in the past, cleanly deactivate them!
                 if (endDateObj && endDateObj <= today) {
                     try {
                         const staffRef = doc(db, 'staff_profiles', staff.id);
                         await updateDoc(staffRef, {
                             status: 'inactive',
-                            'offboardingSettings.isPendingFutureOffboard': false, // Turn off the flag
+                            'offboardingSettings.isPendingFutureOffboard': false, 
                             'offboardingSettings.finalDeactivationDate': serverTimestamp()
                         });
                         console.log(`Successfully auto-deactivated ${staff.firstName || staff.nickname} post-payroll.`);
@@ -68,7 +64,15 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
             head: [['Staff', 'Total Earnings', 'Total Deductions', 'Net Pay']],
             body: payrollData
                     .filter(item => selectedForPayroll.has(item.id)) 
-                    .map(item => [item.displayName, formatCurrency(item.totalEarnings), formatCurrency(item.totalDeductions), formatCurrency(item.netPay)]),
+                    .map(item => {
+                        let name = item.displayName;
+                        const staff = staffList.find(s => s.id === item.id);
+                        if (activeBranch === 'global' && staff?.branchId) {
+                            const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId;
+                            name += ` (${bName.replace('Da Moreno ', '')})`;
+                        }
+                        return [name, formatCurrency(item.totalEarnings), formatCurrency(item.totalDeductions), formatCurrency(item.netPay)]
+                    }),
             startY: 20,
             foot: [['TOTAL', '', '', formatCurrency(totalSelectedNetPay)]], 
             footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 20 },
@@ -87,21 +91,33 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
             return <tr><td colSpan="5" className="px-6 py-10 text-center text-red-400">{error}</td></tr>;
         }
         if (payrollData.length > 0) {
-            return payrollData.map(item => (
-                <tr key={item.id} className="hover:bg-gray-700">
-                    <td className="p-4">
-                        <input type="checkbox" className="rounded border-gray-600 bg-gray-900 text-amber-600 focus:ring-amber-500" checked={selectedForPayroll.has(item.id)} onChange={() => handleSelectOne(item.id)} />
-                    </td>
-                    <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white cursor-pointer">{item.displayName}</td>
-                    <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
-                    <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
-                    
-                    <td onClick={() => onViewDetails(item)} className={`px-6 py-4 whitespace-nowrap text-sm font-bold cursor-pointer ${item.netPay < 0 ? 'text-red-500' : 'text-amber-400'}`}>
-                        {formatCurrency(item.netPay)}
-                        {item.netPay < 0 && <span className="ml-2 text-xs text-red-400 font-normal">(Negative Pay!)</span>}
-                    </td>
-                </tr>
-            ));
+            return payrollData.map(item => {
+                // --- THE FIX: Branch Badges for Global View ---
+                const staff = staffList.find(s => s.id === item.id);
+                let branchBadge = null;
+                if (activeBranch === 'global' && staff?.branchId) {
+                    const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId;
+                    branchBadge = <span className="ml-2 text-[9px] uppercase tracking-wider font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">{bName.replace('Da Moreno ', '')}</span>;
+                }
+
+                return (
+                    <tr key={item.id} className="hover:bg-gray-700">
+                        <td className="p-4">
+                            <input type="checkbox" className="rounded border-gray-600 bg-gray-900 text-amber-600 focus:ring-amber-500" checked={selectedForPayroll.has(item.id)} onChange={() => handleSelectOne(item.id)} />
+                        </td>
+                        <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white cursor-pointer">
+                            {item.displayName} {branchBadge}
+                        </td>
+                        <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalEarnings)}</td>
+                        <td onClick={() => onViewDetails(item)} className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 cursor-pointer">{formatCurrency(item.totalDeductions)}</td>
+                        
+                        <td onClick={() => onViewDetails(item)} className={`px-6 py-4 whitespace-nowrap text-sm font-bold cursor-pointer ${item.netPay < 0 ? 'text-red-500' : 'text-amber-400'}`}>
+                            {formatCurrency(item.netPay)}
+                            {item.netPay < 0 && <span className="ml-2 text-xs text-red-400 font-normal">(Negative Pay!)</span>}
+                        </td>
+                    </tr>
+                );
+            });
         }
         return <tr><td colSpan="5" className="px-6 py-10 text-center text-gray-500">Select a pay period and click Generate.</td></tr>;
     };
@@ -166,7 +182,6 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                         <span className="text-gray-400">Total for Selected ({selectedForPayroll.size}): </span>
                         <span className="text-2xl font-bold text-amber-400">{formatCurrency(totalSelectedNetPay)} THB</span>
                     </div>
-                    {/* --- FIX: Switched onClick to use our new wrapper function --- */}
                     <button
                         onClick={onFinalizeClick}
                         disabled={isFinalizing || selectedForPayroll.size === 0}

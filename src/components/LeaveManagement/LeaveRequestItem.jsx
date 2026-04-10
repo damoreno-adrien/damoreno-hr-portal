@@ -6,7 +6,8 @@ import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator';
 import { Briefcase, Trash2, AlertTriangle, Users, Banknote } from 'lucide-react';
 import StatusBadge from '../common/StatusBadge';
 
-export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList }) => {
+// --- NEW: Added activeBranch and branches to props ---
+export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, activeBranch, branches = [] }) => {
     const isFullManager = ['admin', 'manager', 'super_admin'].includes(userRole);
 
     const conflicts = useMemo(() => {
@@ -58,19 +59,26 @@ export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteReque
                     <div className="flex items-center gap-2">
                         <div className="flex items-center gap-2">
                             <p className="font-bold text-white text-lg">{req.displayStaffName}</p>
+                            
+                            {/* --- THE FIX: Branch Badge for Global View --- */}
+                            {activeBranch === 'global' && req.branchId && (
+                                <span className="text-[8px] uppercase tracking-wider font-bold bg-gray-700/50 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 truncate max-w-[80px]">
+                                    {(branches.find(b => b.id === req.branchId)?.name || req.branchId).replace('Da Moreno ', '')}
+                                </span>
+                            )}
+
                             {(req.leaveType === 'Public Holiday (In Lieu)' || req.leaveType === 'Cash Out Holiday Credits') && (
-                                <span className="bg-blue-500/20 border border-blue-500 text-blue-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full flex items-center">
+                                <span className="bg-blue-500/20 border border-blue-500 text-blue-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full flex items-center ml-2">
                                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5 animate-pulse"></span> Holiday Credit
                                 </span>
                             )}
                         </div>
-                        {req.staffDepartment && <span className="text-xs bg-gray-700 px-2 py-0.5 rounded text-gray-300">{req.staffDepartment}</span>}
+                        {req.staffDepartment && <span className="text-xs bg-gray-700 px-2 py-0.5 rounded text-gray-300 ml-2">{req.staffDepartment}</span>}
                     </div>
                     <p className="text-sm text-gray-400 mt-1"><span className="text-amber-400 font-semibold">{req.leaveType}</span> • Requested: {dateUtils.formatDisplayDate(req.requestedAt)}</p>
                     {createdByString && <p className="text-xs italic text-gray-500">{createdByString}</p>}
                 </div>
 
-                {/* --- UPGRADED: Responsive Horizontal Layout for Desktop --- */}
                 {req.leaveType === 'Cash Out Holiday Credits' ? (
                     <div className="text-center bg-green-900/30 p-3 rounded-lg border border-green-700 flex flex-col md:flex-row items-center justify-center min-w-[140px] md:min-w-0 md:px-5 md:gap-3">
                         <Banknote className="w-5 h-5 text-green-500 mb-1 md:mb-0" />

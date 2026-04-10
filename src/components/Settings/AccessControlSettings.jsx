@@ -4,13 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '../../../firebase.js';
-import { Shield, UserCog, UserPlus, Loader2, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Shield, UserCog, UserPlus, Loader2, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown, Edit2, Check, X } from 'lucide-react';
 
-const functions = getFunctions(app);
-const inviteAdminFunc = httpsCallable(functions, 'inviteAdmin');
-const updateUserRoleFunc = httpsCallable(functions, 'updateUserRole');
+const functions = getFunctions(app, "asia-southeast1");
+const inviteAdminFunc = httpsCallable(functions, 'inviteAdminHandler');
+const updateUserRoleFunc = httpsCallable(functions, 'updateUserRoleHandler');
+const updateAdminBranchesFunc = httpsCallable(functions, 'updateAdminBranchesHandler');
 
-export const AccessControlSettings = ({ db, userRole }) => {
+export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches = [] }) => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -18,9 +19,16 @@ export const AccessControlSettings = ({ db, userRole }) => {
     const [showArchived, setShowArchived] = useState(false);
     const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
 
+    // Form State
     const [newAdminName, setNewAdminName] = useState('');
     const [newAdminEmail, setNewAdminEmail] = useState('');
     const [newAdminPassword, setNewAdminPassword] = useState('');
+    const [newAdminRole, setNewAdminRole] = useState('admin');
+    const [newAdminBranches, setNewAdminBranches] = useState([]);
+
+    // Editing State
+    const [editingAdminId, setEditingAdminId] = useState(null);
+    const [editingBranches, setEditingBranches] = useState([]);
 
     const fetchUsers = async () => {
         setLoading(true);
@@ -39,6 +47,8 @@ export const AccessControlSettings = ({ db, userRole }) => {
                     ? `${profileData.firstName} ${profileData.lastName || ''}`
                     : profileData.fullName || profileData.nickname || baseUsers[doc.id].name || 'Unknown Name';
                 baseUsers[doc.id].status = profileData.status || 'active';
+                // Note: Staff have a single branchId, Admins have an array of branchIds
+                baseUsers[doc.id].branchId = profileData.branchId || baseUsers[doc.id].branchId || 'global'; 
             });
             setUsers(Object.values(baseUsers));
         } catch (error) { console.error("Failed to fetch users", error); }
@@ -47,14 +57,45 @@ export const AccessControlSettings = ({ db, userRole }) => {
 
     useEffect(() => { fetchUsers(); }, [db]);
 
+    // Handle Checkbox Toggles
+    const handleBranchToggle = (branchId, isEditing = false) => {
+        const currentList = isEditing ? editingBranches : newAdminBranches;
+        const setList = isEditing ? setEditingBranches : setNewAdminBranches;
+        
+        if (currentList.includes(branchId)) {
+            setList(currentList.filter(id => id !== branchId));
+        } else {
+            setList([...currentList, branchId]);
+        }
+    };
+
     const handleInviteAdmin = async (e) => {
         e.preventDefault();
         if (!newAdminName || !newAdminEmail || newAdminPassword.length < 6) return alert("Please fill all fields. Password must be at least 6 characters.");
+        if (newAdminRole === 'admin' && newAdminBranches.length === 0) return alert("Please select at least one branch for this Admin.");
+        
         setIsSaving(true);
         try {
-            await inviteAdminFunc({ name: newAdminName, email: newAdminEmail, password: newAdminPassword });
-            setNewAdminName(''); setNewAdminEmail(''); setNewAdminPassword('');
-            alert("Success! Branch Director (Admin) account has been created.");
+            await inviteAdminFunc({ 
+                name: newAdminName, 
+                email: newAdminEmail, 
+                password: newAdminPassword,
+                role: newAdminRole,
+                branchIds: newAdminRole === 'super_admin' ? ['global'] : newAdminBranches
+            });
+            setNewAdminName(''); setNewAdminEmail(''); setNewAdminPassword(''); setNewAdminBranches([]);
+            alert(`Success! ${newAdminRole === 'super_admin' ? 'Global Super Admin' : 'Branch Admin'} account created.`);
+            await fetchUsers();
+        } catch (error) { alert(`Error: ${error.message}`); }
+        finally { setIsSaving(false); }
+    };
+
+    const handleSaveAdminBranches = async (adminId) => {
+        if (editingBranches.length === 0) return alert("Admin must be assigned to at least one branch.");
+        setIsSaving(true);
+        try {
+            await updateAdminBranchesFunc({ targetUid: adminId, branchIds: editingBranches });
+            setEditingAdminId(null);
             await fetchUsers();
         } catch (error) { alert(`Error: ${error.message}`); }
         finally { setIsSaving(false); }
@@ -79,13 +120,17 @@ export const AccessControlSettings = ({ db, userRole }) => {
 
     if (loading) return <div className="text-gray-400 p-4 flex items-center"><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Loading Access Control...</div>;
 
-    // Only Super Admins can see other Super Admins. Directors only see Directors.
     const executives = users.filter(u =>
         ['admin', 'super_admin'].includes(u.role) &&
         (userRole === 'super_admin' || u.role !== 'super_admin')
     );
+    
     const workforce = users.filter(u => !['admin', 'super_admin'].includes(u.role));
-    const filteredWorkforce = workforce.filter(u => showArchived ? true : (u.status !== 'archived' && u.status !== 'inactive'));
+    const filteredWorkforce = workforce.filter(u => {
+        const matchesBranch = u.branchId === selectedBranchId;
+        const matchesArchive = showArchived ? true : (u.status !== 'archived' && u.status !== 'inactive');
+        return matchesBranch && matchesArchive;
+    });
 
     const sortedWorkforce = [...filteredWorkforce].sort((a, b) => {
         if (sortConfig.key === 'name') {
@@ -102,7 +147,6 @@ export const AccessControlSettings = ({ db, userRole }) => {
 
     return (
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden relative" id="access-control">
-            {/* --- NEW: Blocking Loading Overlay --- */}
             {isSaving && (
                 <div className="absolute inset-0 bg-gray-900/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
                     <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
@@ -120,28 +164,107 @@ export const AccessControlSettings = ({ db, userRole }) => {
             <div className="p-6 space-y-8">
                 {/* Executive Section */}
                 <div className="space-y-4">
-                    <h4 className="text-lg font-bold text-white flex items-center border-b border-gray-700 pb-2"><UserCog className="w-5 h-5 mr-2 text-amber-400" /> Executive Roster (Admins)</h4>
-                    <p className="text-sm text-gray-400 mb-4">Admins have full access to the Command Center but do not have Staff Profiles (no clock-ins or payslips).</p>
+                    <h4 className="text-lg font-bold text-white flex items-center border-b border-gray-700 pb-2"><UserCog className="w-5 h-5 mr-2 text-amber-400" /> Executive Roster</h4>
+                    <p className="text-sm text-gray-400 mb-4">Executives have full access to the Command Center but do not have clock-in profiles.</p>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {userRole === 'super_admin' && (
-                            <form onSubmit={handleInviteAdmin} className="bg-gray-900/50 p-4 rounded-xl border border-gray-700 space-y-3">
-                                <h5 className="font-bold text-gray-300 flex items-center text-sm"><UserPlus className="w-4 h-4 mr-2" /> Invite New Branch Director</h5>
-                                <input type="text" placeholder="Full Name" value={newAdminName} onChange={e => setNewAdminName(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm" />
-                                <input type="email" placeholder="Email Address" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm" />
-                                <input type="password" placeholder="Temporary Password" value={newAdminPassword} onChange={e => setNewAdminPassword(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm" />
-                                <button type="submit" disabled={isSaving} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50">Create Admin Account</button>
+                            <form onSubmit={handleInviteAdmin} className="bg-gray-900/50 p-4 rounded-xl border border-gray-700 space-y-3 h-max">
+                                <h5 className="font-bold text-gray-300 flex items-center text-sm"><UserPlus className="w-4 h-4 mr-2" /> Create Executive Account</h5>
+                                
+                                <select value={newAdminRole} onChange={e => setNewAdminRole(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm outline-none focus:border-indigo-500">
+                                    <option value="admin">Branch Admin (Limited View)</option>
+                                    <option value="super_admin">Global Super Admin (Full View)</option>
+                                </select>
+                                
+                                {newAdminRole === 'admin' && (
+                                    <div className="bg-gray-800 p-3 rounded-lg border border-gray-600">
+                                        <p className="text-xs text-gray-400 font-bold mb-2 uppercase tracking-wider">Assign Branches:</p>
+                                        <div className="flex flex-col gap-2 max-h-32 overflow-y-auto custom-scrollbar">
+                                            {branches.map(b => (
+                                                <label key={b.id} className="flex items-center gap-2 cursor-pointer group">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={newAdminBranches.includes(b.id)}
+                                                        onChange={() => handleBranchToggle(b.id)}
+                                                        className="rounded border-gray-600 bg-gray-900 text-indigo-500 focus:ring-indigo-500 cursor-pointer" 
+                                                    />
+                                                    <span className="text-sm text-gray-300 group-hover:text-white transition-colors">{b.name}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <input type="text" placeholder="Full Name" value={newAdminName} onChange={e => setNewAdminName(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm outline-none focus:border-indigo-500" />
+                                <input type="email" placeholder="Email Address" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm outline-none focus:border-indigo-500" />
+                                <input type="password" placeholder="Temporary Password" value={newAdminPassword} onChange={e => setNewAdminPassword(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm outline-none focus:border-indigo-500" />
+                                
+                                <button type="submit" disabled={isSaving} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50">Create Account</button>
                             </form>
                         )}
-                        <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                        
+                        <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-700 h-max">
                             <h5 className="font-bold text-gray-300 text-sm mb-3">Current Executives</h5>
-                            <div className="space-y-2">
-                                {executives.map(user => (
-                                    <div key={user.id} className="flex items-center justify-between bg-gray-800 p-2.5 rounded-lg border border-gray-700">
-                                        <div><p className="text-sm font-bold text-white">{user.name || 'Unknown Name'}</p><p className="text-xs text-gray-400">{user.email}</p></div>
-                                        <span className="bg-indigo-900/50 text-indigo-400 border border-indigo-700/50 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">{user.role}</span>
-                                    </div>
-                                ))}
+                            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                                {executives.map(user => {
+                                    const isEditing = editingAdminId === user.id;
+                                    
+                                    // Generate the display string for assigned branches
+                                    let assignedString = "Unknown";
+                                    if (user.role === 'super_admin') {
+                                        assignedString = "Global System Access";
+                                    } else if (user.branchIds && Array.isArray(user.branchIds)) {
+                                        const names = user.branchIds.map(id => branches.find(b => b.id === id)?.name?.replace('Da Moreno ', '')).filter(Boolean);
+                                        assignedString = names.length > 0 ? names.join(', ') : 'No Branches Assigned';
+                                    }
+
+                                    return (
+                                        <div key={user.id} className="bg-gray-800 p-3 rounded-lg border border-gray-700 shadow-sm">
+                                            <div className="flex items-start justify-between">
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-bold text-white">{user.name || 'Unknown Name'}</p>
+                                                        <span className={`border text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${user.role === 'super_admin' ? 'bg-purple-900/50 text-purple-400 border-purple-700/50' : 'bg-indigo-900/50 text-indigo-400 border-indigo-700/50'}`}>{user.role}</span>
+                                                    </div>
+                                                    <p className="text-[10px] text-gray-400 mt-1">
+                                                        Assigned: <span className="text-gray-300 font-medium">{assignedString}</span>
+                                                    </p>
+                                                </div>
+                                                
+                                                {userRole === 'super_admin' && user.role !== 'super_admin' && !isEditing && (
+                                                    <button onClick={() => { setEditingAdminId(user.id); setEditingBranches(user.branchIds || []); }} className="p-1.5 text-gray-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded transition-colors" title="Edit Assigned Branches">
+                                                        <Edit2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* Inline Branch Editor */}
+                                            {isEditing && (
+                                                <div className="mt-3 pt-3 border-t border-gray-700 animate-fadeIn">
+                                                    <p className="text-xs text-gray-400 font-bold mb-2 uppercase tracking-wider">Edit Assignments:</p>
+                                                    <div className="grid grid-cols-2 gap-2 mb-3">
+                                                        {branches.map(b => (
+                                                            <label key={b.id} className="flex items-center gap-2 cursor-pointer group">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    checked={editingBranches.includes(b.id)}
+                                                                    onChange={() => handleBranchToggle(b.id, true)}
+                                                                    className="rounded border-gray-600 bg-gray-900 text-indigo-500 focus:ring-indigo-500 cursor-pointer" 
+                                                                />
+                                                                <span className="text-xs text-gray-300 group-hover:text-white transition-colors">{b.name.replace('Da Moreno ', '')}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleSaveAdminBranches(user.id)} className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-1.5 rounded flex justify-center items-center gap-1 transition-colors"><Check className="w-3 h-3"/> Save</button>
+                                                        <button onClick={() => setEditingAdminId(null)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-bold py-1.5 rounded flex justify-center items-center gap-1 transition-colors"><X className="w-3 h-3"/> Cancel</button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -193,7 +316,7 @@ export const AccessControlSettings = ({ db, userRole }) => {
                                         </td>
                                     </tr>
                                 ))}
-                                {sortedWorkforce.length === 0 && <tr><td colSpan="2" className="px-4 py-8 text-center text-gray-500 italic">No staff found.</td></tr>}
+                                {sortedWorkforce.length === 0 && <tr><td colSpan="2" className="px-4 py-8 text-center text-gray-500 italic">No staff found for this branch.</td></tr>}
                             </tbody>
                         </table>
                     </div>

@@ -1,12 +1,14 @@
+/* src/components/SalaryAdvance/AdvanceModal.jsx */
+
 import React, { useState, useEffect } from 'react';
-import { doc, addDoc, updateDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, addDoc, updateDoc, collection, serverTimestamp, getDoc } from 'firebase/firestore';
 import Modal from '../common/Modal';
 
 export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdvance }) {
     const [formData, setFormData] = useState({
         amount: '',
         date: new Date().toISOString().split('T')[0],
-        status: 'pending', // NEW: Add status to form state
+        status: 'pending',
     });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -18,13 +20,13 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
             setFormData({
                 amount: existingAdvance.amount || '',
                 date: existingAdvance.date || new Date().toISOString().split('T')[0],
-                status: existingAdvance.status || 'pending', // UPDATED: Populate status in edit mode
+                status: existingAdvance.status || 'pending', 
             });
         } else {
             setFormData({
                 amount: '',
                 date: new Date().toISOString().split('T')[0],
-                status: 'pending', // Reset for new entries
+                status: 'pending', 
             });
         }
     }, [existingAdvance, isEditMode, isOpen]);
@@ -50,17 +52,21 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
         const payPeriodMonth = selectedDate.getMonth() + 1;
         const payPeriodYear = selectedDate.getFullYear();
 
-        const advanceData = {
-            staffId: staffId,
-            amount: Number(amount),
-            date,
-            payPeriodMonth,
-            payPeriodYear,
-        };
-
         try {
+            // --- THE MAGIC STAMP ---
+            const staffRef = await getDoc(doc(db, 'staff_profiles', staffId));
+            const branchId = staffRef.exists() ? staffRef.data().branchId : null;
+
+            const advanceData = {
+                staffId: staffId,
+                amount: Number(amount),
+                date,
+                payPeriodMonth,
+                payPeriodYear,
+                branchId: branchId // <-- Stamped!
+            };
+
             if (isEditMode) {
-                // UPDATED: Add status to the data being saved in edit mode
                 const updateData = { ...advanceData, status: status, isReadByStaff: false };
                 const advanceDocRef = doc(db, 'salary_advances', existingAdvance.id);
                 await updateDoc(advanceDocRef, updateData);
@@ -93,7 +99,6 @@ export default function AdvanceModal({ isOpen, onClose, db, staffId, existingAdv
                     <input type="date" id="date" value={formData.date} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md" />
                 </div>
                 
-                {/* NEW: Status dropdown, only shown in edit mode */}
                 {isEditMode && (
                     <div>
                         <label htmlFor="status" className="block text-sm font-medium text-gray-300">Status</label>

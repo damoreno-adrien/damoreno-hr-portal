@@ -26,13 +26,21 @@ const formatRate = (job) => {
         : 'N/A';
 };
 
-export const ProfileDetailsView = ({ staff, currentJob }) => {
+export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
+    
+    // Find friendly branch name
+    const branchName = branches.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unassigned';
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
             {staff.status === 'inactive' && <InfoRow label="Last Day of Employment" value={dateUtils.formatDisplayDate(staff.endDate)} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
             
+            {/* --- NEW: Show Branch Assignment --- */}
+            <div className="md:col-span-2 bg-indigo-900/20 p-3 rounded-lg border border-indigo-700/50">
+                <InfoRow label="Branch Location" value={branchName} className="text-indigo-300" />
+            </div>
+
             <InfoRow label="Legal Name" value={displayName} />
             <InfoRow label="Nickname" value={staff.nickname} />
             <InfoRow label="Email Address" value={staff.email} />

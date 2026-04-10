@@ -41,3 +41,6 @@ exports.onManagerAlertUpdated = onManagerAlertUpdated;
 exports.updateStaffEmail = require('./src/staff/updateStaffEmail').updateStaffEmailHandler;
 exports.inviteAdmin = require('./src/users/accessControl').inviteAdminHandler;
 exports.updateUserRole = require('./src/users/accessControl').updateUserRoleHandler;
+exports.updateAdminBranchesHandler = require('./src/users/accessControl').updateAdminBranchesHandler;
+exports.migrateBranchData = require('./src/admin/migrateBranchData').migrateBranchDataHandler;
+exports.migrateBranchSettings = require('./src/admin/migrateBranchSettings').migrateBranchSettingsHandler;

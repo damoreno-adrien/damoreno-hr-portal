@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { app, auth, db } from '../firebase';
@@ -37,6 +37,9 @@ export default function App() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+    // --- Global Branch State ---
+    const [activeBranch, setActiveBranch] = useState('global');
+    
     // --- Active View State ---
     const [activeRole, setActiveRole] = useState(null);
 
@@ -72,6 +75,35 @@ export default function App() {
         }
     }, [db, user, hasStaffProfile]);
 
+    // --- THE MASTER FIX: Resolve the Branch Config at the Top Level! ---
+    const resolvedConfig = useMemo(() => {
+        if (!companyConfig) return null;
+        
+        let effectiveBranch = 'global';
+        
+        // If viewing as staff, force their native branch config so their Geofence works!
+        if (activeRole === 'staff') {
+            effectiveBranch = staffProfile?.branchId || 'global';
+        } else {
+            effectiveBranch = activeBranch;
+        }
+        
+        if (!effectiveBranch || effectiveBranch === 'global') return companyConfig;
+
+        const branchOverrides = companyConfig.branchSettings?.[effectiveBranch] || {};
+        
+        return {
+            ...companyConfig,
+            ...branchOverrides,
+            attendanceBonus: branchOverrides.attendanceBonus || companyConfig.attendanceBonus || {},
+            disciplinaryRules: branchOverrides.disciplinaryRules || companyConfig.disciplinaryRules || {},
+            geofence: branchOverrides.geofence || companyConfig.geofence || {},
+            financialRules: branchOverrides.financialRules || companyConfig.financialRules || {},
+            departments: branchOverrides.departments || companyConfig.departments || [],
+            publicHolidays: branchOverrides.publicHolidays || companyConfig.publicHolidays || []
+        };
+    }, [companyConfig, activeBranch, activeRole, staffProfile]);
+
     useEffect(() => {
         if (!db) return;
         if (['manager', 'admin', 'dept_manager', 'super_admin'].includes(userRole)) {
@@ -101,7 +133,8 @@ export default function App() {
     }, [userRole, db, user]);
 
     useEffect(() => {
-        if (hasStaffProfile && db && user && companyConfig && staffProfile) {
+        // --- Using resolvedConfig to calculate accurate branch-specific holiday payouts ---
+        if (hasStaffProfile && db && user && resolvedConfig && staffProfile) {
             const q = query(
                 collection(db, 'leave_requests'),
                 where('staffId', '==', user.uid),
@@ -109,7 +142,7 @@ export default function App() {
             );
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 const requests = snapshot.docs.map(doc => doc.data());
-                const balances = calculateStaffLeaveBalances(staffProfile, requests, companyConfig);
+                const balances = calculateStaffLeaveBalances(staffProfile, requests, resolvedConfig);
                 if (balances) {
                     setLeaveBalances({ annual: balances.annual.remaining, publicHoliday: balances.ph.remaining, personal: balances.personal.remaining });
                 }
@@ -118,7 +151,7 @@ export default function App() {
         } else {
             setLeaveBalances({ annual: 0, publicHoliday: 0, personal: 0 });
         }
-    }, [db, user, hasStaffProfile, companyConfig, staffProfile]);
+    }, [db, user, hasStaffProfile, resolvedConfig, staffProfile]);
 
     const handleLogin = async (email, password) => {
         setLoginError('');
@@ -141,10 +174,11 @@ export default function App() {
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
             if (activeRole === 'manager') {
-                return <AttendancePage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} />;
+                return <AttendancePage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} activeBranch={activeBranch} />;
             }
             if (activeRole === 'staff') {
-                return <StaffDashboardPage db={db} user={user} companyConfig={companyConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
+                // Safely passing the resolved Branch Config down to fix the Geofence error!
+                return <StaffDashboardPage db={db} user={user} companyConfig={resolvedConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
             }
         }
 
@@ -173,26 +207,21 @@ export default function App() {
         };
 
         switch (currentPage) {
-            case 'planning':
-                return activeRole === 'manager' ? requireDeptManager(<PlanningPage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} companyConfig={companyConfig} />) : <MySchedulePage db={db} user={user} companyConfig={companyConfig} />;
-
-            case 'leave':
-                return activeRole === 'manager'
-                    ? requireDeptManager(<TeamLeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} />)
-                    : <MyLeavePage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={companyConfig} leaveBalances={leaveBalances} />;
+            case 'planning': return activeRole === 'manager' ? requireDeptManager(<PlanningPage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} companyConfig={resolvedConfig} activeBranch={activeBranch} />) : <MySchedulePage db={db} user={user} companyConfig={resolvedConfig} />;
+            case 'leave': return activeRole === 'manager' ? requireDeptManager(<TeamLeaveManagementPage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={resolvedConfig} activeBranch={activeBranch} />) : <MyLeavePage db={db} user={user} userRole={userRole} staffList={staffList} companyConfig={resolvedConfig} leaveBalances={leaveBalances} />;
             case 'my-profile': return <MyProfilePage staffProfile={staffProfile} />;
-            case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={companyConfig} />;
-            case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={companyConfig} />;
-            case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={companyConfig} />;
-            case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={companyConfig} />;
+            case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={resolvedConfig} />;
+            case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={resolvedConfig} />;
+            case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={resolvedConfig} />;
+            case 'my-payslips': return <MyPayslipsPage db={db} user={user} companyConfig={resolvedConfig} />;
 
-            case 'staff': return requireFullManager(<StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={companyConfig} />);
-            case 'reports': return requireFullManager(<AttendanceReportsPage db={db} staffList={staffList} />);
-            case 'financials': return requireFullManager(<FinancialsPage db={db} staffList={staffList} />);
-            case 'payroll': return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={companyConfig} />);
+            case 'staff': return requireFullManager(<StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={resolvedConfig} activeBranch={activeBranch} staffProfile={staffProfile} />);
+            case 'reports': return requireFullManager(<AttendanceReportsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
+            case 'financials': return requireFullManager(<FinancialsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
+            case 'payroll': return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={resolvedConfig} activeBranch={activeBranch} />);
             
-            // --- FIXED: ADDED userRole={userRole} HERE ---
-            case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} />);
+            // Settings needs the RAW config to save things safely, so we pass companyConfig here.
+            case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} activeBranch={activeBranch} />);
 
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }
@@ -223,6 +252,10 @@ export default function App() {
                 setIsFinancialsMenuOpen={setIsFinancialsMenuOpen}
                 isSettingsMenuOpen={isSettingsMenuOpen}
                 setIsSettingsMenuOpen={setIsSettingsMenuOpen}
+                
+                activeBranch={activeBranch}
+                setActiveBranch={setActiveBranch}
+                companyConfig={companyConfig}
             />
 
             <div className="flex-1 flex flex-col md:overflow-hidden">

@@ -1,7 +1,8 @@
 /* src/pages/AttendancePage.jsx */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth'; // <-- Securely grab UID directly
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
@@ -30,7 +31,7 @@ const getStaffDepartment = (staff) => {
     return 'Unassigned';
 };
 
-const UpcomingBirthdaysCard = ({ staffList }) => {
+const UpcomingBirthdaysCard = ({ staffList, activeBranch, branches = [] }) => {
     const upcomingBirthdays = staffList.map(staff => {
         if (!staff.birthdate) return null;
         const today = new Date();
@@ -53,12 +54,20 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
             <h3 className="text-xl font-semibold text-white mb-4">Upcoming Birthdays (Next 30 Days)</h3>
             <div className="space-y-3 max-h-60 overflow-y-auto">
                 {upcomingBirthdays.length > 0 ? (
-                    upcomingBirthdays.map(staff => (
-                        <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md">
-                            <span className="text-white font-medium">{getDisplayName(staff)}</span>
-                            <span className="text-sm text-amber-400">{dateUtils.formatCustom(staff.nextBirthday, 'dd MMMM')} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})</span>
-                        </div>
-                    ))
+                    upcomingBirthdays.map(staff => {
+                        let nameDisplay = getDisplayName(staff);
+                        if (activeBranch === 'global' && staff.branchId) {
+                            const bName = branches.find(b => b.id === staff.branchId)?.name || staff.branchId;
+                            nameDisplay += ` (${bName.replace('Da Moreno ', '')})`;
+                        }
+                        
+                        return (
+                            <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md">
+                                <span className="text-white font-medium">{nameDisplay}</span>
+                                <span className="text-sm text-amber-400">{dateUtils.formatCustom(staff.nextBirthday, 'dd MMMM')} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})</span>
+                            </div>
+                        );
+                    })
                 ) : (
                     <p className="text-sm text-gray-500">No upcoming birthdays in the next 30 days.</p>
                 )}
@@ -67,7 +76,7 @@ const UpcomingBirthdaysCard = ({ staffList }) => {
     );
 };
 
-export default function AttendancePage({ db, staffList, userRole, staffProfile }) {
+export default function AttendancePage({ db, staffList, userRole, staffProfile, activeBranch }) {
     const [todaysShifts, setTodaysShifts] = useState([]);
     const [checkIns, setCheckIns] = useState({});
     const [todaysLeave, setTodaysLeave] = useState([]);
@@ -78,6 +87,9 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
     
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [activeAlertTab, setActiveAlertTab] = useState('pending');
+    
+    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
 
     const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
     
@@ -90,8 +102,17 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
 
     useEffect(() => {
         if (!db) return;
-        const todayStr = dateUtils.formatISODate(new Date());
+        
+        // 1. Fetch Secure Branch List
+        const uid = getAuth().currentUser?.uid;
+        if (userRole === 'admin' && uid) {
+            getDoc(doc(db, 'users', uid)).then(snap => {
+                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
+            }).catch(err => console.error(err));
+        }
 
+        // 2. Fetch standard dashboard data
+        const todayStr = dateUtils.formatISODate(new Date());
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => { setTodaysShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); });
 
@@ -109,7 +130,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
         const unsubscribeConfig = onSnapshot(configRef, (docSnap) => { if (docSnap.exists()) setCompanyConfig(docSnap.data()); });
 
         return () => { unsubscribeShifts(); unsubscribeCheckIns(); unsubscribeLeave(); unsubscribeConfig(); };
-    }, [db]);
+    }, [db, userRole]);
 
     const handleCardClick = (staff) => {
         if (!isFullManager) return; 
@@ -132,18 +153,26 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
         setAlertToFix(recordForModal);
     };
 
-    // --- FIX 1: Defined the missing close handler ---
-    const handleCloseManualFix = () => {
-        setAlertToFix(null);
-    };
+    const handleCloseManualFix = () => setAlertToFix(null);
 
+    // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
     const staffToDisplay = useMemo(() => {
         let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive');
+        
         if (userRole === 'dept_manager' && currentUserDept) {
             list = list.filter(staff => getStaffDepartment(staff) === currentUserDept);
         }
+        
+        if (activeBranch === 'global') {
+            if (userRole === 'admin') {
+                list = list.filter(staff => adminBranchIds.includes(staff.branchId));
+            }
+        } else if (activeBranch) {
+            list = list.filter(staff => staff.branchId === activeBranch);
+        }
+        
         return list;
-    }, [staffList, showArchived, userRole, currentUserDept]);
+    }, [staffList, showArchived, userRole, currentUserDept, activeBranch, adminBranchIds]);
 
     const staffWithStatus = staffToDisplay.map(staff => {
         const checkIn = checkIns[staff.id];
@@ -179,10 +208,17 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
         }
 
         const isClickable = staff.reason !== 'Off Today' && isFullManager;
+        
+        let nameDisplay = getDisplayName(staff);
+        if (activeBranch === 'global' && staff.branchId) {
+            const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId;
+            nameDisplay += ` (${bName.replace('Da Moreno ', '')})`;
+        }
+
         const CardContent = () => (
             <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
                 <div className={`w-3 h-3 rounded-full ${statusColor} flex-shrink-0`}></div>
-                <div className="flex-1 overflow-hidden"><p className="font-bold text-white truncate">{getDisplayName(staff)}</p><p className="text-xs text-gray-400 truncate">{statusText}</p></div>
+                <div className="flex-1 overflow-hidden"><p className="font-bold text-white truncate">{nameDisplay}</p><p className="text-xs text-gray-400 truncate">{statusText}</p></div>
             </div>
         );
         return isClickable ? <button onClick={onClick} className="w-full text-left">{CardContent()}</button> : <CardContent />;
@@ -238,12 +274,16 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile }
                         <button onClick={() => setActiveAlertTab('history')} className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'history' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}>Action History Log</button>
                     </div>
                     <div className="p-4">
-                        {activeAlertTab === 'pending' ? <ManagerAlerts onManualFix={handleOpenManualFix} /> : <HRActionLog db={db} />}
+                        {/* Pass userRole and adminBranchIds down so tabs can securely filter too! */}
+                        {activeAlertTab === 'pending' 
+                            ? <ManagerAlerts onManualFix={handleOpenManualFix} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} /> 
+                            : <HRActionLog db={db} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} />
+                        }
                     </div>
                 </div>
             )}
 
-            <div className="mb-6"><UpcomingBirthdaysCard staffList={staffToDisplay} /></div>
+            <div className="mb-6"><UpcomingBirthdaysCard staffList={staffToDisplay} activeBranch={activeBranch} branches={companyConfig?.branches || []} /></div>
             <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-3 md:gap-6">
                 <StatusColumn title="On Shift" staff={onShiftAndBreak} />
                 <StatusColumn title="Not Present" staff={notPresent} />

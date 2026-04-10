@@ -5,10 +5,10 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { Plus, Trash2, Check, Save, Loader2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
-export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHoliday }) => {
+// --- ADDED selectedBranchId to props ---
+export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHoliday, selectedBranchId }) => {
     const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
     
-    // --- NEW: Grouped state for the 3 financial rules ---
     const [settings, setSettings] = useState({
         holidayPayMultiplier: 1.0,
         maxHolidayBalance: 15,
@@ -23,7 +23,6 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
         if (config) {
             const vals = {
                 holidayPayMultiplier: config.holidayPayMultiplier ?? 1.0,
-                // Fallback to the old variable name if maxHolidayBalance doesn't exist yet
                 maxHolidayBalance: config.maxHolidayBalance ?? config.publicHolidayCreditCap ?? 15, 
                 cashOutWindowDays: config.cashOutWindowDays ?? 60
             };
@@ -44,13 +43,17 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
         setIsSaved(false);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
+            // --- THE STAMP: Save to branchSettings.[branchId] ---
+            const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
+
             await updateDoc(configDocRef, {
-                holidayPayMultiplier: Number(settings.holidayPayMultiplier),
-                maxHolidayBalance: Number(settings.maxHolidayBalance),
-                cashOutWindowDays: Number(settings.cashOutWindowDays),
+                [`${prefix}holidayPayMultiplier`]: Number(settings.holidayPayMultiplier),
+                [`${prefix}maxHolidayBalance`]: Number(settings.maxHolidayBalance),
+                [`${prefix}cashOutWindowDays`]: Number(settings.cashOutWindowDays),
                 // Keep the old one synced just in case old code looks for it before we finish updating everything
-                publicHolidayCreditCap: Number(settings.maxHolidayBalance) 
+                [`${prefix}publicHolidayCreditCap`]: Number(settings.maxHolidayBalance) 
             });
+            
             setOriginalSettings(settings);
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
@@ -85,7 +88,6 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
         <div id="public-holidays" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8">
             <h3 className="text-xl font-semibold text-white">Public Holidays</h3>
             
-            {/* --- NEW: Financial Rules Grid --- */}
             <div className="mt-6 p-5 bg-gray-900/50 rounded-xl border border-gray-700/50">
                 <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4">Holiday Accrual & Payout Rules</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -119,7 +121,6 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
             
             <hr className="border-gray-700 my-8" />
 
-            {/* --- Holiday list management is unchanged --- */}
             <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4">Company Calendar</h4>
             <form onSubmit={handleAddSubmit} className="flex flex-col sm:flex-row items-stretch sm:space-x-4 space-y-2 sm:space-y-0">
                 <input type="date" id="date" value={newHoliday.date} onChange={handleHolidayInputChange} className="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white outline-none focus:border-indigo-500"/>

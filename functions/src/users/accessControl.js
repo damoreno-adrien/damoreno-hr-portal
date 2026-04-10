@@ -9,20 +9,22 @@ const db = getFirestore();
 
 // --- FUNCTION 1: Invite a Pure Admin (Branch Director) ---
 exports.inviteAdminHandler = functions.https.onCall({
-    region: "us-central1"
+    region: "asia-southeast1"
 }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
 
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
     const callerRole = callerDoc.exists ? callerDoc.data().role : null;
     
-    // STRICT SECURITY: Only Super Admin can create Directors
     if (callerRole !== 'super_admin') {
         throw new HttpsError("permission-denied", "Only the Super Admin can invite new Directors.");
     }
 
-    const { email, password, name } = request.data;
+    const { email, password, name, role, branchIds } = request.data;
     if (!email || !password || !name) throw new HttpsError("invalid-argument", "Missing required fields.");
+
+    const targetRole = role === 'super_admin' ? 'super_admin' : 'admin';
+    const targetBranches = targetRole === 'super_admin' ? ['global'] : (branchIds || []);
 
     try {
         const userRecord = await admin.auth().createUser({
@@ -34,7 +36,8 @@ exports.inviteAdminHandler = functions.https.onCall({
         await db.collection("users").doc(userRecord.uid).set({
             email: email.trim().toLowerCase(),
             name: name.trim(),
-            role: "admin",
+            role: targetRole,
+            branchIds: targetBranches, 
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
@@ -47,7 +50,7 @@ exports.inviteAdminHandler = functions.https.onCall({
 
 // --- FUNCTION 2: Update an Existing Staff Member's Role ---
 exports.updateUserRoleHandler = functions.https.onCall({
-    region: "us-central1"
+    region: "asia-southeast1"
 }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
 
@@ -61,7 +64,6 @@ exports.updateUserRoleHandler = functions.https.onCall({
     const { targetUid, newRole } = request.data;
     if (!targetUid || !newRole) throw new HttpsError("invalid-argument", "Missing UID or Role.");
 
-    // SECURITY: Prevent anyone but Super Admin from promoting to Admin/Super Admin
     if (['admin', 'super_admin'].includes(newRole) && callerRole !== 'super_admin') {
          throw new HttpsError("permission-denied", "Only the Super Admin can grant executive clearance.");
     }
@@ -71,5 +73,27 @@ exports.updateUserRoleHandler = functions.https.onCall({
         return { success: true };
     } catch (error) {
         throw new HttpsError("internal", "Failed to update user role.");
+    }
+});
+
+// --- FUNCTION 3: Link/Unlink Branches for Existing Admins ---
+exports.updateAdminBranchesHandler = functions.https.onCall({
+    region: "asia-southeast1"
+}, async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
+
+    const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+    if (!callerDoc.exists || callerDoc.data().role !== 'super_admin') {
+        throw new HttpsError("permission-denied", "Only Super Admins can reassign branches.");
+    }
+
+    const { targetUid, branchIds } = request.data;
+    if (!targetUid || !Array.isArray(branchIds)) throw new HttpsError("invalid-argument", "Invalid parameters.");
+
+    try {
+        await db.collection("users").doc(targetUid).update({ branchIds: branchIds });
+        return { success: true };
+    } catch (error) {
+        throw new HttpsError("internal", "Failed to update admin branches.");
     }
 });

@@ -20,11 +20,9 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
     try {
         const now = DateTime.now().setZone(timeZone);
         
-        // --- DATE RANGE SETUP ---
         const startDateStr = request.data.startDate || now.minus({ days: 1 }).toISODate();
-        const endDateStr = request.data.endDate || startDateStr; // Default to single day if no end date
+        const endDateStr = request.data.endDate || startDateStr; 
         
-        // Generate an array of all dates to scan
         const targetDates = [];
         let currDate = DateTime.fromISO(startDateStr, { zone: timeZone });
         const endDate = DateTime.fromISO(endDateStr, { zone: timeZone });
@@ -34,7 +32,6 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
             currDate = currDate.plus({ days: 1 });
         }
 
-        // We use the EARLIEST date to set our global 3-month lookback window
         const startTargetObj = DateTime.fromISO(startDateStr, { zone: timeZone });
         const globalThreeMonthsAgoStr = startTargetObj.minus({ months: 3 }).toISODate();
 
@@ -59,9 +56,6 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
         let alertsCreated = 0;
         let staleAlertsDeleted = 0;
 
-        // ====================================================================
-        // DATA FETCH: Grab everything ONCE to save database reads
-        // ====================================================================
         const [schedulesSnap, attendanceSnap, leaveSnap, staffSnap] = await Promise.all([
             db.collection("schedules").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
             db.collection("attendance").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
@@ -75,7 +69,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
             attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
         });
 
-        // --- Map Staff Profiles to easily grab Dept & Position ---
+        // --- NEW: Added branchId to the staff map ---
         const staffProfilesMap = new Map();
         staffSnap.docs.forEach(doc => {
             const data = doc.data();
@@ -86,15 +80,11 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                 dept = currentJob.department || '';
                 pos = currentJob.position || currentJob.title || '';
             }
-            staffProfilesMap.set(doc.id, { department: dept, position: pos });
+            staffProfilesMap.set(doc.id, { department: dept, position: pos, branchId: data.branchId || null });
         });
 
-        // ====================================================================
-        // THE RANGE LOOP: Process each day individually
-        // ====================================================================
         for (const targetDateStr of targetDates) {
             
-            // 1. REALITY SYNC: Delete existing PENDING alerts for THIS specific date
             const staleAlertsSnap = await db.collection("manager_alerts")
                 .where("date", "==", targetDateStr)
                 .where("status", "==", "pending")
@@ -105,7 +95,6 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                 staleAlertsDeleted++;
             });
 
-            // 2. Setup the specific time windows for THIS specific date
             const targetDateObj = DateTime.fromISO(targetDateStr, { zone: timeZone });
             const startOfMonthStr = targetDateObj.startOf('month').toISODate();
             const threeMonthsAgoStr = targetDateObj.minus({ months: 3 }).toISODate();
@@ -113,13 +102,11 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
 
             const staffStats = {};
 
-            // 3. Process the math exactly as it was, but scoped to the current date loop
             for (const schedDoc of schedulesSnap.docs) {
                 const shift = schedDoc.data();
                 const staffId = shift.staffId;
                 const shiftDate = shift.date;
                 
-                // CRITICAL FILTER: Don't look at shifts from the future relative to the day we are currently scanning!
                 if (shiftDate > targetDateStr) continue;
                 if (shiftDate < threeMonthsAgoStr) continue;
                 
@@ -141,7 +128,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                     });
 
                     if (!attendance && !hasLeave) {
-                        const profile = staffProfilesMap.get(staffId) || {}; // <--- FIX IS HERE
+                        const profile = staffProfilesMap.get(staffId) || {};
                         const alertRef = db.collection("manager_alerts").doc();
                         batch.set(alertRef, { 
                             type: "risk_absence", 
@@ -150,6 +137,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                             staffName: shift.staffName, 
                             department: profile.department || null,
                             position: profile.position || null,
+                            branchId: profile.branchId || null, // <-- Branch DNA injection
                             date: targetDateStr, 
                             createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" 
                         });
@@ -203,8 +191,6 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                         if (actualEnd.isValid && scheduledEnd.isValid && actualStart.isValid) {
                             let totalExtraMins = 0;
 
-                            // ONLY count staying late towards automatic overtime. 
-                            // Ignore early check-ins (staff arriving early to hang out/eat).
                             if (actualEnd > scheduledEnd) {
                                 totalExtraMins += actualEnd.diff(scheduledEnd, 'minutes').minutes;
                             }
@@ -221,6 +207,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                                     staffName: shift.staffName, 
                                     department: profile.department || null,
                                     position: profile.position || null,
+                                    branchId: profile.branchId || null, // <-- Branch DNA injection
                                     date: targetDateStr, 
                                     extraMinutes: Math.round(totalExtraMins), 
                                     multiplier: hrRules.otMultiplier, 
@@ -259,7 +246,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
 
                         if (lostBonus) recommendedAction += " & Revoke Bonus";
 
-                        const profile = staffProfilesMap.get(staffId) || {}; // <--- FIX IS HERE
+                        const profile = staffProfilesMap.get(staffId) || {}; 
                         const alertRef = db.collection("manager_alerts").doc();
                         batch.set(alertRef, { 
                             type: "risk_late", 
@@ -268,6 +255,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                             staffName: stats.name,
                             department: profile.department || null,
                             position: profile.position || null, 
+                            branchId: profile.branchId || null, // <-- Branch DNA injection
                             date: targetDateStr, 
                             minutesLate: Math.round(stats.lateMinsToday), 
                             attendanceDocId: stats.todayAttendanceId, 

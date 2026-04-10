@@ -1,7 +1,8 @@
 /* src/pages/TeamLeaveManagementPage.jsx */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'; 
+import { collection, query, onSnapshot, doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'; 
+import { getAuth } from 'firebase/auth'; // <-- NEW: For secure UID fetching
 import { Search, Plus, List, Calendar as CalendarIcon, Filter, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Users, ArrowUpDown } from 'lucide-react';
 
 import Modal from '../components/common/Modal';
@@ -40,7 +41,7 @@ const DateRangeFilter = ({ currentFilter, setFilter }) => {
     );
 };
 
-const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, expandSignal }) => {
+const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, expandSignal, activeBranch }) => {
     const [isOpen, setIsOpen] = useState(false); 
     
     useEffect(() => {
@@ -67,6 +68,7 @@ const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditR
                             onUpdateRequest={onUpdateRequest} onDeleteRequest={onDeleteRequest} 
                             onEditRequest={onEditRequest} onMcStatusChange={onMcStatusChange} 
                             allRequests={allRequests} companyConfig={companyConfig} staffList={staffList} 
+                            activeBranch={activeBranch} branches={companyConfig?.branches || []}
                         />
                     ))}
                 </div>
@@ -75,7 +77,7 @@ const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditR
     );
 };
 
-export default function TeamLeaveManagementPage({ db, user, userRole, staffList, companyConfig }) {
+export default function TeamLeaveManagementPage({ db, user, userRole, staffList, companyConfig, activeBranch }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     
     const [viewMode, setViewMode] = useState('list'); 
@@ -95,6 +97,18 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
     const [requestToEdit, setRequestToEdit] = useState(null);
     const [timelinePrefill, setTimelinePrefill] = useState(null);
     const [summaryStaff, setSummaryStaff] = useState(null);
+
+    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
+
+    useEffect(() => {
+        const uid = user?.uid || getAuth().currentUser?.uid;
+        if (userRole === 'admin' && uid && db) {
+            getDoc(doc(db, 'users', uid)).then(snap => {
+                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
+            }).catch(err => console.error(err));
+        }
+    }, [db, userRole, user]);
 
     const currentUserDept = useMemo(() => {
         if (userRole !== 'dept_manager') return null;
@@ -129,28 +143,39 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
         return () => unsubscribe();
     }, [db, staffList]);
 
-    // --- FIX 1: Dedicated Timeline Data (Ignores List Filters, Hides Junk) ---
     const timelineRequests = useMemo(() => {
         return allLeaveRequests.filter(req => {
             const staffMember = staffList.find(s => s.id === req.staffId);
-            const reqDept = getStaffDepartment(staffMember);
+            
+            // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+            if (activeBranch === 'global') {
+                if (userRole === 'admin' && !adminBranchIds.includes(staffMember?.branchId)) return false;
+            } else if (activeBranch && staffMember?.branchId !== activeBranch) {
+                return false;
+            }
 
-            // Apply global search & department filters
+            const reqDept = getStaffDepartment(staffMember);
             if (effectiveDeptFilter !== 'All' && reqDept !== effectiveDeptFilter) return false;
             if (searchTerm && !req.displayStaffName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
 
-            // Remove clutter from the Timeline grid
-            if (req.status === 'rejected') return false; // Don't show denied vacations
-            if (req.leaveType === 'Cash Out Holiday Credits') return false; // Not an actual absence
+            if (req.status === 'rejected') return false; 
+            if (req.leaveType === 'Cash Out Holiday Credits') return false; 
 
             return true;
         });
-    }, [allLeaveRequests, effectiveDeptFilter, searchTerm, staffList]);
+    }, [allLeaveRequests, effectiveDeptFilter, searchTerm, staffList, activeBranch, userRole, adminBranchIds]);
 
-    // --- FIX 2: Dedicated List Data (Respects Tabs & Advanced Sorting) ---
     const listRequests = useMemo(() => {
         let filtered = allLeaveRequests.filter(req => {
             const staffMember = staffList.find(s => s.id === req.staffId);
+            
+            // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+            if (activeBranch === 'global') {
+                if (userRole === 'admin' && !adminBranchIds.includes(staffMember?.branchId)) return false;
+            } else if (activeBranch && staffMember?.branchId !== activeBranch) {
+                return false;
+            }
+
             const reqDept = getStaffDepartment(staffMember);
 
             if (effectiveDeptFilter !== 'All' && reqDept !== effectiveDeptFilter) return false;
@@ -194,7 +219,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             if (sortConfig === 'startDate_asc') {
                 const dateA = dateUtils.parseISODateString(a.startDate) || new Date(0);
                 const dateB = dateUtils.parseISODateString(b.startDate) || new Date(0);
-                return dateA - dateB || timeB - timeA; // Secondary sort: Newest submission first
+                return dateA - dateB || timeB - timeA; 
             }
             if (sortConfig === 'startDate_desc') {
                 const dateA = dateUtils.parseISODateString(a.startDate) || new Date(0);
@@ -208,7 +233,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
         });
 
         return filtered;
-    }, [allLeaveRequests, filter, searchTerm, dateFilter, effectiveDeptFilter, staffList, sortConfig]);
+    }, [allLeaveRequests, filter, searchTerm, dateFilter, effectiveDeptFilter, staffList, sortConfig, activeBranch, userRole, adminBranchIds]);
 
     const groupedRequests = useMemo(() => {
         const groups = {};
@@ -226,8 +251,15 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
     const activeStaffList = useMemo(() => {
         let list = staffList.filter(s => s.status !== 'inactive');
         if (userRole === 'dept_manager' && currentUserDept) list = list.filter(s => getStaffDepartment(s) === currentUserDept);
+        
+        // --- SECURE THE "NEW REQUEST" DROPDOWN ---
+        if (activeBranch === 'global') {
+            if (userRole === 'admin') list = list.filter(s => adminBranchIds.includes(s.branchId));
+        } else if (activeBranch) {
+            list = list.filter(s => s.branchId === activeBranch);
+        }
         return list;
-    }, [staffList, userRole, currentUserDept]);
+    }, [staffList, userRole, currentUserDept, activeBranch, adminBranchIds]);
     
     const filteredTimelineStaff = useMemo(() => {
         let list = activeStaffList;
@@ -384,6 +416,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                                     onUpdateRequest={handleUpdateRequest} onDeleteRequest={handleDeleteRequest} 
                                     onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange} 
                                     allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList} 
+                                    activeBranch={activeBranch} branches={companyConfig?.branches || []}
                                 />
                             )) : (
                                 <p className="text-center py-10 text-gray-400">No {filter} requests found.</p>
@@ -396,7 +429,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                                 onUpdateRequest={handleUpdateRequest} onDeleteRequest={handleDeleteRequest} 
                                 onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange} 
                                 allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList} 
-                                expandSignal={expandSignal}
+                                expandSignal={expandSignal} activeBranch={activeBranch}
                             />
                         )) : (
                             <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">

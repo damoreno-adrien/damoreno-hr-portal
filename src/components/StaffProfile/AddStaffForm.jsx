@@ -5,7 +5,7 @@ import { app } from '../../../firebase';
 const functions = getFunctions(app, 'asia-southeast1');
 const createUser = httpsCallable(functions, 'createUser');
 
-export default function AddStaffForm({ auth, onClose, departments }) {
+export default function AddStaffForm({ auth, onClose, departments, userRole, activeBranch, branches = [], managerProfile }) {
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [nickname, setNickname] = useState('');
@@ -25,14 +25,22 @@ export default function AddStaffForm({ auth, onClose, departments }) {
     // --- NEW: Holiday Policy State ---
     const [holidayPolicy, setHolidayPolicy] = useState('in_lieu');
 
+    // --- SECURE BRANCH LOGIC ---
+    const determineDefaultBranch = () => {
+        if (userRole === 'manager' || userRole === 'dept_manager') return managerProfile?.branchId || '';
+        if (activeBranch && activeBranch !== 'global') return activeBranch;
+        return branches.length > 0 ? branches[0].id : '';
+    };
+    const [branchId, setBranchId] = useState(determineDefaultBranch());
+
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password) {
-            setError('Please fill out all required fields.');
+        if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password || !branchId) {
+            setError('Please fill out all required fields, including Branch.');
             return;
         }
         if (payType === 'Salary' && !baseSalary) { setError('Base Salary is required.'); return; }
@@ -51,7 +59,8 @@ export default function AddStaffForm({ auth, onClose, departments }) {
             const userData = {
                 email, password, firstName, lastName, nickname, position, department, startDate, payType,
                 isSsoRegistered,
-                holidayPolicy, // <-- NEW: Send policy to database
+                holidayPolicy, 
+                branchId, // <-- THE MAGIC STAMP IS SENT TO BACKEND
                 baseSalary: payType === 'Salary' ? parseInt(baseSalary, 10) : null,
                 standardDayHours: payType === 'Salary' ? parseInt(standardDayHours, 10) : null,
                 hourlyRate: payType === 'Hourly' ? parseInt(hourlyRate, 10) : null,
@@ -73,6 +82,22 @@ export default function AddStaffForm({ auth, onClose, departments }) {
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
+            {/* --- NEW: Branch Selector for Admins --- */}
+            {['admin', 'super_admin'].includes(userRole) && (
+                <div className="bg-indigo-900/30 p-4 rounded-lg border border-indigo-700 mb-6">
+                    <label className="block text-sm font-bold text-indigo-400 mb-1">Assign to Branch Location</label>
+                    <select 
+                        value={branchId} 
+                        onChange={(e) => setBranchId(e.target.value)} 
+                        className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white outline-none focus:border-indigo-500" 
+                        required
+                    >
+                        <option value="" disabled>Select a branch...</option>
+                        {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                </div>
+            )}
+
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">First Name</label>
@@ -143,7 +168,7 @@ export default function AddStaffForm({ auth, onClose, departments }) {
                  )}
             </div>
 
-            {/* --- NEW: Compliance & Payroll Settings Block --- */}
+            {/* --- Compliance & Payroll Settings Block --- */}
             <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-4">
                 <label className="flex items-center space-x-3 cursor-pointer">
                     <input 

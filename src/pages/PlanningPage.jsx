@@ -1,7 +1,8 @@
 /* src/pages/PlanningPage.jsx */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, writeBatch, doc, getDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth'; // <-- NEW
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
@@ -28,7 +29,7 @@ const DEPT_STYLES = {
     'Unassigned': { border: 'border-l-4 border-l-gray-500', text: 'text-gray-400', bg: 'bg-gray-500/10' }
 };
 
-export default function PlanningPage({ db, staffList, companyConfig, userRole, staffProfile }) {
+export default function PlanningPage({ db, staffList, companyConfig, userRole, staffProfile, activeBranch }) {
     const [weekStart, setWeekStart] = useState(() => {
         const d = new Date();
         d.setHours(0, 0, 0, 0);
@@ -49,13 +50,11 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
     
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
-    // --- NEW: Today's date string for highlighting ---
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // --- NEW: Calculate the "Dominant Month" for the current week ---
     const displayMonthYear = useMemo(() => {
         const dominantDate = new Date(weekStart);
-        dominantDate.setDate(dominantDate.getDate() + 3); // Thursday dictates the week's month
+        dominantDate.setDate(dominantDate.getDate() + 3); 
         return dateUtils.formatCustom(dominantDate, 'MMMM yyyy').toUpperCase();
     }, [weekStart]);
 
@@ -104,9 +103,28 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
         setShowBulkCreator(true);
     };
 
+    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
+    
+    useEffect(() => {
+        const uid = getAuth().currentUser?.uid;
+        if (userRole === 'admin' && uid && db) {
+            getDoc(doc(db, 'users', uid)).then(snap => {
+                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
+            }).catch(err => console.error(err));
+        }
+    }, [db, userRole]);
+
     const groupedAndSortedStaff = useMemo(() => {
         if (!staffList || !weekDates || weekDates.length === 0) return {};
-        const activeStaff = staffList.filter(s => dateUtils.isStaffActiveOnDate(s, weekDates[0].dateObject));
+        let activeStaff = staffList.filter(s => dateUtils.isStaffActiveOnDate(s, weekDates[0].dateObject));
+        
+        // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+        if (activeBranch === 'global') {
+            if (userRole === 'admin') activeStaff = activeStaff.filter(s => adminBranchIds.includes(s.branchId));
+        } else if (activeBranch) {
+            activeStaff = activeStaff.filter(s => s.branchId === activeBranch);
+        }
         
         const groups = activeStaff.reduce((acc, staff) => {
             const job = getCurrentJob(staff);
@@ -124,7 +142,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
             });
         });
         return groups;
-    }, [staffList, sortOrder, weekDates]);
+    }, [staffList, sortOrder, weekDates, activeBranch, userRole, adminBranchIds]); // <-- FIXED DEPENDENCY ARRAY!
 
     const currentUserDept = useMemo(() => {
         if (userRole !== 'dept_manager' || !staffProfile) return null;
@@ -192,13 +210,12 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                     <div className="space-y-1 min-w-[200px]">
                         <h2 className="text-2xl font-black text-white tracking-tight">Planning</h2>
                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">
-                            {userRole === 'dept_manager' ? `${currentUserDept} Department` : 'Da Moreno At Town'}
+                            {userRole === 'dept_manager' ? `${currentUserDept} Department` : 'Da Moreno Schedules'}
                         </p>
                     </div>
                     
                     <div className="flex flex-col gap-1 w-full md:w-auto">
                         <div className="flex justify-between items-end px-1 mb-1">
-                            {/* --- NEW: Dynamic Month/Year Header --- */}
                             <span className="text-sm font-black text-indigo-400 uppercase tracking-widest">{displayMonthYear}</span>
                             <div className="flex gap-1.5">
                                 <button onClick={goBack4Weeks} className="text-[10px] uppercase font-bold tracking-wider bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded transition-colors">- 4W</button>
@@ -272,7 +289,6 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                     const isToday = date.dateString === todayStr;
                                     return (
                                         <th key={date.dateString} className={`p-4 border-b text-center relative transition-colors ${isToday ? 'bg-indigo-900/30 border-indigo-500' : 'bg-gray-900 border-gray-700'}`}>
-                                            {/* --- NEW: Indigo top-bar glow for Today --- */}
                                             {isToday && <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-500"></div>}
                                             <p className={`text-[10px] font-black uppercase tracking-tighter ${isToday ? 'text-indigo-400' : 'text-gray-500'}`}>{date.dayName}</p>
                                             <p className={`text-xl font-black mt-1 ${isToday ? 'text-white' : 'text-gray-300'}`}>{dateUtils.formatCustom(date.dateObject, 'dd')}</p>
@@ -291,80 +307,95 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                                 {category}
                                             </td>
                                         </tr>
-                                        {groupedAndSortedStaff[category].map(staff => (
-                                            <tr key={staff.id} className="hover:bg-indigo-500/5 transition-colors group text-sm">
-                                                <td 
-                                                    onClick={() => handleStaffNameClick(staff)}
-                                                    className={`p-4 sticky left-0 z-20 bg-gray-800 group-hover:bg-[#1f2937] transition-colors shadow-[4px_0_10px_rgba(0,0,0,0.3)] ${style.border} cursor-pointer hover:brightness-110 active:scale-[0.98]`}
-                                                    title="Click to plan schedule for this week"
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${style.bg} ${style.text}`}>
-                                                            {(staff.nickname || staff.firstName).substring(0,2).toUpperCase()}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-black text-white leading-tight">{staff.nickname || staff.firstName}</p>
-                                                            <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">
-                                                                {getCurrentJob(staff).position || 'Staff'}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-
-                                                {weekDates.map(date => {
-                                                    const dayData = weekData[staff.id]?.[date.dateString] || {};
-                                                    const { schedule, attendance, leave } = dayData;
-                                                    const statusInfo = getShiftStatus(schedule, attendance, date.dateString);
-                                                    const isToday = date.dateString === todayStr;
-                                                    
-                                                    return (
-                                                        <td key={date.dateString} className={`p-2 text-center align-top min-w-[140px] transition-colors ${isToday ? 'bg-indigo-900/5 border-x border-indigo-500/10' : ''}`}>
-                                                            <div 
-                                                                onClick={() => setActionMenu({ staff, date: date.dateString, dayData })}
-                                                                className={`min-h-[105px] p-3 rounded-xl cursor-pointer transition-all flex flex-col justify-between group/cell relative border
-                                                                    ${leave ? 'bg-indigo-500/10 border-indigo-500/30' : schedule ? 'bg-gray-700/30 border-gray-600/50 hover:bg-gray-700/60' : 'bg-transparent border border-dashed border-gray-700/30'}
-                                                                    ${statusInfo.status === 'absent' && !leave ? 'ring-1 ring-red-500/50 bg-red-500/5 shadow-[inset_0_0_10px_rgba(239,68,68,0.1)]' : ''}
-                                                                    ${isToday && !leave && !schedule ? 'bg-indigo-900/10 border-indigo-500/20' : ''}
-                                                                `}
-                                                            >
-                                                                {leave ? (
-                                                                    <div className="flex flex-col items-center justify-center h-full space-y-1">
-                                                                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">On Leave</span>
-                                                                        <span className="text-[8px] font-bold text-gray-500 uppercase">{leave.leaveType}</span>
-                                                                    </div>
-                                                                ) : schedule ? (
-                                                                    <div className="space-y-2">
-                                                                        <div className="flex items-center justify-between text-white font-black text-[11px]">
-                                                                            <span>{schedule.startTime}</span>
-                                                                            {schedule.includesBreak ? <Coffee className="w-3 h-3 text-gray-500" /> : <Flame className="w-3 h-3 text-amber-500" />}
-                                                                            <span>{schedule.endTime}</span>
-                                                                        </div>
-                                                                        {statusInfo.status === 'absent' && <div className="text-[9px] font-black text-red-500 uppercase tracking-tighter animate-pulse text-center">No Show</div>}
-                                                                        {statusInfo.status === 'late' && <div className="text-[9px] font-black text-amber-500 uppercase tracking-tighter text-center bg-amber-500/10 rounded py-0.5">Late +{statusInfo.minutes}m</div>}
-                                                                    </div>
-                                                                ) : <div className="mt-6 opacity-0 group-hover/cell:opacity-100 transition-opacity"><Plus className="w-4 h-4 text-gray-600" /></div>}
-                                                                
-                                                                {attendance && (
-                                                                    <div className="mt-auto pt-2 border-t border-gray-700/50">
-                                                                        <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono font-black">
-                                                                            <span className="text-green-400">{dateUtils.formatCustom(attendance.checkInTime?.toDate?.() || attendance.checkInTime, 'HH:mm')}</span>
-                                                                            <span className="text-gray-600">→</span>
-                                                                            {attendance.checkOutTime ? (
-                                                                                <span className="text-green-400">{dateUtils.formatCustom(attendance.checkOutTime?.toDate?.() || attendance.checkOutTime, 'HH:mm')}</span>
-                                                                            ) : (attendance.breakStart && !attendance.breakEnd) ? (
-                                                                                <span className="text-orange-500 animate-pulse uppercase tracking-tighter">On Break</span>
-                                                                            ) : (
-                                                                                <span className="text-amber-400 animate-pulse uppercase">On</span>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                )}
+                                        {groupedAndSortedStaff[category].map(staff => {
+                                            const branchName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unknown';
+                                            
+                                            return (
+                                                <tr key={staff.id} className="hover:bg-indigo-500/5 transition-colors group text-sm">
+                                                    <td 
+                                                        onClick={() => handleStaffNameClick(staff)}
+                                                        className={`p-4 sticky left-0 z-20 bg-gray-800 group-hover:bg-[#1f2937] transition-colors shadow-[4px_0_10px_rgba(0,0,0,0.3)] ${style.border} cursor-pointer hover:brightness-110 active:scale-[0.98]`}
+                                                        title="Click to plan schedule for this week"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${style.bg} ${style.text}`}>
+                                                                {(staff.nickname || staff.firstName).substring(0,2).toUpperCase()}
                                                             </div>
-                                                        </td>
-                                                    );
-                                                })}
-                                            </tr>
-                                        ))}
+                                                            <div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <p className="font-black text-white leading-tight">{staff.nickname || staff.firstName}</p>
+                                                                    
+                                                                    {activeBranch === 'global' && staff.branchId && (
+                                                                        <span 
+                                                                            className="text-[8px] uppercase tracking-wider font-bold bg-gray-700/50 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 truncate max-w-[80px]" 
+                                                                            title={branchName}
+                                                                        >
+                                                                            {branchName.replace('Da Moreno ', '')}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-[10px] text-gray-500 uppercase font-bold tracking-tight mt-0.5">
+                                                                    {getCurrentJob(staff).position || 'Staff'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+
+                                                    {weekDates.map(date => {
+                                                        const dayData = weekData[staff.id]?.[date.dateString] || {};
+                                                        const { schedule, attendance, leave } = dayData;
+                                                        const statusInfo = getShiftStatus(schedule, attendance, date.dateString);
+                                                        const isToday = date.dateString === todayStr;
+                                                        
+                                                        return (
+                                                            <td key={date.dateString} className={`p-2 text-center align-top min-w-[140px] transition-colors ${isToday ? 'bg-indigo-900/5 border-x border-indigo-500/10' : ''}`}>
+                                                                <div 
+                                                                    onClick={() => setActionMenu({ staff, date: date.dateString, dayData })}
+                                                                    className={`min-h-[105px] p-3 rounded-xl cursor-pointer transition-all flex flex-col justify-between group/cell relative border
+                                                                        ${leave ? 'bg-indigo-500/10 border-indigo-500/30' : schedule ? 'bg-gray-700/30 border-gray-600/50 hover:bg-gray-700/60' : 'bg-transparent border border-dashed border-gray-700/30'}
+                                                                        ${statusInfo.status === 'absent' && !leave ? 'ring-1 ring-red-500/50 bg-red-500/5 shadow-[inset_0_0_10px_rgba(239,68,68,0.1)]' : ''}
+                                                                        ${isToday && !leave && !schedule ? 'bg-indigo-900/10 border-indigo-500/20' : ''}
+                                                                    `}
+                                                                >
+                                                                    {leave ? (
+                                                                        <div className="flex flex-col items-center justify-center h-full space-y-1">
+                                                                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">On Leave</span>
+                                                                            <span className="text-[8px] font-bold text-gray-500 uppercase">{leave.leaveType}</span>
+                                                                        </div>
+                                                                    ) : schedule ? (
+                                                                        <div className="space-y-2">
+                                                                            <div className="flex items-center justify-between text-white font-black text-[11px]">
+                                                                                <span>{schedule.startTime}</span>
+                                                                                {schedule.includesBreak ? <Coffee className="w-3 h-3 text-gray-500" /> : <Flame className="w-3 h-3 text-amber-500" />}
+                                                                                <span>{schedule.endTime}</span>
+                                                                            </div>
+                                                                            {statusInfo.status === 'absent' && <div className="text-[9px] font-black text-red-500 uppercase tracking-tighter animate-pulse text-center">No Show</div>}
+                                                                            {statusInfo.status === 'late' && <div className="text-[9px] font-black text-amber-500 uppercase tracking-tighter text-center bg-amber-500/10 rounded py-0.5">Late +{statusInfo.minutes}m</div>}
+                                                                        </div>
+                                                                    ) : <div className="mt-6 opacity-0 group-hover/cell:opacity-100 transition-opacity"><Plus className="w-4 h-4 text-gray-600" /></div>}
+                                                                    
+                                                                    {attendance && (
+                                                                        <div className="mt-auto pt-2 border-t border-gray-700/50">
+                                                                            <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono font-black">
+                                                                                <span className="text-green-400">{dateUtils.formatCustom(attendance.checkInTime?.toDate?.() || attendance.checkInTime, 'HH:mm')}</span>
+                                                                                <span className="text-gray-600">→</span>
+                                                                                {attendance.checkOutTime ? (
+                                                                                    <span className="text-green-400">{dateUtils.formatCustom(attendance.checkOutTime?.toDate?.() || attendance.checkOutTime, 'HH:mm')}</span>
+                                                                                ) : (attendance.breakStart && !attendance.breakEnd) ? (
+                                                                                    <span className="text-orange-500 animate-pulse uppercase tracking-tighter">On Break</span>
+                                                                                ) : (
+                                                                                    <span className="text-amber-400 animate-pulse uppercase">On</span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            );
+                                        })}
                                     </React.Fragment>
                                 );
                             })}
@@ -397,12 +428,12 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                 </div>
             )}
 
-            {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} />}
+            {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} activeBranch={activeBranch} />}
             {selectedAttendance && <Modal isOpen={true} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} title="Attendance Correction"><EditAttendanceModal db={db} record={selectedAttendance} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} /></Modal>}
             
             {showBulkCreator && (
                 <Modal isOpen={true} onClose={() => { setShowBulkCreator(false); setBulkCreatorProps({}); }} title="Bulk Generator">
-                    <ShiftCreator db={db} staffList={staffList} onSuccess={() => { setShowBulkCreator(false); setBulkCreatorProps({}); refetchWeekData(); }} {...bulkCreatorProps} />
+                    <ShiftCreator db={db} staffList={staffList} onSuccess={() => { setShowBulkCreator(false); setBulkCreatorProps({}); refetchWeekData(); }} {...bulkCreatorProps} activeBranch={activeBranch} branches={companyConfig?.branches || []} />
                 </Modal>
             )}
         </div>

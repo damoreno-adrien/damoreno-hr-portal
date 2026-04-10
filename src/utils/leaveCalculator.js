@@ -2,15 +2,33 @@
 import * as dateUtils from './dateUtils';
 import { parseHireDate } from './staffUtils';
 
-export const calculateStaffLeaveBalances = (staff, existingRequests = [], companyConfig, targetDate = new Date()) => {
-    if (!staff || !companyConfig) return null;
+export const calculateStaffLeaveBalances = (staff, existingRequests = [], rawCompanyConfig, targetDate = new Date()) => {
+    if (!staff || !rawCompanyConfig) return null;
+
+    // --- THE MASTER FIX: Always use the staff's native branch rules! ---
+    // This ensures math works perfectly even if a Manager is in "Global View"
+    const branchId = staff.branchId;
+    const branchOverrides = (branchId && rawCompanyConfig.branchSettings && rawCompanyConfig.branchSettings[branchId]) 
+        ? rawCompanyConfig.branchSettings[branchId] 
+        : {};
+        
+    const companyConfig = {
+        ...rawCompanyConfig,
+        ...branchOverrides,
+        publicHolidays: branchOverrides.publicHolidays || rawCompanyConfig.publicHolidays || []
+    };
 
     const currentYear = targetDate.getFullYear();
     const today = new Date(targetDate);
     today.setHours(23, 59, 59, 999);
     
-    const hireDate = parseHireDate(staff.startDate);
-    const monthsOfService = (today.getFullYear() - hireDate.getFullYear()) * 12 + (today.getMonth() - hireDate.getMonth());
+    // --- FIX: Prevent NaN if startDate is missing or invalid ---
+    let hireDate = parseHireDate(staff.startDate);
+    if (!hireDate || isNaN(hireDate.getTime())) {
+        hireDate = new Date(); // Fallback to today to avoid breaking math
+    }
+    
+    const monthsOfService = Math.max(0, (today.getFullYear() - hireDate.getFullYear()) * 12 + (today.getMonth() - hireDate.getMonth()));
     
     let availableAnnualQuota = 0;
     let accruedAnnual = 0;
@@ -19,9 +37,13 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
         availableAnnualQuota = Number(companyConfig.annualLeaveDays) || 0; 
         accruedAnnual = availableAnnualQuota;
     } else if (monthsOfService > 0) {
-        accruedAnnual = Math.floor((Number(companyConfig.annualLeaveDays) / 12) * monthsOfService);
+        accruedAnnual = Math.floor((Number(companyConfig.annualLeaveDays || 0) / 12) * monthsOfService);
         availableAnnualQuota = 0; 
     }
+
+    // Safety checks to absolutely prevent NaN creeping into the UI
+    accruedAnnual = isNaN(accruedAnnual) ? 0 : accruedAnnual;
+    availableAnnualQuota = isNaN(availableAnnualQuota) ? 0 : availableAnnualQuota;
 
     const sickQuota = Number(companyConfig.paidSickDays) || 30;
     const personalQuota = Number(companyConfig.paidPersonalDays) || 0;
@@ -41,17 +63,14 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
         holidaysByYear[hYear].push(h);
     });
 
-    // 3. Apply the 13-Day Max Cap per year (Your Logic)
+    // 3. Apply the 13-Day Max Cap per year
     let cappedPastHolidays = [];
     Object.keys(holidaysByYear).sort().forEach(year => {
-        // Sort the holidays chronologically within that year
         const yearHolidays = holidaysByYear[year].sort((a, b) => dateUtils.parseISODateString(a.date) - dateUtils.parseISODateString(b.date));
-        
-        // Take a maximum of 13 holidays from this year
         cappedPastHolidays.push(...yearHolidays.slice(0, 13));
     });
 
-    // --- FIX: Split the trackers for Days Off vs Cash Outs ---
+    // Split the trackers for Days Off vs Cash Outs
     let used = { annual: 0, sick: 0, personal: 0, phDaysOff: 0, phCashOuts: 0 };
     
     existingRequests.forEach(req => {
@@ -78,7 +97,7 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
     const maxCap = companyConfig.maxHolidayBalance ?? companyConfig.publicHolidayCreditCap ?? 15;
     const bankedHolidays = remainingAfterDaysOff.slice(-maxCap);
 
-// 3. Find how many banked holidays are within the cash-out window
+    // 3. Find how many banked holidays are within the cash-out window
     const cashOutWindowDays = companyConfig.cashOutWindowDays ?? 60;
     const cutoffDate = new Date(today);
     cutoffDate.setDate(cutoffDate.getDate() - cashOutWindowDays);
@@ -89,7 +108,7 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
         return hDate >= cutoffDate;
     });
 
-    // --- NEW: Create a year-by-year breakdown of the REMAINING credits ---
+    // --- Create a year-by-year breakdown of the REMAINING credits ---
     const phBreakdown = {};
     const availableHolidays = bankedHolidays.slice(used.phCashOuts || 0); // Only look at what's left!
 
@@ -101,7 +120,7 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
         }
     });
 
-    // --- FIX 4: Deduct Cash Outs directly from the Cashable pool ---
+    // 4. Deduct Cash Outs directly from the Cashable pool
     const finalCashable = Math.max(0, cashableHolidays.length - used.phCashOuts);
     const finalPhRemaining = Math.max(0, bankedHolidays.length - used.phCashOuts);
     const totalPhUsed = used.phDaysOff + used.phCashOuts;
@@ -111,7 +130,6 @@ export const calculateStaffLeaveBalances = (staff, existingRequests = [], compan
         annual: { total: availableAnnualQuota, used: used.annual, remaining: Math.max(0, availableAnnualQuota - used.annual), accrued: accruedAnnual, isLocked: monthsOfService < 12 },
         sick: { total: sickQuota, used: used.sick, remaining: Math.max(0, sickQuota - used.sick) },
         personal: { total: personalQuota, used: used.personal, remaining: Math.max(0, personalQuota - used.personal) },
-        // --- ADDED the breakdown object below ---
         ph: { total: maxCap, used: totalPhUsed, remaining: finalPhRemaining, cashable: finalCashable, breakdown: phBreakdown } 
     };
 };

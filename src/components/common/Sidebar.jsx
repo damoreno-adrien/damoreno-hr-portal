@@ -1,10 +1,12 @@
 /* src/components/common/Sidebar.jsx */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../../firebase';
 import { 
     User, Users, Briefcase, Calendar, Send, Settings, LogOut, 
     BarChart, DollarSign, X, ChevronLeft, ChevronRight, 
-    ChevronDown, ChevronUp, RefreshCw 
+    ChevronDown, ChevronUp, RefreshCw, Globe
 } from 'lucide-react';
 
 const NavLink = ({ icon, label, page, badgeCount, isSidebarCollapsed, setCurrentPage, setIsMobileMenuOpen, currentPage }) => (
@@ -23,8 +25,26 @@ export default function Sidebar({
     user, userRole, activeRole, setActiveRole, hasStaffProfile, handleLogout, currentPage, setCurrentPage,
     isMobileMenuOpen, setIsMobileMenuOpen, isSidebarCollapsed, setIsSidebarCollapsed,
     pendingLeaveCount, pendingAdvanceCount, unreadLeaveUpdatesCount, unreadAdvanceUpdatesCount,
-    isFinancialsMenuOpen, setIsFinancialsMenuOpen
+    isFinancialsMenuOpen, setIsFinancialsMenuOpen,
+    activeBranch, setActiveBranch, companyConfig 
 }) {
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
+
+    useEffect(() => {
+        if (userRole === 'admin' && user?.uid) {
+            getDoc(doc(db, 'users', user.uid)).then(docSnap => {
+                if (docSnap.exists()) {
+                    const assignedBranches = docSnap.data().branchIds || [];
+                    setAdminBranchIds(assignedBranches);
+                    
+                    if (activeBranch === 'global' && assignedBranches.length === 1) {
+                        setActiveBranch(assignedBranches[0]);
+                    }
+                }
+            }).catch(err => console.error("Error fetching admin branches:", err));
+        }
+    }, [userRole, user?.uid, activeBranch, setActiveBranch]);
+
     const handleToggleRole = () => {
         setActiveRole(activeRole === 'manager' ? 'staff' : 'manager');
         setCurrentPage('dashboard');
@@ -44,7 +64,6 @@ export default function Sidebar({
     };
     const branding = getRoleBranding();
 
-    // --- NEW: Dynamic text for the switch button ---
     const getSwitchText = () => {
         if (userRole === 'super_admin') return 'Super Admin';
         if (userRole === 'admin') return 'Director';
@@ -52,9 +71,20 @@ export default function Sidebar({
         return 'Manager';
     };
 
+    const isSuperAdmin = userRole === 'super_admin';
+    const isAdmin = userRole === 'admin';
+    
+    const visibleBranches = companyConfig?.branches?.filter(b => {
+        if (isSuperAdmin) return true;
+        if (isAdmin) return adminBranchIds.includes(b.id);
+        return false;
+    }) || [];
+
+    const showDropdown = (isSuperAdmin || (isAdmin && visibleBranches.length > 0)) && activeRole === 'manager';
+
     return (
         <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
-            <div className="flex justify-between items-center text-center py-4 mb-5 border-b border-gray-700 px-4">
+            <div className="flex justify-between items-center text-center py-4 mb-3 border-b border-gray-700 px-4">
                 <div className={`overflow-hidden ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
                     <h1 className="text-2xl font-bold text-white whitespace-nowrap">Da Moreno HR</h1>
                     <p className={`text-sm font-bold uppercase tracking-wider ${branding.color}`}>{branding.title}</p>
@@ -62,7 +92,32 @@ export default function Sidebar({
                 <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-1 text-gray-400 hover:text-white"><X className="h-6 w-6" /></button>
             </div>
             
-            <nav className="flex-1 space-y-2 px-4 overflow-y-auto">
+            {showDropdown && (
+                <div className={`px-4 mb-4 ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
+                    <div className="relative">
+                        <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
+                        <select
+                            value={activeBranch}
+                            onChange={(e) => setActiveBranch(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-700 text-white text-sm font-bold rounded-lg pl-9 pr-3 py-2 outline-none focus:border-indigo-500 appearance-none cursor-pointer shadow-inner"
+                        >
+                            {/* --- THE FIX: Intelligent Global Dropdowns --- */}
+                            {isSuperAdmin && <option value="global">🌍 Global View</option>}
+                            
+                            {isAdmin && adminBranchIds.length > 1 && (
+                                <option value="global">🌍 All My Branches</option>
+                            )}
+                            
+                            {visibleBranches.map(branch => (
+                                <option key={branch.id} value={branch.id}>📍 {branch.name}</option>
+                            ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    </div>
+                </div>
+            )}
+            
+            <nav className="flex-1 space-y-2 px-4 overflow-y-auto mt-2">
                 {activeRole === 'manager' && (
                     <>
                         <NavLink page="dashboard" label="Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
@@ -108,7 +163,6 @@ export default function Sidebar({
                     <button onClick={handleToggleRole} className={`flex items-center justify-center w-full px-4 py-3 mb-3 rounded-lg ${branding.bg} ${branding.hover} text-white transition-colors`}>
                         <RefreshCw className="h-5 w-5" />
                         <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
-                            {/* --- UPGRADED: Dynamic Switch Text --- */}
                             {activeRole === 'manager' ? 'Switch to Staff' : `Switch to ${getSwitchText()}`}
                         </span>
                     </button>

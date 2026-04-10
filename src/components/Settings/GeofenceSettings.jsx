@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check } from 'lucide-react';
 
-export const GeofenceSettings = ({ db, config }) => {
+export const GeofenceSettings = ({ db, config, selectedBranchId }) => {
     const [localGeofence, setLocalGeofence] = useState({});
     const [originalGeofence, setOriginalGeofence] = useState({});
     const [isSaving, setIsSaving] = useState(false);
@@ -33,15 +33,19 @@ export const GeofenceSettings = ({ db, config }) => {
         setIsSaved(false);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
-            // Save using dot notation
+            // --- THE STAMP: Save to branchSettings.[branchId].geofence ---
+            const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.geofence` : 'geofence';
+            
             const dataToSave = {
-                'geofence.latitude': Number(localGeofence.latitude),
-                'geofence.longitude': Number(localGeofence.longitude),
-                'geofence.radius': Number(localGeofence.radius),
+                [prefix]: {
+                    latitude: Number(localGeofence.latitude),
+                    longitude: Number(localGeofence.longitude),
+                    radius: Number(localGeofence.radius)
+                }
             };
             await updateDoc(configDocRef, dataToSave);
             
-            setOriginalGeofence(localGeofence); // Update original state
+            setOriginalGeofence(localGeofence); 
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
         } catch (error) {
@@ -52,10 +56,10 @@ export const GeofenceSettings = ({ db, config }) => {
     };
 
     return (
-        <div id="geofence-config" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8">
+        <div id="geofence-config" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 border border-gray-700">
             <h3 className="text-xl font-semibold text-white">Geofence Configuration</h3>
-            <p className="text-gray-400 mt-2">Set the location and radius for clock-in/out verification.</p>
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <p className="text-gray-400 mt-2">Set the location and radius for clock-in/out verification for this location.</p>
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-900/50 p-4 rounded-lg">
                 <div>
                     <label htmlFor="latitude" className="block text-sm font-medium text-gray-300 mb-1">Latitude</label>
                     <input type="number" step="any" id="latitude" value={localGeofence.latitude || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
@@ -70,12 +74,11 @@ export const GeofenceSettings = ({ db, config }) => {
                 </div>
             </div>
 
-            {/* --- NEW SAVE BUTTON --- */}
             <div className="flex justify-end mt-6 pt-4 border-t border-gray-700">
                 <button
                     onClick={handleSave}
                     disabled={isSaving || !hasChanges}
-                    className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                     {isSaving ? 'Saving...' : (isSaved ? <><Check className="h-5 w-5 mr-2" /> Saved</> : 'Save Changes')}
                 </button>

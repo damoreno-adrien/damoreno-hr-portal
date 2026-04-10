@@ -14,8 +14,8 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
     const handleSave = async () => {
         setLoading(true);
         try {
-            // Document ID must be staffId_date to match our planning grid logic
             const shiftRef = doc(db, "schedules", `${staff.id}_${date}`);
+            
             await setDoc(shiftRef, {
                 staffId: staff.id,
                 staffName: staff.nickname || staff.firstName,
@@ -23,8 +23,11 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
                 startTime,
                 endTime,
                 includesBreak,
+                // --- THE FIX: Absolute Source of Truth ---
+                branchId: staff.branchId || null, 
                 updatedAt: new Date()
             }, { merge: true });
+            
             onClose();
         } catch (error) {
             console.error("Error saving shift:", error);
@@ -39,7 +42,6 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
         
         setLoading(true);
         try {
-            // Target the exact document ID used in the grid
             const shiftRef = doc(db, "schedules", `${staff.id}_${date}`);
             await deleteDoc(shiftRef);
             onClose();
@@ -95,7 +97,6 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
                     </button>
 
                     <div className="flex gap-3 pt-2">
-                        {/* Only show delete if a shift actually exists in the DB */}
                         {shift && (
                             <button 
                                 onClick={handleDelete} 

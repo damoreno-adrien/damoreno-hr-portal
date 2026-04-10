@@ -7,7 +7,7 @@ import { getDisplayName } from '../../utils/staffUtils';
 import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator';
 import { AlertTriangle, Banknote } from 'lucide-react'; 
 
-export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, initialData = null, userRole, staffList = [], companyConfig, leaveBalances, isModalOpen }) {
+export default function LeaveRequestForm({ db, user, onClose, existingRequests = [], existingRequest = null, initialData = null, userRole, staffList = [], companyConfig, isModalOpen }) {
     const [leaveType, setLeaveType] = useState('Annual Leave');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -111,8 +111,15 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
         const actualEndDate = leaveType === 'Cash Out Holiday Credits' ? dateUtils.formatISODate(new Date()) : endDate;
 
         const requestData = {
-            staffId: checkStaffId, staffName: getDisplayName(staffForRequest), staffDepartment: staffForRequest.department || null,
-            leaveType, startDate: actualStartDate, endDate: actualEndDate, totalDays, reason,
+            staffId: checkStaffId, 
+            staffName: getDisplayName(staffForRequest), 
+            staffDepartment: staffForRequest.department || null,
+            branchId: staffForRequest.branchId || null, 
+            leaveType, 
+            startDate: actualStartDate, 
+            endDate: actualEndDate, 
+            totalDays, 
+            reason,
             status: existingRequest ? existingRequest.status : 'pending',
         };
 
@@ -124,7 +131,6 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 const creator = staffList.find(s => s.id === user.uid);
                 if (creator) creatorName = getDisplayName(creator);
                 
-                // --- UPGRADED: Attach Audit Trail if Auto-Approved ---
                 const isAutoApproved = isManagerCreating && isFullManager;
                 
                 const payload = {
@@ -179,7 +185,7 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                 </select>
 
                 {targetStaffBalances && (
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                         <div className={`p-2 rounded border ${leaveType === 'Annual Leave' ? 'bg-amber-900/30 border-amber-600' : 'bg-gray-700 border-gray-600'}`}>
                             <span className="text-gray-400">Annual:</span> <span className="font-bold text-white ml-1">{targetStaffBalances.annual.remaining} / {targetStaffBalances.annual.total}</span>
                         </div>
@@ -189,9 +195,23 @@ export default function LeaveRequestForm({ db, user, onClose, existingRequests =
                         <div className={`p-2 rounded border ${leaveType === 'Sick Leave' ? 'bg-red-900/30 border-red-600' : 'bg-gray-700 border-gray-600'}`}>
                             <span className="text-gray-400">Sick:</span> <span className="font-bold text-white ml-1">{targetStaffBalances.sick.remaining} / {targetStaffBalances.sick.total}</span>
                         </div>
+                        
+                        {/* --- NEW: Enriched PH Credit Display inside the form --- */}
                         {targetStaffBalances.policy === 'in_lieu' && (
-                            <div className={`p-2 rounded border ${(leaveType === 'Public Holiday (In Lieu)' || leaveType === 'Cash Out Holiday Credits') ? 'bg-blue-900/30 border-blue-600' : 'bg-gray-700 border-gray-600'}`}>
-                                <span className="text-gray-400">PH Credit:</span> <span className="font-bold text-white ml-1">{targetStaffBalances.ph.remaining}</span>
+                            <div className={`col-span-2 p-2.5 rounded border flex flex-col gap-2 ${(leaveType === 'Public Holiday (In Lieu)' || leaveType === 'Cash Out Holiday Credits') ? 'bg-blue-900/30 border-blue-600' : 'bg-gray-700 border-gray-600'}`}>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-400 font-bold uppercase tracking-wider">PH Credits:</span> 
+                                    <span className="font-bold text-white text-sm">{targetStaffBalances.ph.remaining} Total</span>
+                                </div>
+                                {targetStaffBalances.ph.breakdown && Object.keys(targetStaffBalances.ph.breakdown).length > 0 && (
+                                    <div className="flex gap-2 flex-wrap">
+                                        {Object.entries(targetStaffBalances.ph.breakdown).sort().map(([year, days]) => (
+                                            <span key={year} className="bg-blue-800/40 text-blue-300 px-2 py-0.5 rounded border border-blue-700/50">
+                                                {year}: {days} {days === 1 ? 'Day' : 'Days'}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

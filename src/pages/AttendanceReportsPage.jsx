@@ -1,7 +1,8 @@
 /* src/pages/AttendanceReportsPage.jsx */
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth'; 
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
@@ -11,7 +12,7 @@ import { calculateAttendanceStatus } from '../utils/statusUtils';
 import { app } from "../../firebase.js";
 import { ArrowUp, ArrowDown, Download, Upload, Trash2, Check, ChevronDown } from 'lucide-react';
 
-const functions = getFunctions(app, "us-central1"); 
+const functions = getFunctions(app, "asia-southeast1"); 
 const exportAttendanceData = httpsCallable(functions, 'exportAttendanceData');
 const importAttendanceData = httpsCallable(functions, 'importAttendanceData');
 const cleanupBadAttendanceIds = httpsCallable(functions, 'cleanupBadAttendanceIds');
@@ -24,7 +25,7 @@ const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
-export default function AttendanceReportsPage({ db, staffList }) {
+export default function AttendanceReportsPage({ db, staffList, activeBranch, userRole }) {
     const [reportData, setReportData] = useState([]);
     const [unsortedReportData, setUnsortedReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +52,18 @@ export default function AttendanceReportsPage({ db, staffList }) {
     const [cleanupLoading, setCleanupLoading] = useState(false);
     const [cleanupResult, setCleanupResult] = useState(null);
 
+    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
+
+    useEffect(() => {
+        const uid = getAuth().currentUser?.uid;
+        if (userRole === 'admin' && uid && db) {
+            getDoc(doc(db, 'users', uid)).then(snap => {
+                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
+            }).catch(err => console.error(err));
+        }
+    }, [db, userRole]);
+
     // 1. Fetch Config on Mount
     useEffect(() => {
         if (!db) return;
@@ -72,7 +85,7 @@ export default function AttendanceReportsPage({ db, staffList }) {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // --- NEW: Time-Aware Staff Filter for Reports ---
+    // --- Time-Aware & Branch-Secure Staff Filter for Reports ---
     const relevantStaffList = useMemo(() => {
         if (!staffList || !startDate || !endDate) return [];
         
@@ -102,9 +115,16 @@ export default function AttendanceReportsPage({ db, staffList }) {
             // They left before the report window started
             if (sEnd && sEnd < reportStart) return false;
 
+            // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+            if (activeBranch === 'global') {
+                if (userRole === 'admin' && !adminBranchIds.includes(staff.branchId)) return false;
+            } else if (activeBranch && staff.branchId !== activeBranch) {
+                return false;
+            }
+
             return true;
         });
-    }, [staffList, startDate, endDate]);
+    }, [staffList, startDate, endDate, activeBranch, userRole, adminBranchIds]);
 
     const handleToggleStaff = (staffId) => {
         setSelectedStaffIds(prev => {
@@ -161,7 +181,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 }
             });
 
-            // Use the dynamically filtered staff list
             const staffToReport = selectedStaffIds.length === 0
                 ? relevantStaffList 
                 : relevantStaffList.filter(s => selectedStaffIds.includes(s.id));
@@ -170,7 +189,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
             const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
 
             for (const staff of staffToReport) {
-                // Calculate their exact employment dates
                 let sStart = new Date(0);
                 if (staff.startDate) sStart = staff.startDate.toDate ? staff.startDate.toDate() : new Date(staff.startDate);
                 let sEnd = null;
@@ -180,7 +198,6 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 if (sEnd) sEnd.setHours(23,59,59,999);
 
                 for (const day of dateInterval) {
-                    // --- NEW: Stop generating rows for days outside their employment ---
                     if (day < sStart || (sEnd && day > sEnd)) continue;
 
                     const dateStr = dateUtils.formatISODate(day);
@@ -359,7 +376,11 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
     return (
         <div>
-            {editingRecord && ( <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}> <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} /> </Modal> )}
+            {editingRecord && ( 
+                <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}> 
+                    <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} /> 
+                </Modal> 
+            )}
             
             <ImportConfirmationModal 
                 isOpen={isConfirmModalOpen} 
@@ -375,8 +396,14 @@ export default function AttendanceReportsPage({ db, staffList }) {
 
             <div className="bg-gray-800 rounded-lg shadow-lg p-4 md:p-6 mb-8">
                  <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
-                     <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" /></div>
-                     <div className="flex-grow"><label className="block text-sm font-medium text-gray-300 mb-1">End Date</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" /></div>
+                     <div className="flex-grow">
+                         <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
+                         <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" />
+                     </div>
+                     <div className="flex-grow">
+                         <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
+                         <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" />
+                     </div>
                      
                      <div className="flex-grow relative" ref={dropdownRef}>
                         <label className="block text-sm font-medium text-gray-300 mb-1">Staff Selection</label>
@@ -419,8 +446,26 @@ export default function AttendanceReportsPage({ db, staffList }) {
                 </div>
             </div>
 
-             {cleanupResult && ( <div className={`p-4 rounded-lg mb-6 shadow ${cleanupResult.error ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> <p className={`font-semibold ${cleanupResult.error ? 'text-red-300' : 'text-green-300'}`}>{cleanupResult.error ? 'Cleanup Failed' : 'Cleanup Success'}</p> <p className="text-sm text-gray-300">{cleanupResult.message}</p> </div> )}
-             {importResult && ( <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}> Import Result: {importResult.message} </p> {importResult.errors?.length > 0 && ( <div className="mt-3"> <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered during import:</p> <ul className="list-disc list-inside text-sm text-red-400 space-y-1 max-h-40 overflow-y-auto"> {importResult.errors.map((err, index) => ( <li key={index}>{err}</li> ))} </ul> </div> )} </div> )}
+             {cleanupResult && ( 
+                 <div className={`p-4 rounded-lg mb-6 shadow ${cleanupResult.error ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> 
+                    <p className={`font-semibold ${cleanupResult.error ? 'text-red-300' : 'text-green-300'}`}>{cleanupResult.error ? 'Cleanup Failed' : 'Cleanup Success'}</p> 
+                    <p className="text-sm text-gray-300">{cleanupResult.message}</p> 
+                 </div> 
+             )}
+             
+             {importResult && ( 
+                 <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}> 
+                    <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}> Import Result: {importResult.message} </p> 
+                    {importResult.errors?.length > 0 && ( 
+                        <div className="mt-3"> 
+                            <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered during import:</p> 
+                            <ul className="list-disc list-inside text-sm text-red-400 space-y-1 max-h-40 overflow-y-auto"> 
+                                {importResult.errors.map((err, index) => ( <li key={index}>{err}</li> ))} 
+                            </ul> 
+                        </div> 
+                    )} 
+                 </div> 
+             )}
 
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
                 <table className="min-w-full">
@@ -435,7 +480,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
-                        {isLoading ? ( <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr> ) : reportData.length > 0 ? (
+                        {isLoading ? ( 
+                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr> 
+                        ) : reportData.length > 0 ? (
                             reportData.map((row) => (
                                 <tr key={row.id || `${row.staffId}_${row.date}`} onClick={() => handleRowClick(row)} className="hover:bg-gray-700 cursor-pointer transition duration-150 ease-in-out">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{row.staffName}</td>
@@ -455,7 +502,9 @@ export default function AttendanceReportsPage({ db, staffList }) {
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours < 0 ? 'N/A' : row.workHours.toFixed(2)}</td>
                                 </tr>
                             ))
-                        ) : ( <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">No attendance data found for the selected criteria.</td></tr> )}
+                        ) : ( 
+                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">No attendance data found for the selected criteria.</td></tr> 
+                        )}
                     </tbody>
                 </table>
             </div>

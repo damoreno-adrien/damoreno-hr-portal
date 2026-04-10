@@ -12,31 +12,31 @@ export default function StaffSummaryModal({ staff, allRequests, companyConfig })
                 <h4 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-3">{title}</h4>
                 <div className="flex justify-between items-end">
                     <div>
-                        <p className="text-3xl font-black text-white">{data.remaining}</p>
+                        <p className="text-3xl font-black text-white">{data.remaining ?? 0}</p>
                         <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mt-1">Remaining</p>
                     </div>
                     <div className="text-right">
                         {data.isLocked ? (
                             <div className="flex flex-col items-end">
                                 <span className="text-amber-500 text-[11px] font-bold bg-amber-500/10 px-2 py-1 rounded">🔒 Locked (&lt; 1 Yr)</span>
-                                <span className="text-gray-400 text-[10px] mt-1 font-medium">{data.accrued} Days Accrued</span>
+                                <span className="text-gray-400 text-[10px] mt-1 font-medium">{data.accrued ?? 0} Days Accrued</span>
                             </div>
                         ) : isPH ? (
                             <div className="flex flex-col items-end">
-                                <span className="text-green-400 font-bold text-sm">{data.cashable} Cashable</span>
-                                <p className="text-xs text-gray-500 mt-0.5">{data.used} Used Lifetime</p>
+                                <span className="text-green-400 font-bold text-sm">{data.cashable ?? 0} Cashable</span>
+                                <p className="text-xs text-gray-500 mt-0.5">{data.used ?? 0} Used Lifetime</p>
                             </div>
                         ) : (
                             <>
-                                <p className="text-sm font-bold text-gray-300">{data.used} Used</p>
-                                <p className="text-xs text-gray-500 mt-0.5">/ {data.total} Total</p>
+                                <p className="text-sm font-bold text-gray-300">{data.used ?? 0} Used</p>
+                                <p className="text-xs text-gray-500 mt-0.5">/ {data.total ?? 0} Total</p>
                             </>
                         )}
                     </div>
                 </div>
             </div>
 
-            {/* --- NEW: The Year-by-Year Breakdown UI --- */}
+            {/* --- The Year-by-Year Breakdown UI --- */}
             {isPH && data.breakdown && Object.keys(data.breakdown).length > 0 && (
                 <div className="mt-4 pt-3 border-t border-gray-700 space-y-1.5">
                     {Object.keys(data.breakdown).sort().map((year) => (

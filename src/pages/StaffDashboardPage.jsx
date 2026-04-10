@@ -167,14 +167,18 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     const handleCheckIn = async () => {
         const localDateString = formatISODate(new Date());
+        
+        // --- NEW: Find the user's home branch from the staff list ---
+        const currentStaffProfile = staffList?.find(s => s.id === user.uid);
+        
         await setDoc(getDocRef(), {
             staffId: user.uid,
             staffName: user.displayName || user.email,
             date: localDateString,
             checkInTime: serverTimestamp(),
             checkOutTime: null,
-            // Automatically set includesBreak from schedule preference
-            includesBreak: todaysSchedule?.includesBreak !== false
+            includesBreak: todaysSchedule?.includesBreak !== false,
+            branchId: currentStaffProfile?.branchId || null
         });
     };
 

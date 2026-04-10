@@ -1,7 +1,25 @@
 import React from 'react';
 
-export const ProfileDetailsEdit = ({ formData, handleInputChange }) => (
+export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [], userRole }) => (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
+        
+        {/* --- NEW: Branch Selector for Super Admins Editing Profiles --- */}
+        {['admin', 'super_admin'].includes(userRole) && (
+            <div className="md:col-span-2 bg-indigo-900/20 p-4 rounded-lg border border-indigo-700/50 mb-2">
+                <label className="text-sm font-bold text-indigo-400">Branch Location</label>
+                <select 
+                    id="branchId" 
+                    value={formData.branchId || ''} 
+                    onChange={handleInputChange} 
+                    className="w-full mt-1 px-3 py-2 bg-gray-900 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"
+                >
+                    <option value="">Unassigned</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Changing this will move the staff member to a new dashboard view.</p>
+            </div>
+        )}
+
         <div><label className="text-sm text-gray-400">First Name</label><input id="firstName" value={formData.firstName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
         <div><label className="text-sm text-gray-400">Last Name</label><input id="lastName" value={formData.lastName} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
         <div><label className="text-sm text-gray-400">Nickname</label><input id="nickname" value={formData.nickname} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
@@ -11,7 +29,7 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange }) => (
         <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
         <div className="md:col-span-2"><label className="text-sm text-gray-400">Bank Account</label><input id="bankAccount" value={formData.bankAccount} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"/></div>
         
-        {/* --- NEW: Identification Section --- */}
+        {/* --- Identification Section --- */}
         <div className="md:col-span-2 mt-2 bg-gray-800/30 p-4 rounded-lg border border-gray-700 space-y-4">
             <h4 className="text-sm font-bold text-gray-300 border-b border-gray-700 pb-2">Identification Document</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

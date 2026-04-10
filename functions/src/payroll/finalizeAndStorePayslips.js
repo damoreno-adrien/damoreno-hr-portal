@@ -2,10 +2,7 @@ const { HttpsError, https } = require("firebase-functions/v2");
 const { getFirestore } = require('firebase-admin/firestore');
 const admin = require('firebase-admin');
 
-if (admin.apps.length === 0) {
-    admin.initializeApp();
-}
-
+if (admin.apps.length === 0) { admin.initializeApp(); }
 const db = getFirestore();
 
 exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast1" }, async (request) => {
@@ -24,10 +21,24 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
     }
 
     const batch = db.batch();
-    const authDisablePromises = []; // Array to hold our Auth lockout commands
+    const authDisablePromises = []; 
+    const branchTotals = {}; // Tracks totals to create separate 'payroll_run' documents
 
     const processPayslips = payrollData.map(async (payslip) => {
         const staffId = payslip.staffId || payslip.id;
+        
+        // --- 1. THE SPLITTER: Fetch Staff Branch ---
+        const staffRef = db.collection("staff_profiles").doc(staffId);
+        const staffSnap = await staffRef.get();
+        const staffData = staffSnap.data() || {};
+        const branchId = staffData.branchId || 'global'; 
+
+        // Keep track of the totals for this specific branch
+        if (!branchTotals[branchId]) branchTotals[branchId] = { totalNetPay: 0, count: 0 };
+        branchTotals[branchId].totalNetPay += (Number(payslip.netPay) || 0);
+        branchTotals[branchId].count += 1;
+
+        // --- 2. STAMP THE PAYSLIP ---
         const payslipId = `${staffId}_${year}_${month}`;
         const payslipRef = db.collection("payslips").doc(payslipId);
 
@@ -36,6 +47,7 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
             staffId: staffId, 
             payPeriodYear: year,
             payPeriodMonth: month,
+            branchId: branchId !== 'global' ? branchId : null, // The DNA Stamp
             generatedAt: admin.firestore.FieldValue.serverTimestamp(), 
             finalizedAt: admin.firestore.FieldValue.serverTimestamp(),
             finalizedBy: request.auth.uid,
@@ -44,17 +56,12 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
         batch.set(payslipRef, payslipToSave);
 
-        const staffRef = db.collection("staff_profiles").doc(staffId);
-
-        // 1. Update Bonus Streak
+        // 3. Update Bonus Streak
         const newStreak = payslip.bonusInfo?.newStreak ?? 0;
         batch.update(staffRef, { bonusStreak: newStreak });
 
-        // --- 2. THE HUMAN ACTION OFFBOARDING TRIGGER ---
-        // If this payslip contains an offboarding payout (meaning it's their final month)
+        // 4. Handle Offboarding Lockout
         if (payslip.offboardingPayout) {
-            
-            // A. Update the database to mark them inactive and stamp the audit trail
             batch.update(staffRef, {
                 'status': 'inactive',
                 'offboardingSettings.isPendingFutureOffboard': false,
@@ -62,16 +69,13 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
                 'offboardingSettings.payoutDisbursedAt': admin.firestore.FieldValue.serverTimestamp(),
                 'offboardingSettings.payoutPayslipId': payslipId
             });
-
-            // B. Reach into the Firebase Auth vault and disable their login credentials
             const disableAuthPromise = admin.auth().updateUser(staffId, { disabled: true })
                 .then(() => console.log(`Successfully locked Auth for offboarded staff: ${staffId}`))
                 .catch(err => console.error(`Failed to lock Auth for ${staffId}:`, err));
-            
             authDisablePromises.push(disableAuthPromise);
         }
 
-        // 3. Handle Loan Deductions
+        // 5. Handle Loan Deductions
         const loanDeductionAmount = payslip.deductions?.loan || 0;
         if (loanDeductionAmount > 0) {
             const loansSnapshot = await db.collection("loans").where("staffId", "==", staffId).where("isActive", "==", true).get();
@@ -86,7 +90,7 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
             }
         }
 
-        // 4. Handle Salary Advance Deductions
+        // 6. Handle Salary Advance Deductions
         const advanceDeductionAmount = payslip.deductions?.advance || 0;
         if (advanceDeductionAmount > 0) {
             const advancesSnapshot = await db.collection("salary_advances")
@@ -107,12 +111,28 @@ exports.finalizeAndStorePayslipsHandler = https.onCall({ region: "asia-southeast
 
     try {
         await Promise.all(processPayslips);
+
+        // --- 7. CREATE THE SEPARATE PAYROLL_RUN DOCUMENTS ---
+        for (const [bId, data] of Object.entries(branchTotals)) {
+            // Give each branch a completely separate run document in the database
+            const runDocId = bId === 'global' ? `${year}_${month}` : `${year}_${month}_${bId}`;
+            const runRef = db.collection("payroll_runs").doc(runDocId);
+            
+            batch.set(runRef, {
+                year,
+                month,
+                branchId: bId === 'global' ? null : bId, // Tie the run to the branch
+                totalNetPay: data.totalNetPay,
+                payslipCount: data.count,
+                finalizedAt: admin.firestore.FieldValue.serverTimestamp(),
+                finalizedBy: request.auth.uid
+            }, { merge: true });
+        }
+
         await batch.commit();
-        
-        // Execute all the Auth lockouts after the database successfully updates
         await Promise.all(authDisablePromises);
 
-        return { result: `Successfully stored ${payrollData.length} payslips for ${month}/${year}.` };
+        return { result: `Successfully grouped and stored ${payrollData.length} payslips for ${month}/${year}.` };
     } catch (error) {
         console.error("Batch commit failed:", error);
         throw new HttpsError("internal", "Failed to store payslips.");

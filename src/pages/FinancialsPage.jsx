@@ -1,6 +1,8 @@
+/* src/pages/FinancialsPage.jsx */
+
 import React, { useState, useEffect, useMemo } from 'react';
-// 1. Import 'doc'
-import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth'; // <-- NEW: For secure UID fetching
 import { Plus, Pencil, Trash2, CheckCircle, XCircle, Download, ArrowUp, ArrowDown } from 'lucide-react';
 import LoanModal from '../components/Financials/LoanModal';
 import AdvanceModal from '../components/SalaryAdvance/AdvanceModal';
@@ -12,7 +14,6 @@ const months = ["January", "February", "March", "April", "May", "June", "July", 
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1];
 
 const StatusBadge = ({ status }) => {
-    // ... (No change)
     const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
     const statusMap = {
         pending: "bg-yellow-500/20 text-yellow-300",
@@ -23,7 +24,8 @@ const StatusBadge = ({ status }) => {
     return <span className={`${baseClasses} ${statusMap[status] || 'bg-gray-500/20 text-gray-300'}`}>{status}</span>;
 };
 
-export default function FinancialsPage({ staffList, db }) {
+// --- ENHANCED: Added userRole to props ---
+export default function FinancialsPage({ staffList, db, activeBranch, userRole }) {
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
     const [showArchived, setShowArchived] = useState(false); 
@@ -33,26 +35,37 @@ export default function FinancialsPage({ staffList, db }) {
 
     const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'asc' });
 
-    // 2. Add state for Company Config
     const [companyConfig, setCompanyConfig] = useState(null);
 
-    // ... (Rest of state definitions are unchanged)
     const [loans, setLoans] = useState([]);
     const [isLoadingLoans, setIsLoadingLoans] = useState(false);
     const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
     const [editingLoan, setEditingLoan] = useState(null);
+    
     const [advances, setAdvances] = useState([]);
     const [isLoadingAdvances, setIsLoadingAdvances] = useState(false);
     const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
     const [editingAdvance, setEditingAdvance] = useState(null);
+    
     const [adjustments, setAdjustments] = useState([]);
     const [isLoadingAdjustments, setIsLoadingAdjustments] = useState(false);
     const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
     const [editingAdjustment, setEditingAdjustment] = useState(null);
 
+    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
+
+    useEffect(() => {
+        const uid = getAuth().currentUser?.uid;
+        if (userRole === 'admin' && uid && db) {
+            getDoc(doc(db, 'users', uid)).then(snap => {
+                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
+            }).catch(err => console.error("Failed to fetch admin branches:", err));
+        }
+    }, [db, userRole]);
+
     const getDisplayName = (staff) => staff?.nickname || staff?.firstName || staff?.fullName || 'Unknown';
 
-    // 3. Fetch Company Config
     useEffect(() => {
         if (!db) return;
         const configRef = doc(db, 'settings', 'company_config');
@@ -66,7 +79,6 @@ export default function FinancialsPage({ staffList, db }) {
         return () => unsubscribeConfig();
     }, [db]);
 
-    // 4. Update Pending Advances listener to include eligibility calculation
     useEffect(() => {
         if (!db || !companyConfig) return;
         
@@ -83,12 +95,10 @@ export default function FinancialsPage({ staffList, db }) {
                     const staffMember = staffList.find(s => s.id === req.staffId);
                     if (!staffMember) return null;
 
-                    // --- FIX: Safely extract salary regardless of PayType ---
                     const job = staffMember.jobHistory?.[0] || staffMember;
                     const salary = Number(job.baseSalary) || Number(job.rate) || 0;
                     
                     const maxEligible = (salary * eligibilityPercent) / 100;
-                    // --------------------------------------------------------
 
                     return { 
                         ...req, 
@@ -99,32 +109,54 @@ export default function FinancialsPage({ staffList, db }) {
                 })
                 .filter(req => req && req.staff.status !== 'inactive'); 
 
-            setPendingAdvances(hydratedList);
+            // --- THE SECURITY FILTER: Enforce "All My Branches" on Pending Requests ---
+            const branchFilteredList = hydratedList.filter(req => {
+                if (activeBranch === 'global') {
+                    if (userRole === 'admin' && !adminBranchIds.includes(req.staff.branchId)) return false;
+                    return true;
+                }
+                return req.staff.branchId === activeBranch;
+            });
+
+            setPendingAdvances(branchFilteredList);
             setIsLoadingPending(false);
         }, (err) => { console.error(err); setIsLoadingPending(false); });
         
         return () => unsubscribe();
-    }, [db, staffList, companyConfig]);
+    }, [db, staffList, companyConfig, activeBranch, userRole, adminBranchIds]);
 
     useEffect(() => {
         if (selectedStaffId && db) {
             setIsLoadingLoans(true);
             setIsLoadingAdvances(true);
             setIsLoadingAdjustments(true);
+            
             const loansQuery = query(collection(db, 'loans'), where('staffId', '==', selectedStaffId));
-            const unsubLoans = onSnapshot(loansQuery, (snap) => { setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingLoans(false); }, (err) => { console.error(err); setIsLoadingLoans(false); });
+            const unsubLoans = onSnapshot(loansQuery, (snap) => { 
+                setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
+                setIsLoadingLoans(false); 
+            }, (err) => { console.error(err); setIsLoadingLoans(false); });
+            
             const commonQueries = [where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year)];
+            
             const advancesQuery = query(collection(db, 'salary_advances'), ...commonQueries);
-            const unsubAdvances = onSnapshot(advancesQuery, (snap) => { setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingAdvances(false); }, (err) => { console.error(err); setIsLoadingAdvances(false); });
+            const unsubAdvances = onSnapshot(advancesQuery, (snap) => { 
+                setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
+                setIsLoadingAdvances(false); 
+            }, (err) => { console.error(err); setIsLoadingAdvances(false); });
+            
             const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), ...commonQueries);
-            const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => { setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoadingAdjustments(false); }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
+            const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => { 
+                setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
+                setIsLoadingAdjustments(false); 
+            }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
+            
             return () => { unsubLoans(); unsubAdvances(); unsubAdjustments(); };
         } else {
             setLoans([]); setAdvances([]); setAdjustments([]);
         }
     }, [selectedStaffId, db, payPeriod]);
 
-    // 5. Update sort hook to handle 'maxEligible'
     const sortedPendingAdvances = useMemo(() => {
         let sortableItems = [...pendingAdvances];
         if (sortConfig.key) {
@@ -132,8 +164,7 @@ export default function FinancialsPage({ staffList, db }) {
                 let aValue = a[sortConfig.key];
                 let bValue = b[sortConfig.key];
 
-                // Handle different data types
-                if (sortConfig.key === 'amount' || sortConfig.key === 'maxEligible') { // <-- Added maxEligible
+                if (sortConfig.key === 'amount' || sortConfig.key === 'maxEligible') { 
                     aValue = a[sortConfig.key] || 0;
                     bValue = b[sortConfig.key] || 0;
                 } else if (sortConfig.key === 'date') {
@@ -144,12 +175,8 @@ export default function FinancialsPage({ staffList, db }) {
                     bValue = ('' + bValue).toLowerCase();
                 }
 
-                if (aValue < bValue) {
-                    return sortConfig.direction === 'asc' ? -1 : 1;
-                }
-                if (aValue > bValue) {
-                    return sortConfig.direction === 'asc' ? 1 : -1;
-                }
+                if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
                 return 0;
             });
         }
@@ -158,27 +185,27 @@ export default function FinancialsPage({ staffList, db }) {
 
     const handleSort = (key) => {
         let direction = 'asc';
-        if (sortConfig.key === key && sortConfig.direction === 'asc') {
-            direction = 'desc';
-        }
+        if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
         setSortConfig({ key, direction });
     };
 
     const handlePeriodChange = (e) => setPayPeriod(p => ({ ...p, [e.target.name]: Number(e.target.value) }));
     const handleStaffChange = (e) => setSelectedStaffId(e.target.value);
+    
     const handleOpenAddLoanModal = () => { setEditingLoan(null); setIsLoanModalOpen(true); };
     const handleOpenEditLoanModal = (loan) => { setEditingLoan(loan); setIsLoanModalOpen(true); };
     const handleDeleteLoan = async (id) => { if (window.confirm("Delete this loan record?")) await deleteDoc(doc(db, 'loans', id)); };
+    
     const handleOpenAddAdvanceModal = () => { setEditingAdvance(null); setIsAdvanceModalOpen(true); };
     const handleOpenEditAdvanceModal = (adv) => { setEditingAdvance(adv); setIsAdvanceModalOpen(true); };
     const handleDeleteAdvance = async (id) => { if (window.confirm("Delete this advance record?")) await deleteDoc(doc(db, 'salary_advances', id)); };
     const handleApproveAdvance = async (id) => { await updateDoc(doc(db, 'salary_advances', id), { status: 'approved', isReadByStaff: false }); };
     const handleRejectAdvance = async (id) => { const reason = window.prompt("Reason for rejecting?"); if (reason) { await updateDoc(doc(db, 'salary_advances', id), { status: 'rejected', rejectionReason: reason, isReadByStaff: false }); } };
+    
     const handleOpenAddAdjustmentModal = () => { setEditingAdjustment(null); setIsAdjustmentModalOpen(true); };
     const handleOpenEditAdjustmentModal = (adj) => { setEditingAdjustment(adj); setIsAdjustmentModalOpen(true); };
     const handleDeleteAdjustment = async (id) => { if (window.confirm("Delete this adjustment record?")) await deleteDoc(doc(db, 'monthly_adjustments', id)); };
 
-    // 6. Update PDF Export Function
     const handleExportPendingAdvances = () => {
         if (pendingAdvances.length === 0) {
             alert("No pending advances to export.");
@@ -190,32 +217,34 @@ export default function FinancialsPage({ staffList, db }) {
         const totalAmount = pendingAdvances.reduce((sum, req) => sum + req.amount, 0);
         
         doc.setFontSize(18);
-        doc.text("Da Moreno At Town", 14, 22);
+        doc.text("Da Moreno Financials", 14, 22);
         doc.setFontSize(12);
         doc.text("Pending Salary Advances", 14, 30);
         doc.setFontSize(10);
         doc.text(`As of: ${today}`, 14, 36);
 
-        const sortedForPDF = [...pendingAdvances].sort((a, b) =>
-            a.staffName.localeCompare(b.staffName)
-        );
+        const sortedForPDF = [...pendingAdvances].sort((a, b) => a.staffName.localeCompare(b.staffName));
 
-        // --- PDF Table Header ---
         const head = [['Staff Name', 'Request Date', 'Amount (THB)', 'Max Eligible (THB)']];
         
-        // --- PDF Table Body ---
-        const body = sortedForPDF.map(req => [
-            req.staffName,
-            req.date, 
-            req.amount.toLocaleString('en-US'),
-            req.maxEligible.toLocaleString('en-US')
-        ]);
+        const body = sortedForPDF.map(req => {
+            let name = req.staffName;
+            if (activeBranch === 'global' && req.staff.branchId) {
+                const bName = companyConfig?.branches?.find(b => b.id === req.staff.branchId)?.name || req.staff.branchId;
+                name += ` (${bName.replace('Da Moreno ', '')})`;
+            }
+            return [
+                name,
+                req.date, 
+                req.amount.toLocaleString('en-US'),
+                req.maxEligible.toLocaleString('en-US')
+            ];
+        });
         
         autoTable(doc, {
             startY: 45,
             head: head,
             body: body,
-            // --- PDF Table Footer Update ---
             foot: [['Total Pending', '', totalAmount.toLocaleString('en-US'), '']],
             headStyles: { fillColor: [30, 41, 59] }, 
             footStyles: { fontWeight: 'bold', fillColor: [241, 245, 249], textColor: 0 },
@@ -225,17 +254,28 @@ export default function FinancialsPage({ staffList, db }) {
         doc.save(`pending_advances_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
-    const selectedStaffName = getDisplayName(staffList.find(s => s.id === selectedStaffId));
-
     const staffForDropdown = useMemo(() => {
-        const sortedList = [...staffList].sort((a, b) => {
+        let sortedList = [...staffList].sort((a, b) => {
             const nameA = getDisplayName(a);
             const nameB = getDisplayName(b);
             return nameA.localeCompare(nameB);
         });
-        if (showArchived) return sortedList;
-        return sortedList.filter(s => s.status !== 'inactive');
-    }, [staffList, showArchived]);
+        
+        if (!showArchived) {
+            sortedList = sortedList.filter(s => s.status !== 'inactive');
+        }
+        
+        // --- THE SECURITY FILTER: Enforce "All My Branches" on Staff Dropdown ---
+        if (activeBranch === 'global') {
+            if (userRole === 'admin') {
+                sortedList = sortedList.filter(s => adminBranchIds.includes(s.branchId));
+            }
+        } else if (activeBranch) {
+            sortedList = sortedList.filter(s => s.branchId === activeBranch);
+        }
+        
+        return sortedList;
+    }, [staffList, showArchived, activeBranch, userRole, adminBranchIds]);
 
     const SortableHeader = ({ children, sortKey }) => {
         const isSorted = sortConfig.key === sortKey;
@@ -267,7 +307,14 @@ export default function FinancialsPage({ staffList, db }) {
                     <div className="flex-grow">
                         <select value={selectedStaffId} onChange={handleStaffChange} className="w-full p-2 bg-gray-700 rounded-md text-white">
                             <option value="">-- Select Staff --</option>
-                            {staffForDropdown.map(s => (<option key={s.id} value={s.id}>{getDisplayName(s)}</option>))}
+                            {staffForDropdown.map(s => {
+                                let label = getDisplayName(s);
+                                if (activeBranch === 'global' && s.branchId) {
+                                    const bName = companyConfig?.branches?.find(b => b.id === s.branchId)?.name || s.branchId;
+                                    label += ` (${bName.replace('Da Moreno ', '')})`;
+                                }
+                                return (<option key={s.id} value={s.id}>{label}</option>);
+                            })}
                         </select>
                     </div>
                     <div className="flex items-center flex-shrink-0 pl-2">
@@ -294,7 +341,6 @@ export default function FinancialsPage({ staffList, db }) {
                     <table className="min-w-full">
                         <thead className="bg-gray-700">
                             <tr>
-                                {/* 7. Update table headers */}
                                 <SortableHeader sortKey="staffName">Staff Name</SortableHeader>
                                 <SortableHeader sortKey="date">Date</SortableHeader>
                                 <SortableHeader sortKey="amount">Amount</SortableHeader>
@@ -303,8 +349,25 @@ export default function FinancialsPage({ staffList, db }) {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {/* 8. Update table body */}
-                            {isLoadingPending ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">Loading...</td></tr>) : sortedPendingAdvances.length === 0 ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">No pending requests.</td></tr>) : (sortedPendingAdvances.map(req => (<tr key={req.id}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{req.staffName}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td><td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{req.maxEligible.toLocaleString()} THB</td><td className="px-6 py-4 whitespace-nowrap text-sm text-right space-x-2"><button onClick={() => handleApproveAdvance(req.id)} className="p-2 bg-green-600 rounded-full hover:bg-green-500" title="Approve"><CheckCircle className="h-5 w-5"/></button><button onClick={() => handleRejectAdvance(req.id)} className="p-2 bg-red-600 rounded-full hover:bg-red-500" title="Reject"><XCircle className="h-5 w-5"/></button></td></tr>)))}
+                            {isLoadingPending ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">Loading...</td></tr>) : sortedPendingAdvances.length === 0 ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">No pending requests.</td></tr>) : (sortedPendingAdvances.map(req => {
+                                let displayName = req.staffName;
+                                if (activeBranch === 'global' && req.staff.branchId) {
+                                    const bName = companyConfig?.branches?.find(b => b.id === req.staff.branchId)?.name || req.staff.branchId;
+                                    displayName += ` (${bName.replace('Da Moreno ', '')})`;
+                                }
+                                return (
+                                <tr key={req.id}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{displayName}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{req.maxEligible.toLocaleString()} THB</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right space-x-2">
+                                        <button onClick={() => handleApproveAdvance(req.id)} className="p-2 bg-green-600 rounded-full hover:bg-green-500" title="Approve"><CheckCircle className="h-5 w-5"/></button>
+                                        <button onClick={() => handleRejectAdvance(req.id)} className="p-2 bg-red-600 rounded-full hover:bg-red-500" title="Reject"><XCircle className="h-5 w-5"/></button>
+                                    </td>
+                                </tr>
+                                )
+                            }))}
                         </tbody>
                     </table>
                 </div>
