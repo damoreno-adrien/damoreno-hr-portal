@@ -1,21 +1,167 @@
 /* src/components/Settings/BranchManager.jsx */
-import React, { useState } from 'react';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { Building, Plus, MapPin } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { doc, updateDoc, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
+import { Building, Plus, MapPin, AlertTriangle, Trash2, Users, Shield } from 'lucide-react';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from '../../../firebase'; // Adjusted path to your firebase config
 
+// --- 1. THE DANGER ZONE SUB-COMPONENT ---
+const DangerZoneBranchDelete = ({ branches }) => {
+    const [branchToDelete, setBranchToDelete] = useState('');
+    const [confirmText, setConfirmText] = useState('');
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDelete = async () => {
+        if (confirmText !== branchToDelete) {
+            alert("Confirmation text does not match the Branch ID.");
+            return;
+        }
+
+        if (window.confirm(`FINAL WARNING: This will permanently erase ALL staff, attendance, and financial data for ${branchToDelete}. This cannot be undone.`)) {
+            setIsDeleting(true);
+            try {
+                const functions = getFunctions(app, "asia-southeast1");
+                const deleteBranchData = httpsCallable(functions, 'deleteBranchData');
+                
+                const result = await deleteBranchData({ branchId: branchToDelete });
+                alert(result.data.message);
+                
+                setBranchToDelete('');
+                setConfirmText('');
+            } catch (error) {
+                alert(`Deletion failed: ${error.message}`);
+            } finally {
+                setIsDeleting(false);
+            }
+        }
+    };
+
+    return (
+        <div className="mt-12 bg-red-900/20 border border-red-700/50 rounded-xl p-6">
+            <div className="flex items-center gap-3 mb-4">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+                <h3 className="text-xl font-bold text-red-500">Danger Zone: Erase Branch</h3>
+            </div>
+            <p className="text-sm text-gray-300 mb-6">
+                This tool is for cleaning up Sandbox/UAT environments. It will permanently destroy all staff records, leave requests, attendance logs, and configuration data associated with the selected branch.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Select Branch to Erase</label>
+                    <select 
+                        value={branchToDelete} 
+                        onChange={(e) => setBranchToDelete(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2.5 text-white outline-none focus:border-red-500"
+                    >
+                        <option value="">-- Select Branch --</option>
+                        {branches.map(b => (
+                            <option key={b.id} value={b.id}>{b.name} ({b.id})</option>
+                        ))}
+                    </select>
+                </div>
+
+                {branchToDelete && (
+                    <>
+                        <div>
+                            <label className="block text-xs font-bold text-red-400 mb-1 uppercase tracking-wider">Type '{branchToDelete}' to confirm</label>
+                            <input 
+                                type="text" 
+                                value={confirmText} 
+                                onChange={(e) => setConfirmText(e.target.value)}
+                                placeholder="Confirm ID..."
+                                className="w-full bg-gray-800 border border-red-700/50 rounded-lg p-2.5 text-white outline-none focus:border-red-500"
+                            />
+                        </div>
+                        <button 
+                            onClick={handleDelete}
+                            disabled={isDeleting || confirmText !== branchToDelete}
+                            className="flex items-center justify-center bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <Trash2 className="w-5 h-5 mr-2" />
+                            {isDeleting ? 'Nuking Data...' : 'Destroy Branch'}
+                        </button>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// --- 2. THE MAIN COMPONENT ---
 export function BranchManager({ db, config }) {
     const [newBranchName, setNewBranchName] = useState('');
     const [newBranchId, setNewBranchId] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [branchStats, setBranchStats] = useState({});
 
     const branches = config?.branches || [];
 
-    // Auto-generate a safe ID when typing the name (e.g., "Da Moreno Patong" -> "br_patong")
+    // --- DATA FETCHING: Get Active Staff and Directors ---
+    useEffect(() => {
+        const fetchBranchStats = async () => {
+            if (!db || branches.length === 0) return;
+
+            try {
+                // 1. Fetch all active staff
+                const staffQuery = query(collection(db, 'staff_profiles'), where('status', '==', 'active'));
+                const staffSnap = await getDocs(staffQuery);
+
+                // 2. Fetch all users to find Admins/Directors
+                const usersSnap = await getDocs(collection(db, 'users'));
+
+                // Create a mapping of UID to Name for better display
+                const nameMap = {};
+                staffSnap.forEach(doc => {
+                    const data = doc.data();
+                    nameMap[doc.id] = data.nickname || data.firstName || data.fullName || 'Unknown';
+                });
+
+                const stats = {};
+                branches.forEach(b => {
+                    stats[b.id] = { activeStaff: 0, admins: [] };
+                });
+
+                // Count active staff per branch
+                staffSnap.forEach(doc => {
+                    const data = doc.data();
+                    if (data.branchId && stats[data.branchId]) {
+                        stats[data.branchId].activeStaff += 1;
+                    }
+                });
+
+                // Find Admins/Directors per branch
+                usersSnap.forEach(doc => {
+                    const data = doc.data();
+                    if (['admin', 'super_admin', 'manager'].includes(data.role)) {
+                        if (Array.isArray(data.branchIds)) {
+                            data.branchIds.forEach(bId => {
+                                if (stats[bId]) {
+                                    // Use their staff name if they have one, otherwise fallback to their email
+                                    const displayName = nameMap[doc.id] || data.name || data.email || 'Admin';
+                                    if (!stats[bId].admins.includes(displayName)) {
+                                        stats[bId].admins.push(displayName);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
+
+                setBranchStats(stats);
+            } catch (error) {
+                console.error("Error fetching branch stats:", error);
+            }
+        };
+
+        fetchBranchStats();
+    }, [db, branches]);
+
+    // Auto-generate a safe ID when typing the name
     const handleNameChange = (e) => {
         const name = e.target.value;
         setNewBranchName(name);
         
-        // Only auto-generate if they haven't manually typed an ID yet
         if (!newBranchId || newBranchId.startsWith('br_')) {
             const generatedId = 'br_' + name.toLowerCase().replace(/[^a-z0-9]/g, '');
             setNewBranchId(generatedId);
@@ -26,7 +172,6 @@ export function BranchManager({ db, config }) {
         e.preventDefault();
         if (!newBranchName || !newBranchId) return;
 
-        // Check if ID already exists
         if (branches.some(b => b.id === newBranchId)) {
             alert("This Branch ID already exists! Please use a unique ID.");
             return;
@@ -121,16 +266,51 @@ export function BranchManager({ db, config }) {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {branches.map((branch) => (
-                                <div key={branch.id} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col relative overflow-hidden group">
-                                    <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-500/10 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-150"></div>
-                                    <h5 className="font-bold text-lg text-white mb-1 relative z-10">{branch.name}</h5>
-                                    <p className="text-xs text-gray-400 font-mono relative z-10">ID: {branch.id}</p>
-                                </div>
-                            ))}
+                            {branches.map((branch) => {
+                                const stats = branchStats[branch.id] || { activeStaff: 0, admins: [] };
+                                
+                                return (
+                                    <div key={branch.id} className="bg-gray-800 p-5 rounded-xl border border-gray-700 flex flex-col relative overflow-hidden group shadow-md">
+                                        <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-bl-full -mr-12 -mt-12 transition-transform group-hover:scale-150"></div>
+                                        
+                                        <div className="relative z-10 flex justify-between items-start mb-3">
+                                            <div>
+                                                <h5 className="font-bold text-lg text-white mb-0.5 leading-tight">{branch.name}</h5>
+                                                <p className="text-[11px] text-indigo-400 font-mono">ID: {branch.id}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Rich Data Display */}
+                                        <div className="mt-auto pt-4 border-t border-gray-700 space-y-3 relative z-10">
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span className="text-gray-400 flex items-center"><Users className="w-4 h-4 mr-2" /> Active Staff:</span>
+                                                <span className="font-bold text-white bg-gray-900 border border-gray-700 px-2 py-0.5 rounded">{stats.activeStaff}</span>
+                                            </div>
+                                            
+                                            <div className="flex flex-col text-sm">
+                                                <span className="text-gray-400 mb-1.5 flex items-center"><Shield className="w-4 h-4 mr-2" /> Assigned Directors:</span>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {stats.admins.length > 0 ? stats.admins.map((admin, i) => (
+                                                        <span key={i} className="text-xs font-medium bg-indigo-900/40 text-indigo-300 border border-indigo-700/50 px-2 py-0.5 rounded">
+                                                            {admin}
+                                                        </span>
+                                                    )) : (
+                                                        <span className="text-xs text-amber-500 bg-amber-900/20 px-2 py-0.5 rounded border border-amber-700/50">None assigned</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* Render Danger Zone at the bottom */}
+            <div className="px-6 pb-6">
+                <DangerZoneBranchDelete branches={branches} />
             </div>
         </div>
     );

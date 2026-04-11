@@ -1,12 +1,12 @@
 /* src/components/Settings/PublicHolidaysSettings.jsx */
 
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Plus, Trash2, Check, Save, Loader2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
-// --- ADDED selectedBranchId to props ---
-export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHoliday, selectedBranchId }) => {
+// Note : onAddHoliday et onDeleteHoliday ne sont plus nécessaires, le composant gère la DB directement
+export const PublicHolidaysSettings = ({ db, config, selectedBranchId }) => {
     const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
     
     const [settings, setSettings] = useState({
@@ -19,17 +19,22 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
 
+    // 1. Lecture dynamique
     useEffect(() => {
         if (config) {
+            const branchOverrides = (selectedBranchId && selectedBranchId !== 'global' && config.branchSettings?.[selectedBranchId]) 
+                ? config.branchSettings[selectedBranchId] 
+                : {};
+
             const vals = {
-                holidayPayMultiplier: config.holidayPayMultiplier ?? 1.0,
-                maxHolidayBalance: config.maxHolidayBalance ?? config.publicHolidayCreditCap ?? 15, 
-                cashOutWindowDays: config.cashOutWindowDays ?? 60
+                holidayPayMultiplier: branchOverrides.holidayPayMultiplier ?? config.holidayPayMultiplier ?? 1.0,
+                maxHolidayBalance: branchOverrides.maxHolidayBalance ?? branchOverrides.publicHolidayCreditCap ?? config.maxHolidayBalance ?? config.publicHolidayCreditCap ?? 15, 
+                cashOutWindowDays: branchOverrides.cashOutWindowDays ?? config.cashOutWindowDays ?? 60
             };
             setSettings(vals);
             setOriginalSettings(vals);
         }
-    }, [config]);
+    }, [config, selectedBranchId]);
 
     const handleSettingChange = (e) => {
         const { id, value } = e.target;
@@ -38,19 +43,18 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
 
     const hasChanges = JSON.stringify(settings) !== JSON.stringify(originalSettings);
 
+    // 2. Écriture sécurisée des règles
     const handleSaveSettings = async () => {
         setIsSaving(true);
         setIsSaved(false);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
-            // --- THE STAMP: Save to branchSettings.[branchId] ---
-            const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
+            const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.` : '';
 
             await updateDoc(configDocRef, {
                 [`${prefix}holidayPayMultiplier`]: Number(settings.holidayPayMultiplier),
                 [`${prefix}maxHolidayBalance`]: Number(settings.maxHolidayBalance),
                 [`${prefix}cashOutWindowDays`]: Number(settings.cashOutWindowDays),
-                // Keep the old one synced just in case old code looks for it before we finish updating everything
                 [`${prefix}publicHolidayCreditCap`]: Number(settings.maxHolidayBalance) 
             });
             
@@ -68,14 +72,45 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
         setNewHoliday(prev => ({ ...prev, [e.target.id]: e.target.value }));
     };
 
-    const handleAddSubmit = (e) => {
+    // 3. Ajout d'un jour férié autonome
+    const handleAddSubmit = async (e) => {
         e.preventDefault();
         if (!newHoliday.date || !newHoliday.name.trim()) return;
-        onAddHoliday({ date: newHoliday.date, name: newHoliday.name.trim() });
-        setNewHoliday({ date: '', name: '' });
+        
+        const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.publicHolidays` : 'publicHolidays';
+        
+        try {
+            await updateDoc(doc(db, 'settings', 'company_config'), {
+                [prefix]: arrayUnion({ date: newHoliday.date, name: newHoliday.name.trim() })
+            });
+            setNewHoliday({ date: '', name: '' });
+        } catch (err) {
+            alert("Failed to add holiday: " + err.message);
+        }
     };
 
-    const sortedHolidays = (config?.publicHolidays || []).sort((a, b) => {
+    // 4. Suppression d'un jour férié autonome
+    const handleDeleteHolidayNatively = async (holiday) => {
+        if (!window.confirm(`Delete holiday: ${holiday.name}?`)) return;
+
+        const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.publicHolidays` : 'publicHolidays';
+        
+        try {
+            await updateDoc(doc(db, 'settings', 'company_config'), {
+                [prefix]: arrayRemove(holiday)
+            });
+        } catch (err) {
+            alert("Failed to delete holiday: " + err.message);
+        }
+    };
+
+    // 5. Affichage dynamique
+    const branchOverrides = (selectedBranchId && selectedBranchId !== 'global' && config?.branchSettings?.[selectedBranchId]) 
+        ? config.branchSettings[selectedBranchId] 
+        : {};
+    const activeHolidays = branchOverrides.publicHolidays || config?.publicHolidays || [];
+
+    const sortedHolidays = [...activeHolidays].sort((a, b) => {
         const dateA = dateUtils.parseISODateString(a.date);
         const dateB = dateUtils.parseISODateString(b.date);
         if (!dateA && !dateB) return 0;
@@ -135,7 +170,7 @@ export const PublicHolidaysSettings = ({ db, config, onAddHoliday, onDeleteHolid
                             <span className="text-white font-semibold">{holiday.name}</span>
                             <span className="text-sm text-gray-400 ml-4 font-mono">{dateUtils.formatDisplayDate(holiday.date)}</span>
                         </div>
-                        <button onClick={() => onDeleteHoliday(holiday)} className="text-red-400 hover:text-red-300 hover:bg-red-400/10 p-2 rounded-lg transition-colors" title="Delete holiday">
+                        <button onClick={() => handleDeleteHolidayNatively(holiday)} className="text-red-400 hover:text-red-300 hover:bg-red-400/10 p-2 rounded-lg transition-colors" title="Delete holiday">
                             <Trash2 className="h-4 w-4" />
                         </button>
                     </div>

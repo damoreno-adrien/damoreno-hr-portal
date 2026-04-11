@@ -44,3 +44,4 @@ exports.updateUserRole = require('./src/users/accessControl').updateUserRoleHand
 exports.updateAdminBranchesHandler = require('./src/users/accessControl').updateAdminBranchesHandler;
 exports.migrateBranchData = require('./src/admin/migrateBranchData').migrateBranchDataHandler;
 exports.migrateBranchSettings = require('./src/admin/migrateBranchSettings').migrateBranchSettingsHandler;
+exports.deleteBranchData = require('./src/admin/deleteBranchData').deleteBranchDataHandler;

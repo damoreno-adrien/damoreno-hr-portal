@@ -12,15 +12,20 @@ export const LeaveEntitlementsSettings = ({ db, config, selectedBranchId }) => {
 
     useEffect(() => {
         if (config) {
+            // --- FIX : Lecture spécifique à la succursale ---
+            const branchOverrides = (selectedBranchId && selectedBranchId !== 'global' && config.branchSettings?.[selectedBranchId]) 
+                ? config.branchSettings[selectedBranchId] 
+                : {};
+
             const data = {
-                annualLeaveDays: config.annualLeaveDays || 0,
-                paidSickDays: config.paidSickDays || 0,
-                paidPersonalDays: config.paidPersonalDays || 0,
+                annualLeaveDays: branchOverrides.annualLeaveDays ?? config.annualLeaveDays ?? 0,
+                paidSickDays: branchOverrides.paidSickDays ?? config.paidSickDays ?? 0,
+                paidPersonalDays: branchOverrides.paidPersonalDays ?? config.paidPersonalDays ?? 0,
             };
             setLocalConfig(data);
             setOriginalConfig(data);
         }
-    }, [config]);
+    }, [config, selectedBranchId]); // <-- Met à jour à chaque changement de branche
 
     const handleChange = (e) => {
         setLocalConfig(prev => ({ ...prev, [e.target.id]: e.target.value }));
@@ -33,8 +38,8 @@ export const LeaveEntitlementsSettings = ({ db, config, selectedBranchId }) => {
         setIsSaved(false);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
-            // --- THE STAMP: Save to branchSettings.[branchId] ---
-            const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
+            // --- THE STAMP: Sauvegarde sécurisée ---
+            const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.` : '';
             
             const dataToSave = {
                 [`${prefix}annualLeaveDays`]: Number(localConfig.annualLeaveDays),

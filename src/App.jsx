@@ -104,10 +104,15 @@ export default function App() {
         };
     }, [companyConfig, activeBranch, activeRole, staffProfile]);
 
+    // --- MULTI-BRANCH FIX: Leave Requests Badge ---
     useEffect(() => {
         if (!db) return;
         if (['manager', 'admin', 'dept_manager', 'super_admin'].includes(userRole)) {
-            const q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
+            // Apply branch filter if not looking at Global
+            let q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
+            if (activeBranch && activeBranch !== 'global') {
+                q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'), where('branchId', '==', activeBranch));
+            }
             const unsubscribe = onSnapshot(q, (snap) => setPendingLeaveCount(snap.size));
             return () => unsubscribe();
         }
@@ -116,12 +121,17 @@ export default function App() {
             const unsubscribe = onSnapshot(q, (snap) => setUnreadLeaveUpdatesCount(snap.size));
             return () => unsubscribe();
         }
-    }, [userRole, db, user]);
+    }, [userRole, db, user, activeBranch]); // <-- Added activeBranch dependency
 
+    // --- MULTI-BRANCH FIX: Financials Badge ---
     useEffect(() => {
         if (!db) return;
         if (['manager', 'admin', 'super_admin'].includes(userRole)) {
-            const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
+            // Apply branch filter if not looking at Global
+            let q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
+            if (activeBranch && activeBranch !== 'global') {
+                q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'), where('branchId', '==', activeBranch));
+            }
             const unsubscribe = onSnapshot(q, (snap) => setPendingAdvanceCount(snap.size));
             return () => unsubscribe();
         }
@@ -130,7 +140,7 @@ export default function App() {
             const unsubscribe = onSnapshot(q, (snap) => setUnreadAdvanceUpdatesCount(snap.size));
             return () => unsubscribe();
         }
-    }, [userRole, db, user]);
+    }, [userRole, db, user, activeBranch]); // <-- Added activeBranch dependency
 
     useEffect(() => {
         // --- Using resolvedConfig to calculate accurate branch-specific holiday payouts ---

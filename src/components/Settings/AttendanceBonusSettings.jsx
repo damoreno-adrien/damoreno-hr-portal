@@ -15,8 +15,14 @@ export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
 
     useEffect(() => {
         if (config) {
-            const bonus = config.attendanceBonus || {};
-            const disc = config.disciplinaryRules || {};
+            // --- FIX : Charger les données spécifiques à la branche si elles existent ---
+            const branchOverrides = (selectedBranchId && selectedBranchId !== 'global' && config.branchSettings?.[selectedBranchId]) 
+                ? config.branchSettings[selectedBranchId] 
+                : {};
+
+            const bonus = branchOverrides.attendanceBonus || config.attendanceBonus || {};
+            const disc = branchOverrides.disciplinaryRules || config.disciplinaryRules || {};
+            
             const data = {
                 month1: bonus.month1 ?? 0, month2: bonus.month2 ?? 0, month3: bonus.month3 ?? 0,
                 allowedAbsences: bonus.allowedAbsences ?? 0, allowedLates: bonus.allowedLates ?? 3, maxLateMinutesAllowed: bonus.maxLateMinutesAllowed ?? 30, gracePeriodMinutes: bonus.gracePeriodMinutes ?? 5,
@@ -27,7 +33,7 @@ export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
             setLocalData(data); 
             setOriginalData(data);
         }
-    }, [config]);
+    }, [config, selectedBranchId]); // <-- IMPORTANT : Se met à jour quand on change de branche dans le menu
 
     const handleChange = (e) => {
         const { id, value } = e.target;
@@ -41,8 +47,8 @@ export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
         setIsSaving(true); 
         setIsSaved(false);
         try {
-            // --- THE STAMP: Save to branchSettings.[branchId] ---
-            const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
+            // --- THE STAMP: Sauvegarde isolée (empêche le bug du dossier 'global') ---
+            const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.` : '';
 
             const dataToSave = {
                 [`${prefix}attendanceBonus`]: {
