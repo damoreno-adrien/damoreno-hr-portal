@@ -4,11 +4,19 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check } from 'lucide-react';
 
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 export const LeaveEntitlementsSettings = ({ db, config, selectedBranchId }) => {
     const [localConfig, setLocalConfig] = useState({});
     const [originalConfig, setOriginalConfig] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    // Initialisation de l'authentification pour le logger
+    const auth = getAuth(app);
 
     useEffect(() => {
         if (config) {
@@ -49,6 +57,20 @@ export const LeaveEntitlementsSettings = ({ db, config, selectedBranchId }) => {
 
             await updateDoc(configDocRef, dataToSave);
             
+            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
+            // On détecte exactement quels quotas ont été modifiés
+            const changedKeys = Object.keys(localConfig).filter(key => localConfig[key] !== originalConfig[key]);
+            const changesDetails = changedKeys.map(key => `${key} (${originalConfig[key]} -> ${localConfig[key]})`).join(', ');
+            
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_LEAVE_ENTITLEMENTS', 
+                `Updated leave quotas: ${changesDetails}`
+            );
+            // ------------------------------------------------
+
             setOriginalConfig(localConfig); 
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);

@@ -4,11 +4,19 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check } from 'lucide-react';
 
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
     const [localConfig, setLocalConfig] = useState({});
     const [originalConfig, setOriginalConfig] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    // Initialisation de l'authentification pour le logger
+    const auth = getAuth(app);
 
     useEffect(() => {
         if (config) {
@@ -40,7 +48,6 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
         setIsSaved(false);
         const configDocRef = doc(db, 'settings', 'company_config');
         try {
-            // --- THE STAMP: Save to branchSettings.[branchId] ---
             const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
             
             const dataToSave = {
@@ -58,6 +65,20 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
             
             await updateDoc(configDocRef, dataToSave);
             
+            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
+            // On détecte exactement quels champs ont été modifiés pour le log
+            const changedKeys = Object.keys(localConfig).filter(key => localConfig[key] !== originalConfig[key]);
+            const changesDetails = changedKeys.map(key => `${key} (${originalConfig[key]} -> ${localConfig[key]})`).join(', ');
+            
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_FINANCIAL_RULES', 
+                `Updated financial parameters: ${changesDetails}`
+            );
+            // ------------------------------------------------
+
             setOriginalConfig(localConfig); 
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);

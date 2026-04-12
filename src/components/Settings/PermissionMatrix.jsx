@@ -4,6 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 // The master list of all permissions in the app
 const PERMISSION_KEYS = [
     { key: 'canViewFinancialRules', label: 'View Financial Rules', desc: 'Access taxes, OT multipliers, etc.' },
@@ -20,6 +25,8 @@ const DEFAULT_ROLES = ['staff', 'dept_manager', 'manager', 'admin', 'super_admin
 export function PermissionMatrix({ db }) {
     const [matrix, setMatrix] = useState(null);
     const [loading, setLoading] = useState(true);
+
+    const auth = getAuth(app); // Initialisation de l'auth pour les logs
 
     useEffect(() => {
         const docRef = doc(db, 'settings', 'role_permissions');
@@ -56,6 +63,19 @@ export function PermissionMatrix({ db }) {
         await updateDoc(docRef, {
             [`${role}.${permissionKey}`]: !currentValue
         });
+
+        // --- NOUVEAU : LE JOURNAL D'AUDIT ---
+        const actionType = !currentValue ? 'GRANT_PERMISSION' : 'REVOKE_PERMISSION';
+        const statusText = !currentValue ? 'Granted' : 'Revoked';
+        
+        await logSystemAction(
+            db, 
+            auth.currentUser, 
+            'global', // Les permissions sont globales au système
+            actionType, 
+            `${statusText} '${permissionKey}' for role: ${role.toUpperCase()}`
+        );
+        // ------------------------------------
     };
 
     if (loading || !matrix) {
@@ -67,12 +87,10 @@ export function PermissionMatrix({ db }) {
         const indexA = DEFAULT_ROLES.indexOf(a);
         const indexB = DEFAULT_ROLES.indexOf(b);
         
-        // If a brand new custom role is added later, push it to the end alphabetically
         if (indexA === -1 && indexB === -1) return a.localeCompare(b);
         if (indexA === -1) return 1;
         if (indexB === -1) return -1;
         
-        // Otherwise, obey the strict DEFAULT_ROLES hierarchy
         return indexA - indexB;
     });
 

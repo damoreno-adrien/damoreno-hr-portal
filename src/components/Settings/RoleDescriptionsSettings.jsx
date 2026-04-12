@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { Check, Plus, Trash2, ChevronDown, ChevronRight, Save, AlertCircle, Download, Upload } from 'lucide-react';
+import { Check, Plus, Trash2, ChevronDown, ChevronRight, Save, AlertCircle, Download, Upload, Loader2 } from 'lucide-react'; // <-- Ajout de Loader2
+
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
 
 export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
     const [roles, setRoles] = useState([]);
@@ -13,6 +18,9 @@ export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
     const [error, setError] = useState('');
     
     const fileInputRef = useRef(null);
+
+    // Initialisation de l'authentification pour le logger
+    const auth = getAuth(app);
 
     useEffect(() => {
         if (config && config.roleDescriptions) {
@@ -69,12 +77,21 @@ export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
                 return acc;
             }, {});
 
-            // --- THE STAMP: Save to branchSettings.[branchId].roleDescriptions ---
             const fieldPath = selectedBranchId ? `branchSettings.${selectedBranchId}.roleDescriptions` : 'roleDescriptions';
 
             await updateDoc(doc(db, 'settings', 'company_config'), {
                 [fieldPath]: rolesObject
             });
+
+            // --- NOUVEAU : LE JOURNAL D'AUDIT ---
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_ROLE_DESCRIPTIONS', 
+                `Saved ${roles.length} role descriptions.`
+            );
+            // ------------------------------------
 
             setIsSaved(true);
             setHasUnsavedChanges(false);

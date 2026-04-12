@@ -4,6 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check, ShieldAlert, Award } from 'lucide-react';
 
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
     const [localData, setLocalData] = useState({
         month1: 0, month2: 0, month3: 0, allowedAbsences: 0, allowedLates: 3, maxLateMinutesAllowed: 30, gracePeriodMinutes: 5,
@@ -12,6 +17,9 @@ export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
     const [originalData, setOriginalData] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    // Initialisation de l'authentification pour le logger
+    const auth = getAuth(app);
 
     useEffect(() => {
         if (config) {
@@ -65,6 +73,20 @@ export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
 
             await updateDoc(doc(db, 'settings', 'company_config'), dataToSave);
             
+            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
+            // On détecte exactement quels champs ont été modifiés
+            const changedKeys = Object.keys(localData).filter(key => localData[key] !== originalData[key]);
+            const changesDetails = changedKeys.map(key => `${key} (${originalData[key]} -> ${localData[key]})`).join(', ');
+            
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_ATTENDANCE_RULES', 
+                `Updated attendance/disciplinary rules: ${changesDetails}`
+            );
+            // ------------------------------------------------
+
             setOriginalData(localData); 
             setIsSaved(true); 
             setTimeout(() => setIsSaved(false), 2000);

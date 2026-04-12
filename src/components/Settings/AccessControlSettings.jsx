@@ -3,13 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getAuth } from 'firebase/auth'; // <-- NOUVEAU: Pour identifier le directeur actuel
 import { app } from '../../../firebase.js';
 import { Shield, UserCog, UserPlus, Loader2, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown, Edit2, Check, X, Trash2 } from 'lucide-react';
+import { logSystemAction } from '../../utils/auditLogger'; // <-- Import du logger d'audit
 
 const functions = getFunctions(app, "asia-southeast1");
-const inviteAdminFunc = httpsCallable(functions, 'inviteAdminHandler');
-const updateUserRoleFunc = httpsCallable(functions, 'updateUserRoleHandler');
-const updateAdminBranchesFunc = httpsCallable(functions, 'updateAdminBranchesHandler');
+const inviteAdminFunc = httpsCallable(functions, 'inviteAdmin'); 
+const updateUserRoleFunc = httpsCallable(functions, 'updateUserRole');
+const updateAdminBranchesFunc = httpsCallable(functions, 'updateAdminBranchesHandler'); // Attention, celui-ci a bien "Handler" à la fin !
 
 export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches = [] }) => {
     const [users, setUsers] = useState([]);
@@ -30,6 +32,8 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
 
     const [editingAdminId, setEditingAdminId] = useState(null);
     const [editingBranches, setEditingBranches] = useState([]);
+
+    const auth = getAuth(app); // Initialisation de l'auth pour les logs
 
     const fetchUsers = async () => {
         setLoading(true);
@@ -86,6 +90,10 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                 role: newAdminRole,
                 branchIds: newAdminRole === 'super_admin' ? ['global'] : newAdminBranches
             });
+            
+            // --- LOG ACTION ---
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'CREATE_EXECUTIVE', `Created a new ${newAdminRole} account for ${newAdminEmail}.`);
+
             setNewAdminName(''); setNewAdminEmail(''); setNewAdminPassword(''); setNewAdminBranches([]);
             alert(`Success! ${newAdminRole === 'super_admin' ? 'Global Super Admin' : 'Branch Admin'} account created.`);
             await fetchUsers();
@@ -109,6 +117,9 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                 branchIds: newAdminRole === 'super_admin' ? ['global'] : newAdminBranches
             }, { merge: true });
 
+            // --- LOG ACTION ---
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'PROMOTE_EXECUTIVE', `Promoted staff member ${targetUser.name} to ${newAdminRole}.`);
+
             setSelectedExistingUserId(''); setNewAdminBranches([]);
             alert(`Success! ${targetUser.name} has been promoted to ${newAdminRole === 'super_admin' ? 'Super Admin' : 'Branch Admin'}.`);
             await fetchUsers();
@@ -121,6 +132,11 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
         setIsSaving(true);
         try {
             await updateAdminBranchesFunc({ targetUid: adminId, branchIds: editingBranches });
+            
+            // --- LOG ACTION ---
+            const targetAdmin = users.find(u => u.id === adminId);
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_EXECUTIVE_BRANCHES', `Modified branch assignments for executive ${targetAdmin?.name || adminId}.`);
+
             setEditingAdminId(null);
             await fetchUsers();
         } catch (error) { alert(`Error: ${error.message}`); }
@@ -132,13 +148,16 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
         setIsSaving(true);
         try {
             await deleteDoc(doc(db, 'users', adminId));
+            
+            // --- LOG ACTION ---
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'REVOKE_EXECUTIVE', `Permanently revoked executive access for ${adminName}.`);
+
             alert(`Executive access revoked for ${adminName}.`);
             await fetchUsers();
         } catch (error) { alert(`Error revoking access: ${error.message}`); }
         finally { setIsSaving(false); }
     };
 
-    // --- NOUVEAU : Fonction de rétrogradation (Demote) ---
     const handleDemoteExecutive = async (admin) => {
         if (!admin.hasStaffProfile) {
             return alert(`Cannot demote ${admin.name}. They must have a Staff Profile first to ensure they are assigned to a specific branch.`);
@@ -148,6 +167,10 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
         setIsSaving(true);
         try {
             await updateUserRoleFunc({ targetUid: admin.id, newRole: 'manager' });
+            
+            // --- LOG ACTION ---
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'DEMOTE_EXECUTIVE', `Demoted executive ${admin.name} to General Manager.`);
+
             alert(`Success! ${admin.name} has been demoted to General Manager.`);
             await fetchUsers();
         } catch (error) { alert(`Error demoting: ${error.message}`); }
@@ -174,6 +197,10 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                 baseSalary: 0,
                 createdAt: new Date().toISOString()
             });
+            
+            // --- LOG ACTION ---
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'GENERATE_STAFF_PROFILE', `Generated a clock-in staff profile for executive ${admin.name}.`);
+
             alert(`Staff profile created for ${admin.name}! They can now access the Staff Portal.`);
             await fetchUsers();
         } catch (error) { alert(`Error creating staff profile: ${error.message}`); }
@@ -185,6 +212,10 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
         setIsSaving(true);
         try {
             await updateUserRoleFunc({ targetUid, newRole });
+            
+            // --- LOG ACTION ---
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_STAFF_CLEARANCE', `Changed security clearance of ${userName} to ${newRole.toUpperCase()}.`);
+
             alert(`Success! ${userName} is now authorized as a ${newRole.toUpperCase()}.`);
             await fetchUsers();
         } catch (error) { alert(`Error updating role: ${error.message}`); }
@@ -262,7 +293,6 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                     {creationMode === 'existing' && (
                                         <select value={selectedExistingUserId} onChange={e => setSelectedExistingUserId(e.target.value)} className="w-full bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-sm outline-none focus:border-indigo-500">
                                             <option value="">-- Select Manager to Promote --</option>
-                                            {/* --- CORRECTION: Filtré par succursale ET par rôle Manager --- */}
                                             {filteredWorkforce
                                                 .filter(u => ['manager', 'dept_manager'].includes(u.role))
                                                 .map(u => (
@@ -337,7 +367,6 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                                     </p>
                                                 </div>
                                                 
-                                                {/* --- CORRECTION: Seuls les Super Admins peuvent modifier les profils Executives --- */}
                                                 {userRole === 'super_admin' && (
                                                     <div className="flex gap-1">
                                                         {!user.hasStaffProfile && (

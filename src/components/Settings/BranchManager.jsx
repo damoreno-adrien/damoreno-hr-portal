@@ -3,13 +3,19 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
 import { Building, Plus, MapPin, AlertTriangle, Trash2, Users, Shield } from 'lucide-react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from '../../../firebase'; // Adjusted path to your firebase config
+
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase';
+import { logSystemAction } from '../../utils/auditLogger';
 
 // --- 1. THE DANGER ZONE SUB-COMPONENT ---
-const DangerZoneBranchDelete = ({ branches }) => {
+const DangerZoneBranchDelete = ({ branches, db }) => { // <-- Ajout de 'db' ici
     const [branchToDelete, setBranchToDelete] = useState('');
     const [confirmText, setConfirmText] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
+    
+    const auth = getAuth(app); // Initialisation auth
 
     const handleDelete = async () => {
         if (confirmText !== branchToDelete) {
@@ -24,6 +30,17 @@ const DangerZoneBranchDelete = ({ branches }) => {
                 const deleteBranchData = httpsCallable(functions, 'deleteBranchData');
                 
                 const result = await deleteBranchData({ branchId: branchToDelete });
+                
+                // --- LOG ACTION (CRITIQUE) ---
+                await logSystemAction(
+                    db, 
+                    auth.currentUser, 
+                    'global', // Action globale car on supprime une branche
+                    'DELETE_BRANCH', 
+                    `CRITICAL: Permanently erased all data for branch ID: ${branchToDelete}`
+                );
+                // -----------------------------
+
                 alert(result.data.message);
                 
                 setBranchToDelete('');
@@ -95,6 +112,8 @@ export function BranchManager({ db, config }) {
     const [isSaving, setIsSaving] = useState(false);
     const [branchStats, setBranchStats] = useState({});
 
+    const auth = getAuth(app); // Initialisation auth
+
     const branches = config?.branches || [];
 
     // --- DATA FETCHING: Get Active Staff and Directors ---
@@ -137,7 +156,6 @@ export function BranchManager({ db, config }) {
                         if (Array.isArray(data.branchIds)) {
                             data.branchIds.forEach(bId => {
                                 if (stats[bId]) {
-                                    // Use their staff name if they have one, otherwise fallback to their email
                                     const displayName = nameMap[doc.id] || data.name || data.email || 'Admin';
                                     if (!stats[bId].admins.includes(displayName)) {
                                         stats[bId].admins.push(displayName);
@@ -187,6 +205,17 @@ export function BranchManager({ db, config }) {
                     createdAt: new Date().toISOString()
                 })
             });
+
+            // --- LOG ACTION ---
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                'global', 
+                'ADD_BRANCH', 
+                `Registered a new branch: ${newBranchName} (${newBranchId})`
+            );
+            // ------------------
+
             setNewBranchName('');
             setNewBranchId('');
         } catch (error) {
@@ -310,7 +339,7 @@ export function BranchManager({ db, config }) {
 
             {/* Render Danger Zone at the bottom */}
             <div className="px-6 pb-6">
-                <DangerZoneBranchDelete branches={branches} />
+                <DangerZoneBranchDelete branches={branches} db={db} /> 
             </div>
         </div>
     );

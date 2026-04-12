@@ -5,7 +5,11 @@ import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Plus, Trash2, Check, Save, Loader2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
-// Note : onAddHoliday et onDeleteHoliday ne sont plus nécessaires, le composant gère la DB directement
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 export const PublicHolidaysSettings = ({ db, config, selectedBranchId }) => {
     const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
     
@@ -18,6 +22,8 @@ export const PublicHolidaysSettings = ({ db, config, selectedBranchId }) => {
     
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    const auth = getAuth(app); // Initialisation de l'auth pour les logs
 
     // 1. Lecture dynamique
     useEffect(() => {
@@ -58,6 +64,19 @@ export const PublicHolidaysSettings = ({ db, config, selectedBranchId }) => {
                 [`${prefix}publicHolidayCreditCap`]: Number(settings.maxHolidayBalance) 
             });
             
+            // --- NOUVEAU : LOG POUR LES RÈGLES FINANCIÈRES ---
+            const changedKeys = Object.keys(settings).filter(key => settings[key] !== originalSettings[key]);
+            const changesDetails = changedKeys.map(key => `${key} (${originalSettings[key]} -> ${settings[key]})`).join(', ');
+            
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_HOLIDAY_RULES', 
+                `Updated public holiday rules: ${changesDetails}`
+            );
+            // --------------------------------------------------
+
             setOriginalSettings(settings);
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
@@ -83,6 +102,17 @@ export const PublicHolidaysSettings = ({ db, config, selectedBranchId }) => {
             await updateDoc(doc(db, 'settings', 'company_config'), {
                 [prefix]: arrayUnion({ date: newHoliday.date, name: newHoliday.name.trim() })
             });
+
+            // --- NOUVEAU : LOG POUR L'AJOUT ---
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'ADD_PUBLIC_HOLIDAY', 
+                `Added holiday: ${newHoliday.name.trim()} (${newHoliday.date})`
+            );
+            // ----------------------------------
+
             setNewHoliday({ date: '', name: '' });
         } catch (err) {
             alert("Failed to add holiday: " + err.message);
@@ -99,6 +129,17 @@ export const PublicHolidaysSettings = ({ db, config, selectedBranchId }) => {
             await updateDoc(doc(db, 'settings', 'company_config'), {
                 [prefix]: arrayRemove(holiday)
             });
+
+            // --- NOUVEAU : LOG POUR LA SUPPRESSION ---
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'DELETE_PUBLIC_HOLIDAY', 
+                `Removed holiday: ${holiday.name} (${holiday.date})`
+            );
+            // -----------------------------------------
+
         } catch (err) {
             alert("Failed to delete holiday: " + err.message);
         }

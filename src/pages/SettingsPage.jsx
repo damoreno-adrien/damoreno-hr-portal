@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { Shield, Building2, BookOpen, Gift, DollarSign, CalendarHeart, MapPin, Network, Palmtree, Key, Loader2 } from 'lucide-react';
+import { Shield, Building2, BookOpen, Gift, DollarSign, CalendarHeart, MapPin, Network, Palmtree, Key, Loader2, Activity } from 'lucide-react';
 import { BranchManager } from '../components/Settings/BranchManager';
 import { CompanyInfoSettings } from '../components/Settings/CompanyInfoSettings';
 import { RoleDescriptionsSettings } from '../components/Settings/RoleDescriptionsSettings';
@@ -13,9 +13,13 @@ import { PublicHolidaysSettings } from '../components/Settings/PublicHolidaysSet
 import { GeofenceSettings } from '../components/Settings/GeofenceSettings';
 import { DepartmentManager } from '../components/Settings/DepartmentManager';
 import { AccessControlSettings } from '../components/Settings/AccessControlSettings'; 
-import { PermissionMatrix } from '../components/Settings/PermissionMatrix'; 
+import { PermissionMatrix } from '../components/Settings/PermissionMatrix';
+import { SystemLogsViewer } from '../components/Settings/SystemLogsViewer';
 
 import usePermissions from '../hooks/usePermissions';
+import { getAuth } from 'firebase/auth';
+import { app } from '../../firebase';
+import { logSystemAction } from '../utils/auditLogger';
 
 // --- ADDED: activeBranch prop ---
 export default function SettingsPage({ db, companyConfig, userRole, activeBranch }) {
@@ -50,24 +54,42 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
         };
     }, [companyConfig, effectiveBranch]);
 
+    // Initialisation de l'auth pour les logs (à mettre juste au dessus des fonctions)
+    const auth = getAuth(app);
+
     const handleAddDepartment = async (deptName) => { 
         const field = effectiveBranch ? `branchSettings.${effectiveBranch}.departments` : 'departments';
         await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayUnion(deptName) }); 
+        
+        // LOG AUDIT
+        await logSystemAction(db, auth.currentUser, effectiveBranch, 'ADD_DEPARTMENT', `Added department: ${deptName}`);
     };
+    
     const handleDeleteDepartment = async (dept) => { 
         if (window.confirm(`Delete department "${dept}"?`)) { 
             const field = effectiveBranch ? `branchSettings.${effectiveBranch}.departments` : 'departments';
             await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayRemove(dept) }); 
+            
+            // LOG AUDIT
+            await logSystemAction(db, auth.currentUser, effectiveBranch, 'DELETE_DEPARTMENT', `Deleted department: ${dept}`);
         } 
     };
+    
     const handleAddHoliday = async (holiday) => { 
         const field = effectiveBranch ? `branchSettings.${effectiveBranch}.publicHolidays` : 'publicHolidays';
         await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayUnion(holiday) }); 
+        
+        // LOG AUDIT
+        await logSystemAction(db, auth.currentUser, effectiveBranch, 'ADD_PUBLIC_HOLIDAY', `Added holiday: ${holiday.name} (${holiday.date})`);
     };
+    
     const handleDeleteHoliday = async (holiday) => { 
         if (window.confirm(`Delete holiday "${holiday.name}" (${holiday.date})?`)) { 
             const field = effectiveBranch ? `branchSettings.${effectiveBranch}.publicHolidays` : 'publicHolidays';
             await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayRemove(holiday) }); 
+            
+            // LOG AUDIT
+            await logSystemAction(db, auth.currentUser, effectiveBranch, 'DELETE_PUBLIC_HOLIDAY', `Removed holiday: ${holiday.name} (${holiday.date})`);
         } 
     };
 
@@ -83,6 +105,7 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
         { id: 'attendance-bonus', label: 'Attendance Bonus', icon: Gift, description: 'Rules for perfect attendance payouts.' },
         { id: 'leave-entitlements', label: 'Leave Entitlements', icon: Palmtree, description: 'Set yearly quotas for AL, Sick, etc.' },
         { id: 'public-holidays', label: 'Public Holidays', icon: CalendarHeart, description: 'Manage company recognized holidays.' },
+        { id: 'audit', label: 'Audit Logs', icon: Activity },
     ];
 
     const availableTabs = allTabs.filter(tab => {
@@ -111,6 +134,7 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
             case 'leave-entitlements': return <LeaveEntitlementsSettings db={db} config={resolvedConfig} selectedBranchId={effectiveBranch} />;
             case 'public-holidays': return <PublicHolidaysSettings db={db} config={resolvedConfig} onAddHoliday={handleAddHoliday} onDeleteHoliday={handleDeleteHoliday} selectedBranchId={effectiveBranch} />;
             case 'geofence-config': return <GeofenceSettings db={db} config={resolvedConfig} selectedBranchId={effectiveBranch} />;
+            case 'audit': return <SystemLogsViewer db={db} activeBranch={activeBranch} branches={companyConfig?.branches || []} />;
             default: return <div className="flex justify-center py-20"><p className="text-gray-400 font-bold uppercase tracking-widest text-sm">Select a module</p></div>;
         }
     };

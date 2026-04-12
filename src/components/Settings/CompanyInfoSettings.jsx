@@ -5,6 +5,11 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Check, Plus, Trash2 } from 'lucide-react';
 
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 export const CompanyInfoSettings = ({ db, config, selectedBranchId }) => {
     const [localConfig, setLocalConfig] = useState({ 
         companyName: '', 
@@ -20,6 +25,9 @@ export const CompanyInfoSettings = ({ db, config, selectedBranchId }) => {
     
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    // Initialisation de l'authentification pour le logger
+    const auth = getAuth(app);
 
     useEffect(() => {
         if (config) {
@@ -82,7 +90,6 @@ export const CompanyInfoSettings = ({ db, config, selectedBranchId }) => {
                 newLogoUrl = await getDownloadURL(storageRef);
             }
 
-            // --- THE STAMP: Save to branchSettings.[branchId] ---
             const prefix = selectedBranchId ? `branchSettings.${selectedBranchId}.` : '';
 
             const dataToSave = {
@@ -98,6 +105,24 @@ export const CompanyInfoSettings = ({ db, config, selectedBranchId }) => {
             }
 
             await updateDoc(configDocRef, dataToSave);
+
+            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
+            let changesDetails = [];
+            if (localConfig.companyName !== originalConfig.companyName) changesDetails.push(`Company Name`);
+            if (localConfig.tradingName !== originalConfig.tradingName) changesDetails.push(`Trading Name`);
+            if (localConfig.companyAddress !== originalConfig.companyAddress) changesDetails.push(`Address`);
+            if (localConfig.companyTaxId !== originalConfig.companyTaxId) changesDetails.push(`Tax ID`);
+            if (JSON.stringify(localConfig.directors) !== JSON.stringify(originalConfig.directors)) changesDetails.push(`Directors List`);
+            if (newLogoUrl !== originalConfig.companyLogoUrl) changesDetails.push(`Company Logo`);
+
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_COMPANY_INFO', 
+                `Updated: ${changesDetails.join(', ')}.`
+            );
+            // ------------------------------------------------
 
             setOriginalConfig({ ...localConfig, companyLogoUrl: newLogoUrl });
             setLogoFile(null);

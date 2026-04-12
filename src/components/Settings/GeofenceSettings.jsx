@@ -4,11 +4,19 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check } from 'lucide-react';
 
+// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+import { getAuth } from 'firebase/auth';
+import { app } from '../../../firebase.js';
+import { logSystemAction } from '../../utils/auditLogger';
+
 export const GeofenceSettings = ({ db, config, selectedBranchId }) => {
     const [localGeofence, setLocalGeofence] = useState({});
     const [originalGeofence, setOriginalGeofence] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    // Initialisation de l'authentification pour le logger
+    const auth = getAuth(app);
 
     useEffect(() => {
         if (config && config.geofence) {
@@ -45,6 +53,20 @@ export const GeofenceSettings = ({ db, config, selectedBranchId }) => {
             };
             await updateDoc(configDocRef, dataToSave);
             
+            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
+            // On détecte exactement quels champs (latitude, longitude, radius) ont été modifiés
+            const changedKeys = Object.keys(localGeofence).filter(key => localGeofence[key] !== originalGeofence[key]);
+            const changesDetails = changedKeys.map(key => `${key} (${originalGeofence[key]} -> ${localGeofence[key]})`).join(', ');
+            
+            await logSystemAction(
+                db, 
+                auth.currentUser, 
+                selectedBranchId, 
+                'UPDATE_GEOFENCE', 
+                `Updated geofence parameters: ${changesDetails}`
+            );
+            // ------------------------------------------------
+
             setOriginalGeofence(localGeofence); 
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
