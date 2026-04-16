@@ -15,11 +15,11 @@ import { DepartmentManager } from '../components/Settings/DepartmentManager';
 import { AccessControlSettings } from '../components/Settings/AccessControlSettings'; 
 import { PermissionMatrix } from '../components/Settings/PermissionMatrix';
 import { SystemLogsViewer } from '../components/Settings/SystemLogsViewer';
-
 import usePermissions from '../hooks/usePermissions';
 import { getAuth } from 'firebase/auth';
 import { app } from '../../firebase';
 import { logSystemAction } from '../utils/auditLogger';
+import { SandboxSeeder } from '../components/Settings/SandboxSeeder';
 
 // --- ADDED: activeBranch prop ---
 export default function SettingsPage({ db, companyConfig, userRole, activeBranch }) {
@@ -208,6 +208,12 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
                     {renderContent()}
                 </div>
             </div>
+            {/* Outil de développement visible uniquement par les Super Admins */}
+            {userRole === 'super_admin' && (
+                <div className="px-4 md:px-0">
+                    <SandboxSeeder db={db} />
+                </div>
+            )}
         </div>
     );
 }

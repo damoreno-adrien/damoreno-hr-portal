@@ -111,10 +111,11 @@ export default function useWeeklyPlannerData(db, currentWeekStart) {
 
             // --- NEW: Combine all data into the final weekData structure ---
             const combinedData = {};
+            // --- FIX : Récupère le vrai staffId depuis la donnée (Robuste) ---
             const allStaffIds = new Set([
-                ...Array.from(schedulesMap.keys()).map(k => k.split('_')[0]),
-                ...Array.from(attendanceMap.keys()).map(k => k.split('_')[0]),
-                ...Array.from(leaveMap.keys()).map(k => k.split('_')[0]),
+                ...Array.from(schedulesMap.values()).map(v => v.staffId),
+                ...Array.from(attendanceMap.values()).map(v => v.staffId),
+                ...Array.from(leaveMap.values()).map(v => v.staffId),
             ]);
 
             for (const staffId of allStaffIds) {

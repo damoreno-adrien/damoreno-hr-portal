@@ -13,13 +13,20 @@ const formatRate = (job) => {
     return typeof salary === 'number' ? `${salary.toLocaleString()} THB / mo (${hours}h/day)` : 'N/A';
 };
 
-export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAddNewJob, onEditJob, onDeleteJob }) => {
+// FIX 1: Initialisation des props par défaut avec des tableaux vides
+export const JobHistoryManager = ({ jobHistory = [], departments = [], roleTemplates = [], onAddNewJob, onEditJob, onDeleteJob }) => {
+    
+    // FIX 2: Sécurisation absolue. Si la donnée est corrompue, on force un tableau.
+    const safeJobHistory = Array.isArray(jobHistory) ? jobHistory : [];
+    const safeDepartments = Array.isArray(departments) && departments.length > 0 ? departments : ['General'];
+    const safeTemplates = Array.isArray(roleTemplates) ? roleTemplates : [];
+
     const [isAddingJob, setIsAddingJob] = useState(false);
     const [originalJobToEdit, setOriginalJobToEdit] = useState(null);
     
     const [newJob, setNewJob] = useState({ 
         position: '', 
-        department: departments[0] || '', 
+        department: safeDepartments[0], // Utilise la valeur sécurisée
         startDate: dateUtils.formatISODate(new Date()), 
         payType: 'Salary', 
         baseSalary: '',    
@@ -36,23 +43,21 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
     const handleEditClick = (job) => {
         setOriginalJobToEdit(job);
         
-        // Determine Pay Type (Backward Compatibility)
         let type = job.payType;
         if (type === 'Monthly' || !type) type = 'Salary'; 
 
-        // Determine Rates
         let salary = '';
         let hourly = '';
         if (type === 'Salary') {
-            salary = job.baseSalary !== undefined ? job.baseSalary : job.rate;
+            salary = job.baseSalary !== undefined && job.baseSalary !== null ? job.baseSalary : (job.rate || '');
         } else {
-            hourly = job.hourlyRate !== undefined ? job.hourlyRate : job.rate;
+            hourly = job.hourlyRate !== undefined && job.hourlyRate !== null ? job.hourlyRate : (job.rate || '');
         }
 
         setNewJob({
-            position: job.position,
-            department: job.department,
-            startDate: dateUtils.formatISODate(dateUtils.fromFirestore(job.startDate)),
+            position: job.position || '',
+            department: job.department || safeDepartments[0],
+            startDate: job.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(job.startDate)) : dateUtils.formatISODate(new Date()),
             payType: type,
             baseSalary: salary,
             standardDayHours: job.standardDayHours || 8, 
@@ -68,7 +73,7 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
         setError('');
         setNewJob({ 
             position: '', 
-            department: departments[0] || '', 
+            department: safeDepartments[0], 
             startDate: dateUtils.formatISODate(new Date()), 
             payType: 'Salary', 
             baseSalary: '', 
@@ -84,6 +89,7 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
             return;
         }
 
+        // FIX 3: Structure exacte de ta DB
         let cleanJobData = {
             position: newJob.position,
             department: newJob.department,
@@ -96,11 +102,11 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
             if (!newJob.baseSalary) { setError("Base Salary is required."); return; }
             cleanJobData.baseSalary = parseInt(newJob.baseSalary, 10);
             cleanJobData.standardDayHours = parseInt(newJob.standardDayHours, 10) || 8;
-            cleanJobData.hourlyRate = null; 
+            cleanJobData.hourlyRate = null; // IMPORTANT: Force le null pour la DB
         } else {
             if (!newJob.hourlyRate) { setError("Hourly Rate is required."); return; }
             cleanJobData.hourlyRate = parseInt(newJob.hourlyRate, 10);
-            cleanJobData.baseSalary = null; 
+            cleanJobData.baseSalary = null; // IMPORTANT: Force le null
             cleanJobData.standardDayHours = null;
         }
 
@@ -121,7 +127,8 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
         }
     };
 
-    const sortedJobHistory = [...jobHistory].sort((a, b) => {
+    // FIX 4: On trie sur le tableau sécurisé
+    const sortedJobHistory = [...safeJobHistory].sort((a, b) => {
         const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
         const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
         return dateA - dateB;
@@ -138,24 +145,24 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-sm text-gray-300">Department</label>
-                            <select id="department" value={newJob.department} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white">
-                                {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                            <select id="department" value={newJob.department} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-gray-500 focus:border-indigo-500">
+                                {safeDepartments.map(d => <option key={d} value={d}>{d}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="text-sm text-gray-300">Position</label>
-                            <input id="position" value={newJob.position} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white"/>
+                            <input id="position" value={newJob.position} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-gray-500 focus:border-indigo-500"/>
                         </div>
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-sm text-gray-300">Start Date</label>
-                            <input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white"/>
+                            <input id="startDate" type="date" value={newJob.startDate} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-gray-500 focus:border-indigo-500"/>
                         </div>
                         <div>
                             <label className="text-sm text-gray-300">Pay Type</label>
-                            <select id="payType" value={newJob.payType} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white">
+                            <select id="payType" value={newJob.payType} onChange={handleNewJobChange} className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-gray-500 focus:border-indigo-500">
                                 <option value="Salary">Salary (Fixed Monthly)</option>
                                 <option value="Hourly">Hourly (Per Hour)</option>
                             </select>
@@ -189,10 +196,10 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
                             id="roleTemplate" 
                             value={newJob.roleTemplate || ''} 
                             onChange={handleNewJobChange} 
-                            className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-transparent focus:border-indigo-500"
+                            className="w-full mt-1 px-3 py-2 bg-gray-600 rounded-md text-white border border-gray-500 focus:border-indigo-500"
                         >
                             <option value="">-- No specific template (Requires manual entry) --</option>
-                            {roleTemplates && roleTemplates.map(template => (
+                            {safeTemplates.map(template => (
                                 <option key={template} value={template}>{template}</option>
                             ))}
                         </select>
@@ -208,17 +215,17 @@ export const JobHistoryManager = ({ jobHistory, departments, roleTemplates, onAd
                     {error && <p className="text-red-400 text-sm text-right mt-2">{error}</p>}
                 </div>
             ) : ( 
-                <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors">
+                <button onClick={() => setIsAddingJob(true)} className="w-full flex justify-center items-center py-2 px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors border border-gray-600">
                     <Plus className="h-5 w-5 mr-2"/>Add New Job Role
                 </button> 
             )}
             
-            <div className="space-y-2 max-h-60 overflow-y-auto">
+            <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
                 {sortedJobHistory.length === 0 && !isAddingJob && (
-                    <p className="text-center text-gray-500 py-4">No job history recorded.</p>
+                    <p className="text-center text-gray-500 py-4 italic border border-dashed border-gray-700 rounded-lg">No job history recorded.</p>
                 )}
                 {sortedJobHistory.map((job, index) => (
-                    <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group">
+                    <div key={index} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center group border border-gray-600">
                         <div>
                             <p className="font-bold text-white">
                                 {job.position} <span className="text-sm text-gray-400">({job.department})</span>
