@@ -34,7 +34,7 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
-            {staff.status === 'inactive' && <InfoRow label="Last Day of Employment" value={dateUtils.formatDisplayDate(staff.endDate)} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
+            {['inactive', 'archived'].includes(staff.status) && staff.endDate && <InfoRow label="Last Day of Employment" value={dateUtils.formatDisplayDate(staff.endDate)} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
             
             {/* --- NEW: Show Branch Assignment --- */}
             <div className="md:col-span-2 bg-indigo-900/20 p-3 rounded-lg border border-indigo-700/50">

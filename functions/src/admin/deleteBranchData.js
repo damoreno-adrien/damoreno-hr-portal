@@ -1,28 +1,32 @@
-const functions = require('firebase-functions');
+const { HttpsError, https } = require("firebase-functions/v2");
 const admin = require('firebase-admin');
+const { getFirestore } = require('firebase-admin/firestore');
 
-exports.deleteBranchData = functions.region('asia-southeast1').https.onCall(async (data, context) => {
+if (admin.apps.length === 0) { admin.initializeApp(); }
+const db = getFirestore();
+
+// FIX 1 : On utilise la syntaxe v2 et le bon nom d'export attendu par index.js
+exports.deleteBranchDataHandler = https.onCall({ region: "asia-southeast1", timeoutSeconds: 540 }, async (request) => {
     // 1. SECURITY: Ensure user is authenticated
-    if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'You must be logged in.');
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'You must be logged in.');
     }
-
-    const db = admin.firestore();
 
     // 2. SECURITY: Ensure user is a Super Admin
-    const callerRef = await db.collection('users').doc(context.auth.uid).get();
+    const callerRef = await db.collection('users').doc(request.auth.uid).get();
     if (!callerRef.exists || callerRef.data().role !== 'super_admin') {
-        throw new functions.https.HttpsError('permission-denied', 'Only Super Admins can execute a branch wipe.');
+        throw new HttpsError('permission-denied', 'Only Super Admins can execute a branch wipe.');
     }
 
-    const targetBranchId = data.branchId;
+    // FIX 2 : En v2, les données envoyées sont dans request.data
+    const targetBranchId = request.data.branchId;
     if (!targetBranchId) {
-        throw new functions.https.HttpsError('invalid-argument', 'Branch ID is required.');
+        throw new HttpsError('invalid-argument', 'Branch ID is required.');
     }
 
     // Protect core branches from accidental deletion (Safety net)
     if (targetBranchId === 'br_damorenotown' || targetBranchId === 'br_damorenokathu' || targetBranchId === 'global') {
-         throw new functions.https.HttpsError('permission-denied', 'Protection Fault: Cannot delete primary operational branches.');
+         throw new HttpsError('permission-denied', 'Protection Fault: Cannot delete primary operational branches.');
     }
 
     try {
@@ -75,7 +79,8 @@ exports.deleteBranchData = functions.region('asia-southeast1').https.onCall(asyn
         const configRef = db.collection('settings').doc('company_config');
         const configSnap = await configRef.get();
         
-        if (configSnap.exists()) {
+        // FIX 3 : En Admin SDK Node.js, .exists est une propriété, pas une fonction
+        if (configSnap.exists) {
             const configData = configSnap.data();
             
             // Remove from branches array
@@ -98,6 +103,6 @@ exports.deleteBranchData = functions.region('asia-southeast1').https.onCall(asyn
 
     } catch (error) {
         console.error("Branch Deletion Error:", error);
-        throw new functions.https.HttpsError('internal', 'An error occurred during the deletion process.');
+        throw new HttpsError('internal', 'An error occurred during the deletion process.');
     }
 });

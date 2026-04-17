@@ -4,14 +4,18 @@ const { getFirestore } = require('firebase-admin/firestore');
 
 const db = getFirestore();
 
-exports.setStaffPasswordHandler = https.onCall({ region: "us-central1" }, async (request) => {
+// FIX 1 : Changement de la région vers Asie
+exports.setStaffPasswordHandler = https.onCall({ region: "asia-southeast1" }, async (request) => {
     // 1. Authentication & Authorization Checks
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
-    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-        throw new HttpsError("permission-denied", "Only managers can reset staff passwords.");
+    
+    // FIX 2 : Autorisation pour Admin et Super Admin
+    const allowedRoles = ['manager', 'admin', 'super_admin'];
+    if (!callerDoc.exists || !allowedRoles.includes(callerDoc.data().role)) {
+        throw new HttpsError("permission-denied", "Only managers and admins can reset staff passwords.");
     }
 
     // 2. Input Validation

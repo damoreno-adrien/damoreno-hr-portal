@@ -18,12 +18,12 @@ import { generateDocument, translateNumber } from '../../utils/documentGenerator
 const functionsDefault = getFunctions(app);
 const functionsAsia = getFunctions(app, "asia-southeast1");
 
-const deleteStaffFunc = httpsCallable(functionsDefault, 'deleteStaff');
-const setStaffAuthStatus = httpsCallable(functionsDefault, 'setStaffAuthStatus');
-const setStaffPassword = httpsCallable(functionsDefault, 'setStaffPassword');
+const deleteStaffFunc = httpsCallable(functionsAsia, 'deleteStaff');
+const setStaffAuthStatus = httpsCallable(functionsAsia, 'setStaffAuthStatus');
+const setStaffPassword = httpsCallable(functionsAsia, 'setStaffPassword');
 
 // --- Import our Email Sync Function ---
-const updateStaffEmailFunc = httpsCallable(functionsDefault, 'updateStaffEmail');
+const updateStaffEmailFunc = httpsCallable(functionsAsia, 'updateStaffEmail');
 
 const getInitialFormData = (staff) => {
     const formattedStartDate = staff.startDate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.startDate)) : '';
@@ -35,7 +35,7 @@ const getInitialFormData = (staff) => {
         isSsoRegistered: staff.isSsoRegistered ?? true,
         idType: staff.idType || 'None',
         idNumber: staff.idNumber || '',
-        branchId: staff.branchId || '', // Branch ID captured here
+        branchId: staff.branchId || '', 
     };
     if (staff.firstName || staff.lastName) return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
     const nameParts = (staff.fullName || '').split(' ');
@@ -206,8 +206,11 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
 
-    // --- THE FIX: We grant tab access to Managers, Admins, AND Super Admins ---
+    // Permet l'accès aux onglets basiques
     const isFullManager = ['manager', 'admin', 'super_admin'].includes(userRole);
+    
+    // FIX 2: Contrôle d'accès strict pour les actions destructrices
+    const canManageLifecycle = ['admin', 'super_admin'].includes(userRole);
 
     useEffect(() => {
         setFormData(getInitialFormData(staff));
@@ -336,18 +339,31 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const handleDeleteStaff = async () => {
         if (window.confirm(`DELETE STAFF?`) && window.confirm("Final confirmation: Delete this staff member?")) {
             setIsSaving(true); setError('');
-            try { await deleteStaffFunc({ staffId: staff.id }); onClose(); } catch (err) { alert(`Error deleting staff.`); } finally { setIsSaving(false); }
+            try { await deleteStaffFunc({ staffId: staff.id }); onClose(); } catch (err) { alert(`Error deleting staff: ${err.message}`); } finally { setIsSaving(false); }
         }
     };
 
+    // FIX 3: Réactivation Sécurisée (Ordre des opérations inversé)
     const handleReactivateStaff = async () => {
         setIsSaving(true); setError('');
         try {
             if (!window.confirm(`Set ${displayName} as Active?`)) return;
+            
+            // 1. On tente D'ABORD de réactiver l'accès Auth. Si ça plante, on s'arrête là !
+            await setStaffAuthStatus({ staffId: staff.id, disabled: false });
+            
+            // 2. Si Auth a réussi, on met à jour la base de données.
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await Promise.all([updateDoc(staffDocRef, { status: 'active', endDate: null }), setStaffAuthStatus({ staffId: staff.id, disabled: false })]);
+            const userDocRef = doc(db, 'users', staff.id);
+            await updateDoc(staffDocRef, { status: 'active', endDate: null });
+            try { await updateDoc(userDocRef, { status: 'active' }); } catch (e) { /* Ignore si doc User absent */ }
+            
             onClose();
-        } catch (err) { alert(`Failed to activate staff.`); } finally { setIsSaving(false); }
+        } catch (err) { 
+            alert(`Failed to activate staff access in Firebase. The database was NOT modified to prevent desync. Reason: ${err.message}`); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     const handleUploadFile = async (fileToUpload, metadata) => {
@@ -500,7 +516,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const getTabClasses = (tabName) => {
         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`;
     };
-    const isActive = staff.status === 'active' || staff.status === undefined || staff.status === null;
+    
+    // FIX 4: On regarde l'endDate pour savoir si la personne est VRAIMENT inactive
+    const todayISO = new Date().toISOString().split('T')[0];
+    const isCurrentlyWorking = staff.status === 'active' || !staff.status || (staff.endDate && staff.endDate > todayISO);
 
     return (
         <div className="space-y-6 relative">
@@ -511,8 +530,28 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     onClose={() => setIsOffboardingModalOpen(false)}
                     onSuccess={async (shouldDisableImmediately) => {
                         setIsOffboardingModalOpen(false);
-                        if (shouldDisableImmediately) { try { await setStaffAuthStatus({ staffId: staff.id, disabled: true }); } catch (e) { } }
-                        if (window.confirm("Staff member archived! Would you like to print the Resignation Letter for them to sign?")) {
+                        
+                        try {
+                            const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                            const userDocRef = doc(db, 'users', staff.id);
+                            
+                            // FIX 5: Ordre sécurisé et respect de la logique métier (Payroll)
+                            if (shouldDisableImmediately) { 
+                                // Blocage immédiat exigé
+                                await setStaffAuthStatus({ staffId: staff.id, disabled: true }); 
+                                await updateDoc(staffDocRef, { status: 'archived' });
+                                try { await updateDoc(userDocRef, { status: 'archived' }); } catch(e) {}
+                            } else {
+                                // Fin de contrat dans le futur : on ne bloque pas encore l'accès
+                                // Et on ne force PAS le statut à "archived" tout de suite, 
+                                // car OffboardingModal s'est déjà chargé de mettre l'endDate en DB.
+                                console.log("Staff will remain active until their end date.");
+                            }
+                        } catch (error) {
+                            alert(`Error during offboarding sync: ${error.message}`);
+                        }
+
+                        if (window.confirm("Offboarding details saved! Would you like to print the Resignation/Termination Letter for them to sign?")) {
                             await handleGenerate('resignation', { RESIGNATION_NOTICE_DATE: dateUtils.formatCustom(new Date(), 'dd MMMM yyyy'), LAST_WORKING_DAY: dateUtils.formatCustom(new Date(staff.endDate || new Date()), 'dd MMMM yyyy') });
                         }
                         onClose();
@@ -526,7 +565,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
                     
-                    {/* THE FIX: We use isFullManager here so Super Admins can see the tabs! */}
                     {isFullManager && (
                         <button onClick={() => setActiveTab('hr-records')} className={getTabClasses('hr-records')}>
                             <span className="flex items-center gap-2"><History className="h-4 w-4" /> HR Records</span>
@@ -672,19 +710,37 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         </div>
                     </div>
 
-                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
-                        <h4 className="text-base font-semibold text-white">Staff Actions</h4>
-                        <div>
-                            {isActive ? (<button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff"> <Archive className="h-4 w-4 mr-2" /> Archive Staff Member </button>) : (<button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff"> <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active </button>)}
-                        </div>
-                        <div><button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password"> <Key className="h-4 w-4 mr-2" /> Reset Password </button></div>
-                        {!isActive && (
-                            <div className="pt-4 border-t border-gray-700">
-                                <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently"> <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently </button>
-                                <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
+                    {/* SEULS LES ADMINS PEUVENT GÉRER LE CYCLE DE VIE DU STAFF */}
+                    {canManageLifecycle && (
+                        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
+                            <h4 className="text-base font-semibold text-white">Critical Staff Actions</h4>
+                            <div>
+                                {isCurrentlyWorking ? (
+                                    <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff"> 
+                                        <Archive className="h-4 w-4 mr-2" /> Archive Staff Member 
+                                    </button>
+                                ) : (
+                                    <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff"> 
+                                        <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active 
+                                    </button>
+                                )}
                             </div>
-                        )}
-                    </div>
+                            <div>
+                                <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password"> 
+                                    <Key className="h-4 w-4 mr-2" /> Reset Password 
+                                </button>
+                            </div>
+                            
+                            {!isCurrentlyWorking && (
+                                <div className="pt-4 border-t border-gray-700">
+                                    <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently"> 
+                                        <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently 
+                                    </button>
+                                    <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 
