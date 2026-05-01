@@ -238,9 +238,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     }, [staff]);
 
     const currentJob = [...(staff.jobHistory || [])].sort((a, b) => {
-        const dateA = new Date(b.startDate || 0);
-        const dateB = new Date(a.startDate || 0);
-        return dateA - dateB;
+        // Correction de la logique de tri (b - a pour avoir le plus récent en [0])
+        return new Date(b.startDate || 0) - new Date(a.startDate || 0);
     })[0] || {};
 
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
@@ -848,7 +847,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 <div className="space-y-6">
                     <JobHistoryManager
                         jobHistory={staff.jobHistory}
-                        departments={departments}
+                        departments={companyConfig?.branchSettings?.[staff.branchId]?.departments || []}
                         roleTemplates={Object.keys(companyConfig?.roleDescriptions || {})}
                         onAddNewJob={handleAddNewJob}
                         onEditJob={handleEditJob}
