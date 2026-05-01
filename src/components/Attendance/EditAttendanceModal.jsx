@@ -5,6 +5,10 @@ import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, collection,
 import { X, Clock, Save, Coffee, Flame, AlertCircle, Loader2, Watch, Trash2, ShieldAlert } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../common/FeedbackModal';
+import ConfirmModal from '../common/ConfirmModal';
+
 export default function EditAttendanceModal({ db, record, onClose }) {
     // --- STATE ---
     const [checkIn, setCheckIn] = useState('14:00');
@@ -25,6 +29,10 @@ export default function EditAttendanceModal({ db, record, onClose }) {
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [docId, setDocId] = useState(record?.id || null);
+
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     // --- HELPER: SAFE DATE PARSING ---
     const parseTimeFromVal = (val) => {
@@ -97,8 +105,15 @@ export default function EditAttendanceModal({ db, record, onClose }) {
 
     // --- ACTION: SAVE ---
     const handleSave = async () => {
-        if (!checkIn) return alert("Check-in time is required");
-        if (breakMode === 'manual' && (!breakStart || !breakEnd)) return alert("Both break start and end times are required for Manual mode.");
+        // --- MODIFIÉ : Remplacement des alert() ---
+        if (!checkIn) {
+            setFeedbackModal({ type: 'error', title: 'Missing Information', message: "Check-in time is required." });
+            return;
+        }
+        if (breakMode === 'manual' && (!breakStart || !breakEnd)) {
+            setFeedbackModal({ type: 'error', title: 'Missing Information', message: "Both break start and end times are required for Manual mode." });
+            return;
+        }
 
         setIsSaving(true);
         try {
@@ -159,7 +174,8 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             onClose();
         } catch (error) {
             console.error("Error updating attendance:", error);
-            alert("Failed to save.");
+            // --- MODIFIÉ : Remplacement du alert() ---
+            setFeedbackModal({ type: 'error', title: 'Save Failed', message: "Failed to save attendance record." });
         } finally {
             setIsSaving(false);
         }
@@ -168,135 +184,167 @@ export default function EditAttendanceModal({ db, record, onClose }) {
     // --- ACTION: DELETE ---
     const handleDelete = async () => {
         if (!docId) return;
-        if (!window.confirm("CRITICAL WARNING: Are you sure you want to permanently delete this attendance record? This will completely remove it from payroll calculations and cannot be undone.")) return;
 
-        setIsDeleting(true);
-        try {
-            await deleteDoc(doc(db, "attendance", docId));
-            onClose();
-        } catch (error) {
-            console.error("Error deleting attendance:", error);
-            alert("Failed to delete record.");
-            setIsDeleting(false);
-        }
+        // --- MODIFIÉ : Remplacement du window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Attendance Record",
+            message: "CRITICAL WARNING: Are you sure you want to permanently delete this attendance record? This will completely remove it from payroll calculations and cannot be undone.",
+            isDestructive: true,
+            confirmText: "Delete Record",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsDeleting(true);
+                try {
+                    await deleteDoc(doc(db, "attendance", docId));
+                    onClose();
+                } catch (error) {
+                    console.error("Error deleting attendance:", error);
+                    // --- MODIFIÉ : Remplacement du alert() ---
+                    setFeedbackModal({ type: 'error', title: 'Delete Failed', message: "Failed to delete record." });
+                    setIsDeleting(false);
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     return (
-        <div className="space-y-6 p-1">
-            {/* Header */}
-            <div className="flex items-center gap-4 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
-                <div className="w-12 h-12 bg-indigo-500/10 rounded-full flex items-center justify-center text-indigo-400 font-black">
-                    {record.staffName?.substring(0, 2).toUpperCase()}
+        <>
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
+
+            <div className="space-y-6 p-1">
+                {/* Header */}
+                <div className="flex items-center gap-4 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                    <div className="w-12 h-12 bg-indigo-500/10 rounded-full flex items-center justify-center text-indigo-400 font-black">
+                        {record.staffName?.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                        <h4 className="text-white font-bold">{record.staffName}</h4>
+                        <p className="text-xs text-gray-500 uppercase font-medium">{record.date}</p>
+                    </div>
                 </div>
-                <div>
-                    <h4 className="text-white font-bold">{record.staffName}</h4>
-                    <p className="text-xs text-gray-500 uppercase font-medium">{record.date}</p>
-                </div>
+
+                {isLoadingData ? (
+                    <div className="flex justify-center py-8"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>
+                ) : (
+                    <>
+                        {/* Shift Times */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-gray-500 uppercase ml-1">Clock In</label>
+                                <div className="relative">
+                                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                                    <input type="time" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="w-full bg-gray-800 text-white pl-10 p-3 rounded-xl border border-gray-700 outline-none focus:border-indigo-500 transition-all" />
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-gray-500 uppercase ml-1">Clock Out</label>
+                                <div className="relative">
+                                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                                    <input type="time" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="w-full bg-gray-800 text-white pl-10 p-3 rounded-xl border border-gray-700 outline-none focus:border-indigo-500 transition-all" />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Break Policy Selector */}
+                        <div className="space-y-3 pt-2 border-t border-gray-800">
+                            <label className="text-[10px] font-black text-gray-500 uppercase ml-1 block">Break Policy</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onClick={() => setBreakMode('auto')} className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${breakMode === 'auto' ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'}`}>
+                                    <Coffee className={`w-5 h-5 mb-1 ${breakMode === 'auto' ? 'text-indigo-400' : 'text-gray-500'}`} />
+                                    <span className="text-[10px] font-bold">Standard</span>
+                                    <span className="text-[9px] opacity-60">Auto -1h</span>
+                                </button>
+                                <button onClick={() => setBreakMode('manual')} className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${breakMode === 'manual' ? 'bg-amber-600/20 border-amber-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'}`}>
+                                    <Clock className={`w-5 h-5 mb-1 ${breakMode === 'manual' ? 'text-amber-400' : 'text-gray-500'}`} />
+                                    <span className="text-[10px] font-bold">Manual</span>
+                                    <span className="text-[9px] opacity-60">Set Times</span>
+                                </button>
+                                <button onClick={() => setBreakMode('none')} className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${breakMode === 'none' ? 'bg-red-600/20 border-red-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'}`}>
+                                    <Flame className={`w-5 h-5 mb-1 ${breakMode === 'none' ? 'text-red-400' : 'text-gray-500'}`} />
+                                    <span className="text-[10px] font-bold">Continuous</span>
+                                    <span className="text-[9px] opacity-60">No Break</span>
+                                </button>
+                            </div>
+
+                            {/* Manual Break Inputs */}
+                            {breakMode === 'manual' && (
+                                <div className="grid grid-cols-2 gap-4 bg-gray-800/50 p-3 rounded-lg border border-gray-700 animate-fadeIn">
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase">Break Start</label>
+                                        <input type="time" value={breakStart} onChange={(e) => setBreakStart(e.target.value)} className="w-full bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-sm" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase">Break End</label>
+                                        <input type="time" value={breakEnd} onChange={(e) => setBreakEnd(e.target.value)} className="w-full bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-sm" />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Manager Overrides Section */}
+                        <div className="space-y-3 pt-4 border-t border-gray-800">
+                            <label className="text-[10px] font-black text-indigo-400 uppercase ml-1 flex items-center gap-1">
+                                <ShieldAlert className="w-3 h-3" /> Manager Overrides
+                            </label>
+                            <div className="bg-gray-800/50 p-3 rounded-lg border border-indigo-900/30 flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-bold text-gray-300">Force Paid Overtime</p>
+                                    <p className="text-[10px] text-gray-500">Manually grant OT minutes (bypasses scanner)</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input 
+                                        type="number" 
+                                        value={otOverride} 
+                                        onChange={(e) => setOtOverride(e.target.value)} 
+                                        placeholder="0" 
+                                        className="w-16 bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-center text-sm focus:border-indigo-500 outline-none" 
+                                        min="0" 
+                                    />
+                                    <span className="text-xs text-gray-500 font-bold">mins</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 pt-4 border-t border-gray-800">
+                            {docId && (
+                                <button 
+                                    onClick={handleDelete} 
+                                    disabled={isSaving || isDeleting} 
+                                    className="px-4 py-3 bg-red-900/30 hover:bg-red-900/50 text-red-500 font-bold rounded-xl transition-all border border-red-900/50 flex items-center justify-center disabled:opacity-50"
+                                    title="Delete Record"
+                                >
+                                    {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+                                </button>
+                            )}
+                            
+                            <button onClick={onClose} disabled={isSaving || isDeleting} className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-all disabled:opacity-50">Cancel</button>
+                            
+                            <button onClick={handleSave} disabled={isSaving || isDeleting} className="flex-[2] bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">
+                                {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                                {isSaving ? "Saving..." : "Save Changes"}
+                            </button>
+                        </div>
+                    </>
+                )}
             </div>
-
-            {isLoadingData ? (
-                <div className="flex justify-center py-8"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>
-            ) : (
-                <>
-                    {/* Shift Times */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                            <label className="text-[10px] font-black text-gray-500 uppercase ml-1">Clock In</label>
-                            <div className="relative">
-                                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                <input type="time" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="w-full bg-gray-800 text-white pl-10 p-3 rounded-xl border border-gray-700 outline-none focus:border-indigo-500 transition-all" />
-                            </div>
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="text-[10px] font-black text-gray-500 uppercase ml-1">Clock Out</label>
-                            <div className="relative">
-                                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                <input type="time" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="w-full bg-gray-800 text-white pl-10 p-3 rounded-xl border border-gray-700 outline-none focus:border-indigo-500 transition-all" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Break Policy Selector */}
-                    <div className="space-y-3 pt-2 border-t border-gray-800">
-                        <label className="text-[10px] font-black text-gray-500 uppercase ml-1 block">Break Policy</label>
-                        <div className="grid grid-cols-3 gap-2">
-                            <button onClick={() => setBreakMode('auto')} className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${breakMode === 'auto' ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'}`}>
-                                <Coffee className={`w-5 h-5 mb-1 ${breakMode === 'auto' ? 'text-indigo-400' : 'text-gray-500'}`} />
-                                <span className="text-[10px] font-bold">Standard</span>
-                                <span className="text-[9px] opacity-60">Auto -1h</span>
-                            </button>
-                            <button onClick={() => setBreakMode('manual')} className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${breakMode === 'manual' ? 'bg-amber-600/20 border-amber-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'}`}>
-                                <Clock className={`w-5 h-5 mb-1 ${breakMode === 'manual' ? 'text-amber-400' : 'text-gray-500'}`} />
-                                <span className="text-[10px] font-bold">Manual</span>
-                                <span className="text-[9px] opacity-60">Set Times</span>
-                            </button>
-                            <button onClick={() => setBreakMode('none')} className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-all ${breakMode === 'none' ? 'bg-red-600/20 border-red-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750'}`}>
-                                <Flame className={`w-5 h-5 mb-1 ${breakMode === 'none' ? 'text-red-400' : 'text-gray-500'}`} />
-                                <span className="text-[10px] font-bold">Continuous</span>
-                                <span className="text-[9px] opacity-60">No Break</span>
-                            </button>
-                        </div>
-
-                        {/* Manual Break Inputs */}
-                        {breakMode === 'manual' && (
-                            <div className="grid grid-cols-2 gap-4 bg-gray-800/50 p-3 rounded-lg border border-gray-700 animate-fadeIn">
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-bold text-gray-400 uppercase">Break Start</label>
-                                    <input type="time" value={breakStart} onChange={(e) => setBreakStart(e.target.value)} className="w-full bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-sm" />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-bold text-gray-400 uppercase">Break End</label>
-                                    <input type="time" value={breakEnd} onChange={(e) => setBreakEnd(e.target.value)} className="w-full bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-sm" />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Manager Overrides Section */}
-                    <div className="space-y-3 pt-4 border-t border-gray-800">
-                        <label className="text-[10px] font-black text-indigo-400 uppercase ml-1 flex items-center gap-1">
-                            <ShieldAlert className="w-3 h-3" /> Manager Overrides
-                        </label>
-                        <div className="bg-gray-800/50 p-3 rounded-lg border border-indigo-900/30 flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-bold text-gray-300">Force Paid Overtime</p>
-                                <p className="text-[10px] text-gray-500">Manually grant OT minutes (bypasses scanner)</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <input 
-                                    type="number" 
-                                    value={otOverride} 
-                                    onChange={(e) => setOtOverride(e.target.value)} 
-                                    placeholder="0" 
-                                    className="w-16 bg-gray-900 text-white p-2 rounded-lg border border-gray-600 text-center text-sm focus:border-indigo-500 outline-none" 
-                                    min="0" 
-                                />
-                                <span className="text-xs text-gray-500 font-bold">mins</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="flex gap-3 pt-4 border-t border-gray-800">
-                        {docId && (
-                            <button 
-                                onClick={handleDelete} 
-                                disabled={isSaving || isDeleting} 
-                                className="px-4 py-3 bg-red-900/30 hover:bg-red-900/50 text-red-500 font-bold rounded-xl transition-all border border-red-900/50 flex items-center justify-center disabled:opacity-50"
-                                title="Delete Record"
-                            >
-                                {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
-                            </button>
-                        )}
-                        
-                        <button onClick={onClose} disabled={isSaving || isDeleting} className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-all disabled:opacity-50">Cancel</button>
-                        
-                        <button onClick={handleSave} disabled={isSaving || isDeleting} className="flex-[2] bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">
-                            {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                            {isSaving ? "Saving..." : "Save Changes"}
-                        </button>
-                    </div>
-                </>
-            )}
-        </div>
+        </>
     );
 }

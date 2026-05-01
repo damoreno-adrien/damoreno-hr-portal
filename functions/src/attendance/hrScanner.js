@@ -1,4 +1,4 @@
-const { onCall, HttpsError } = require("firebase-functions/v2/https"); 
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const admin = require("firebase-admin");
 
@@ -15,7 +15,22 @@ const timeZone = "Asia/Bangkok";
 
 exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Auth required");
-    console.log("Running Unified HR Scan (Date Range Upgrade)...");
+    
+    // RÈGLE 3 : RBAC hiérarchique corrigé (Lecture dans la collection 'users')
+    const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+    if (!callerDoc.exists) throw new HttpsError("unauthenticated", "User access record not found");
+    
+    const callerRole = callerDoc.data().role || 'staff';
+    const allowedRoles = ['manager', 'admin', 'super_admin'];
+    if (!allowedRoles.includes(callerRole)) {
+        throw new HttpsError("permission-denied", `Access denied. Required role: ${allowedRoles.join(', ')}`);
+    }
+
+    // Récupération du profil staff uniquement pour obtenir le branchId (RÈGLE 2)
+    const callerStaffDoc = await db.collection("staff_profiles").doc(request.auth.uid).get();
+    const branchId = callerStaffDoc.exists ? (callerStaffDoc.data().branchId || 'global') : 'global';
+
+    console.log(`Running Unified HR Scan (Date Range Upgrade) - Caller: ${request.auth.uid}, Role: ${callerRole}`);
 
     try {
         const now = DateTime.now().setZone(timeZone);
@@ -36,7 +51,11 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
         const globalThreeMonthsAgoStr = startTargetObj.minus({ months: 3 }).toISODate();
 
         const configSnap = await db.collection("settings").doc("company_config").get();
-        const config = configSnap.data() || {};
+        const rawConfig = configSnap.data() || {};
+        
+        // RÈGLE 2 : Merge branchSettings avec fallback global
+        const branchOverrides = rawConfig.branchSettings?.[branchId] || {};
+        const config = { ...rawConfig, ...branchOverrides };
         
         const hrRules = {
             maxLateMins: config.attendanceBonus?.maxLateMinutesAllowed ?? 30,
@@ -69,7 +88,6 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
             attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
         });
 
-        // --- NEW: Added branchId to the staff map ---
         const staffProfilesMap = new Map();
         staffSnap.docs.forEach(doc => {
             const data = doc.data();
@@ -137,7 +155,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                             staffName: shift.staffName, 
                             department: profile.department || null,
                             position: profile.position || null,
-                            branchId: profile.branchId || null, // <-- Branch DNA injection
+                            branchId: profile.branchId || null,
                             date: targetDateStr, 
                             createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" 
                         });
@@ -207,7 +225,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                                     staffName: shift.staffName, 
                                     department: profile.department || null,
                                     position: profile.position || null,
-                                    branchId: profile.branchId || null, // <-- Branch DNA injection
+                                    branchId: profile.branchId || null,
                                     date: targetDateStr, 
                                     extraMinutes: Math.round(totalExtraMins), 
                                     multiplier: hrRules.otMultiplier, 
@@ -255,7 +273,7 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
                             staffName: stats.name,
                             department: profile.department || null,
                             position: profile.position || null, 
-                            branchId: profile.branchId || null, // <-- Branch DNA injection
+                            branchId: profile.branchId || null,
                             date: targetDateStr, 
                             minutesLate: Math.round(stats.lateMinsToday), 
                             attendanceDocId: stats.todayAttendanceId, 
@@ -271,5 +289,8 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
         if (alertsCreated > 0 || staleAlertsDeleted > 0) await batch.commit();
         return { success: true, alertsCreated: alertsCreated, daysScanned: targetDates.length };
 
-    } catch (error) { throw new HttpsError("internal", error.message); }
+    } catch (error) { 
+        console.error("hrScanner error:", error);
+        throw new HttpsError("internal", error.message); 
+    }
 });

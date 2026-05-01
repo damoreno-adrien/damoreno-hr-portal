@@ -9,6 +9,9 @@ import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
 import { logSystemAction } from '../../utils/auditLogger';
 
+// --- IMPORT DE LA MODALE ---
+import FeedbackModal from '../common/FeedbackModal';
+
 // The master list of all permissions in the app
 const PERMISSION_KEYS = [
     { key: 'canViewFinancialRules', label: 'View Financial Rules', desc: 'Access taxes, OT multipliers, etc.' },
@@ -25,6 +28,9 @@ const DEFAULT_ROLES = ['staff', 'dept_manager', 'manager', 'admin', 'super_admin
 export function PermissionMatrix({ db }) {
     const [matrix, setMatrix] = useState(null);
     const [loading, setLoading] = useState(true);
+
+    // --- STATE POUR LA MODALE DE FEEDBACK ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
 
     const auth = getAuth(app); // Initialisation de l'auth pour les logs
 
@@ -55,7 +61,8 @@ export function PermissionMatrix({ db }) {
     const handleToggle = async (role, permissionKey, currentValue) => {
         // Super Admins can never have their powers turned off to prevent locking yourself out!
         if (role === 'super_admin') {
-            alert("Super Admin permissions cannot be restricted.");
+            // --- MODIFIÉ: Remplacement du alert() ---
+            setFeedbackModal({ type: 'error', title: 'Action Blocked', message: "Super Admin permissions cannot be restricted." });
             return;
         }
 
@@ -64,7 +71,7 @@ export function PermissionMatrix({ db }) {
             [`${role}.${permissionKey}`]: !currentValue
         });
 
-        // --- NOUVEAU : LE JOURNAL D'AUDIT ---
+        // --- LE JOURNAL D'AUDIT ---
         const actionType = !currentValue ? 'GRANT_PERMISSION' : 'REVOKE_PERMISSION';
         const statusText = !currentValue ? 'Granted' : 'Revoked';
         
@@ -95,7 +102,16 @@ export function PermissionMatrix({ db }) {
     });
 
     return (
-        <div className="space-y-6 animate-fadeIn pb-10">
+        <div className="space-y-6 animate-fadeIn pb-10 relative">
+            {/* INJECTION DU FEEDBACK MODAL */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+
             <div className="bg-red-900/20 border border-red-700/50 p-4 rounded-xl flex gap-4 items-start">
                 <ShieldAlert className="w-6 h-6 text-red-500 flex-shrink-0 mt-1" />
                 <div>

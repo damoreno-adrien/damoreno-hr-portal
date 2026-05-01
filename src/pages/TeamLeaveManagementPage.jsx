@@ -1,27 +1,31 @@
 /* src/pages/TeamLeaveManagementPage.jsx */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'; 
+import { collection, query, onSnapshot, doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth'; // <-- NEW: For secure UID fetching
 import { Search, Plus, List, Calendar as CalendarIcon, Filter, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Users, ArrowUpDown } from 'lucide-react';
 
 import Modal from '../components/common/Modal';
 import LeaveRequestForm from '../components/LeaveManagement/LeaveRequestForm';
-import StaffSummaryModal from '../components/LeaveManagement/StaffSummaryModal'; 
-import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem'; 
-import { LeaveTimeline } from '../components/LeaveManagement/LeaveTimeline'; 
+import StaffSummaryModal from '../components/LeaveManagement/StaffSummaryModal';
+import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem';
+import { LeaveTimeline } from '../components/LeaveManagement/LeaveTimeline';
 
 import * as dateUtils from '../utils/dateUtils';
 import { getDisplayName } from '../utils/staffUtils';
 
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../components/common/FeedbackModal';
+import ConfirmModal from '../components/common/ConfirmModal';
+
 const getStaffDepartment = (staff) => {
     if (!staff) return 'Unassigned';
-    if (staff.department) return staff.department; 
+    if (staff.department) return staff.department;
     if (staff.jobHistory && staff.jobHistory.length > 0) {
         const sortedJobs = [...staff.jobHistory].sort((a, b) => {
             const dateA = dateUtils.fromFirestore(a.startDate) || new Date(0);
             const dateB = dateUtils.fromFirestore(b.startDate) || new Date(0);
-            return dateB - dateA; 
+            return dateB - dateA;
         });
         if (sortedJobs[0].department) return sortedJobs[0].department;
     }
@@ -42,8 +46,8 @@ const DateRangeFilter = ({ currentFilter, setFilter }) => {
 };
 
 const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, expandSignal, activeBranch }) => {
-    const [isOpen, setIsOpen] = useState(false); 
-    
+    const [isOpen, setIsOpen] = useState(false);
+
     useEffect(() => {
         if (expandSignal) {
             setIsOpen(expandSignal.action === 'expand');
@@ -55,6 +59,12 @@ const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditR
             <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center p-4 bg-gray-900/60 hover:bg-gray-700 transition-colors border-b border-gray-700">
                 <div className="flex items-center gap-3">
                     <h3 className="text-lg font-bold text-white">{group.staffName}</h3>
+                    {activeBranch === 'global' && (() => {
+                        const staff = staffList.find(s => s.id === group.staffId);
+                        if (!staff?.branchId) return null;
+                        const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId;
+                        return <span className="text-[9px] uppercase tracking-wider font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">{bName.replace('Da Moreno ', '')}</span>;
+                    })()}
                     {group.department && <span className="text-xs bg-gray-700 px-2 py-0.5 rounded text-gray-300">{group.department}</span>}
                     <span className="bg-indigo-900/50 text-indigo-300 text-xs font-bold px-2 py-1 rounded-full">{group.requests.length} Request{group.requests.length > 1 ? 's' : ''}</span>
                 </div>
@@ -63,11 +73,11 @@ const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditR
             {isOpen && (
                 <div className="divide-y divide-gray-700/50">
                     {group.requests.map(req => (
-                        <LeaveRequestItem 
-                            key={req.id} req={req} userRole={userRole} 
-                            onUpdateRequest={onUpdateRequest} onDeleteRequest={onDeleteRequest} 
-                            onEditRequest={onEditRequest} onMcStatusChange={onMcStatusChange} 
-                            allRequests={allRequests} companyConfig={companyConfig} staffList={staffList} 
+                        <LeaveRequestItem
+                            key={req.id} req={req} userRole={userRole}
+                            onUpdateRequest={onUpdateRequest} onDeleteRequest={onDeleteRequest}
+                            onEditRequest={onEditRequest} onMcStatusChange={onMcStatusChange}
+                            allRequests={allRequests} companyConfig={companyConfig} staffList={staffList}
                             activeBranch={activeBranch} branches={companyConfig?.branches || []}
                         />
                     ))}
@@ -79,15 +89,15 @@ const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditR
 
 export default function TeamLeaveManagementPage({ db, user, userRole, staffList, companyConfig, activeBranch }) {
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
-    
-    const [viewMode, setViewMode] = useState('list'); 
+
+    const [viewMode, setViewMode] = useState('list');
     const [departmentFilter, setDepartmentFilter] = useState('All');
     const [timelineDate, setTimelineDate] = useState(new Date());
-    
-    const [filter, setFilter] = useState('recent'); 
-    const [groupByStaff, setGroupByStaff] = useState(true); 
+
+    const [filter, setFilter] = useState('recent');
+    const [groupByStaff, setGroupByStaff] = useState(true);
     const [sortConfig, setSortConfig] = useState('requestedAt_desc');
-    
+
     const [isAllExpanded, setIsAllExpanded] = useState(false);
     const [expandSignal, setExpandSignal] = useState(null);
 
@@ -100,6 +110,10 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
 
     // --- THE SECURITY LAYER: Fetch user's assigned branches ---
     const [adminBranchIds, setAdminBranchIds] = useState([]);
+
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     useEffect(() => {
         const uid = user?.uid || getAuth().currentUser?.uid;
@@ -121,15 +135,15 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
     useEffect(() => {
         if (!db) return;
         const q = query(collection(db, "leave_requests"));
-        
+
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            requests.sort((a,b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
-            
+            requests.sort((a, b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
+
             const hydratedRequests = requests.map(req => {
                 const staffMember = staffList.find(s => s.id === req.staffId);
-                return { 
-                    ...req, 
+                return {
+                    ...req,
                     displayStaffName: staffMember ? getDisplayName(staffMember) : (req.staffName || 'Unknown Staff'),
                     staffDepartment: getStaffDepartment(staffMember)
                 };
@@ -137,16 +151,17 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             setAllLeaveRequests(hydratedRequests);
         }, (error) => {
             console.error("FIREBASE RULES BLOCKED THE QUERY:", error);
-            alert("Database Error: Firebase Security Rules blocked you from downloading team leave requests.");
+            // --- MODIFIÉ : Remplacement de alert() ---
+            setFeedbackModal({ type: 'error', title: 'Database Error', message: "Firebase Security Rules blocked you from downloading team leave requests." });
         });
-        
+
         return () => unsubscribe();
     }, [db, staffList]);
 
     const timelineRequests = useMemo(() => {
         return allLeaveRequests.filter(req => {
             const staffMember = staffList.find(s => s.id === req.staffId);
-            
+
             // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
             if (activeBranch === 'global') {
                 if (userRole === 'admin' && !adminBranchIds.includes(staffMember?.branchId)) return false;
@@ -158,8 +173,8 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             if (effectiveDeptFilter !== 'All' && reqDept !== effectiveDeptFilter) return false;
             if (searchTerm && !req.displayStaffName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
 
-            if (req.status === 'rejected') return false; 
-            if (req.leaveType === 'Cash Out Holiday Credits') return false; 
+            if (req.status === 'rejected') return false;
+            if (req.leaveType === 'Cash Out Holiday Credits') return false;
 
             return true;
         });
@@ -168,7 +183,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
     const listRequests = useMemo(() => {
         let filtered = allLeaveRequests.filter(req => {
             const staffMember = staffList.find(s => s.id === req.staffId);
-            
+
             // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
             if (activeBranch === 'global') {
                 if (userRole === 'admin' && !adminBranchIds.includes(staffMember?.branchId)) return false;
@@ -180,7 +195,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
 
             if (effectiveDeptFilter !== 'All' && reqDept !== effectiveDeptFilter) return false;
             if (searchTerm && !req.displayStaffName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-            
+
             if (filter === 'pending' && req.status !== 'pending') return false;
             if (filter === 'approved' && req.status !== 'approved') return false;
             if (filter === 'rejected' && req.status !== 'rejected') return false;
@@ -193,7 +208,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                     const monthEnd = dateUtils.endOfMonth(now);
                     const yearStart = dateUtils.startOfYear(now);
                     const yearEnd = dateUtils.endOfYear(now);
-                    
+
                     if (dateFilter === 'thisMonth' && (reqStartDate < monthStart || reqStartDate > monthEnd)) return false;
                     if (dateFilter === 'thisYear' && (reqStartDate < yearStart || reqStartDate > yearEnd)) return false;
                 }
@@ -202,7 +217,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             if (filter === 'pending') {
                 if (!staffMember || staffMember.status === 'inactive') return false;
             }
-            return true; 
+            return true;
         });
 
         if (filter === 'recent' && !searchTerm) {
@@ -215,19 +230,19 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
 
             if (sortConfig === 'requestedAt_desc') return timeB - timeA;
             if (sortConfig === 'requestedAt_asc') return timeA - timeB;
-            
+
             if (sortConfig === 'startDate_asc') {
                 const dateA = dateUtils.parseISODateString(a.startDate) || new Date(0);
                 const dateB = dateUtils.parseISODateString(b.startDate) || new Date(0);
-                return dateA - dateB || timeB - timeA; 
+                return dateA - dateB || timeB - timeA;
             }
             if (sortConfig === 'startDate_desc') {
                 const dateA = dateUtils.parseISODateString(a.startDate) || new Date(0);
                 const dateB = dateUtils.parseISODateString(b.startDate) || new Date(0);
-                return dateB - dateA || timeB - timeA; 
+                return dateB - dateA || timeB - timeA;
             }
             if (sortConfig === 'duration_desc') {
-                return b.totalDays - a.totalDays || timeB - timeA; 
+                return b.totalDays - a.totalDays || timeB - timeA;
             }
             return 0;
         });
@@ -243,15 +258,15 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             }
             groups[req.staffId].requests.push(req);
         });
-        return Object.values(groups).sort((a,b) => a.staffName.localeCompare(b.staffName));
+        return Object.values(groups).sort((a, b) => a.staffName.localeCompare(b.staffName));
     }, [listRequests]);
 
     const departments = useMemo(() => ['All', ...Array.from(new Set(staffList.map(s => getStaffDepartment(s))))], [staffList]);
-    
+
     const activeStaffList = useMemo(() => {
         let list = staffList.filter(s => s.status !== 'inactive');
         if (userRole === 'dept_manager' && currentUserDept) list = list.filter(s => getStaffDepartment(s) === currentUserDept);
-        
+
         // --- SECURE THE "NEW REQUEST" DROPDOWN ---
         if (activeBranch === 'global') {
             if (userRole === 'admin') list = list.filter(s => adminBranchIds.includes(s.branchId));
@@ -260,7 +275,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
         }
         return list;
     }, [staffList, userRole, currentUserDept, activeBranch, adminBranchIds]);
-    
+
     const filteredTimelineStaff = useMemo(() => {
         let list = activeStaffList;
         if (effectiveDeptFilter !== 'All' && userRole !== 'dept_manager') list = list.filter(s => getStaffDepartment(s) === effectiveDeptFilter);
@@ -274,29 +289,59 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
         setExpandSignal({ action: newStatus ? 'expand' : 'collapse', id: Date.now() });
     };
 
-    const handleUpdateRequest = async (id, newStatus) => { 
-        try { 
+    const handleUpdateRequest = async (id, newStatus) => {
+        try {
             let actionByName = 'Unknown';
             const actionByStaff = staffList.find(s => s.id === user.uid);
             if (actionByStaff) actionByName = getDisplayName(actionByStaff);
 
-            await updateDoc(doc(db, "leave_requests", id), { 
-                status: newStatus, 
+            await updateDoc(doc(db, "leave_requests", id), {
+                status: newStatus,
                 isReadByStaff: false,
                 statusSetBy: user.uid,
                 statusSetByName: actionByName,
                 statusDate: serverTimestamp()
-            }); 
-        } catch (error) { alert("Failed to update status."); } 
+            });
+        } catch (error) { 
+            // --- MODIFIÉ : Remplacement de alert() ---
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: "Failed to update status." }); 
+        }
     };
 
-    const handleDeleteRequest = async (id) => { if (window.confirm("Delete request?")) { try { await deleteDoc(doc(db, "leave_requests", id)); } catch (error) { alert("Failed to delete."); } } };
-    const handleMcStatusChange = async (id, currentStatus) => { try { await updateDoc(doc(db, "leave_requests", id), { mcReceived: !currentStatus }); } catch (error) { alert("Failed to update MC."); } };
+    const handleDeleteRequest = async (id) => { 
+        // --- MODIFIÉ : Remplacement de window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Request",
+            message: "Are you sure you want to delete this request?",
+            isDestructive: true,
+            confirmText: "Delete",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                try { 
+                    await deleteDoc(doc(db, "leave_requests", id)); 
+                } catch (error) { 
+                    // --- MODIFIÉ : Remplacement de alert() ---
+                    setFeedbackModal({ type: 'error', title: 'Delete Failed', message: "Failed to delete request." }); 
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
+    };
     
+    const handleMcStatusChange = async (id, currentStatus) => { 
+        try { 
+            await updateDoc(doc(db, "leave_requests", id), { mcReceived: !currentStatus }); 
+        } catch (error) { 
+            // --- MODIFIÉ : Remplacement de alert() ---
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: "Failed to update MC." }); 
+        } 
+    };
+
     const openEditModal = (request) => { setRequestToEdit(request); setTimelinePrefill(null); setIsModalOpen(true); };
     const openNewRequestModal = () => { setRequestToEdit(null); setTimelinePrefill(null); setIsModalOpen(true); };
     const closeModal = () => { setIsModalOpen(false); setRequestToEdit(null); setTimelinePrefill(null); };
-    
+
     const handleTimelineCellClick = (staffId, date) => {
         const dateStr = dateUtils.formatISODate(date);
         setTimelinePrefill({ staffId, startDate: dateStr, endDate: dateStr });
@@ -305,7 +350,25 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
     };
 
     return (
-        <div className="pb-10">
+        <div className="pb-10 relative">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
+
             {summaryStaff && (
                 <Modal isOpen={true} onClose={() => setSummaryStaff(null)} title={`${getDisplayName(summaryStaff)} - Leave Overview`}>
                     <StaffSummaryModal staff={summaryStaff} allRequests={allLeaveRequests} companyConfig={companyConfig} />
@@ -313,19 +376,19 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             )}
 
             <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Create Leave for Staff"}>
-                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} initialData={timelinePrefill} userRole={userRole} staffList={activeStaffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} isModalOpen={isModalOpen} />
+                <LeaveRequestForm db={db} user={user} onClose={closeModal} existingRequest={requestToEdit} initialData={timelinePrefill} userRole={userRole} staffList={activeStaffList} fullStaffList={staffList} existingRequests={allLeaveRequests} companyConfig={companyConfig} isModalOpen={isModalOpen} />
             </Modal>
-            
+
             <div className="flex flex-col md:flex-row justify-between md:items-center space-y-4 md:space-y-0 mb-6">
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Team Leave Management</h2>
                 <div className="flex gap-3 items-center">
                     {viewMode === 'timeline' && (
-                         <div className="flex items-center bg-gray-700 rounded-lg p-1 mr-2">
-                             <button onClick={() => setTimelineDate(prev => new Date(prev.setMonth(prev.getMonth() - 1)))} className="p-1 hover:text-white text-gray-400"><ChevronLeft className="h-5 w-5"/></button>
-                             <span className="px-2 text-sm font-bold text-white min-w-[100px] text-center">{dateUtils.formatCustom(timelineDate, 'MMMM yyyy')}</span>
-                             <button onClick={() => setTimelineDate(prev => new Date(prev.setMonth(prev.getMonth() + 1)))} className="p-1 hover:text-white text-gray-400"><ChevronRight className="h-5 w-5"/></button>
-                         </div>
-                     )}
+                        <div className="flex items-center bg-gray-700 rounded-lg p-1 mr-2">
+                            <button onClick={() => setTimelineDate(prev => new Date(prev.setMonth(prev.getMonth() - 1)))} className="p-1 hover:text-white text-gray-400"><ChevronLeft className="h-5 w-5" /></button>
+                            <span className="px-2 text-sm font-bold text-white min-w-[100px] text-center">{dateUtils.formatCustom(timelineDate, 'MMMM yyyy')}</span>
+                            <button onClick={() => setTimelineDate(prev => new Date(prev.setMonth(prev.getMonth() + 1)))} className="p-1 hover:text-white text-gray-400"><ChevronRight className="h-5 w-5" /></button>
+                        </div>
+                    )}
                     <div className="bg-gray-700 p-1 rounded-lg flex">
                         <button onClick={() => setViewMode('list')} className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-gray-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}><List className="h-5 w-5" /></button>
                         <button onClick={() => setViewMode('timeline')} className={`p-2 rounded-md transition-colors ${viewMode === 'timeline' ? 'bg-gray-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}><CalendarIcon className="h-5 w-5" /></button>
@@ -333,15 +396,15 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                     <button onClick={openNewRequestModal} className="flex-shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />New Request</button>
                 </div>
             </div>
-            
+
             <div className="mb-6 bg-gray-900 rounded-xl border border-gray-700 p-4 space-y-4 shadow-sm">
-                
+
                 <div className="flex flex-col md:flex-row gap-4">
                     <div className="relative flex-grow">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-5 w-5 text-gray-400" /></div>
                         <input type="text" placeholder="Search by staff name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 h-11 rounded-lg bg-gray-800 text-white border border-gray-700 focus:ring-indigo-500 focus:border-indigo-500 transition-colors" />
                     </div>
-                    
+
                     {userRole !== 'dept_manager' && (
                         <div className="relative min-w-[200px] md:w-64">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Filter className="h-4 w-4 text-gray-400" /></div>
@@ -361,7 +424,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                             <button onClick={() => setFilter('rejected')} className={`px-4 h-full text-sm font-bold rounded-md whitespace-nowrap transition-colors ${filter === 'rejected' ? 'bg-amber-600 text-white shadow' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}>Rejected</button>
                             <button onClick={() => setFilter('all')} className={`px-4 h-full text-sm font-bold rounded-md whitespace-nowrap transition-colors ${filter === 'all' ? 'bg-amber-600 text-white shadow' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}>All</button>
                         </div>
-                        
+
                         <div className="flex flex-wrap items-center gap-3">
                             {(filter === 'approved' || filter === 'rejected' || filter === 'all') && (
                                 <DateRangeFilter currentFilter={dateFilter} setFilter={setDateFilter} />
@@ -371,9 +434,9 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                     <ArrowUpDown className="h-4 w-4 text-indigo-400" />
                                 </div>
-                                <select 
-                                    value={sortConfig} 
-                                    onChange={(e) => setSortConfig(e.target.value)} 
+                                <select
+                                    value={sortConfig}
+                                    onChange={(e) => setSortConfig(e.target.value)}
                                     className="pl-9 pr-4 h-11 bg-gray-800 border border-gray-700 rounded-lg text-sm font-bold text-gray-300 appearance-none cursor-pointer focus:ring-indigo-500 transition-colors"
                                 >
                                     <option value="requestedAt_desc">Newest Submissions</option>
@@ -383,10 +446,10 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                                     <option value="duration_desc">Longest Duration</option>
                                 </select>
                             </div>
-                            
+
                             {groupByStaff && groupedRequests.length > 0 && (
-                                <button 
-                                    onClick={handleToggleExpandAll} 
+                                <button
+                                    onClick={handleToggleExpandAll}
                                     className="flex items-center justify-center h-11 px-4 text-sm font-bold text-gray-400 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-700 hover:text-white transition-colors"
                                 >
                                     {isAllExpanded ? <ChevronUp className="w-4 h-4 mr-2" /> : <ChevronDown className="w-4 h-4 mr-2" />}
@@ -405,17 +468,17 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
             </div>
 
             {viewMode === 'timeline' ? (
-                <LeaveTimeline db={db} allRequests={timelineRequests} staffList={filteredTimelineStaff} currentMonth={timelineDate} onCellClick={handleTimelineCellClick} onStaffClick={(staff) => setSummaryStaff(staff)} getStaffDepartment={getStaffDepartment} />
+                <LeaveTimeline db={db} allRequests={timelineRequests} staffList={filteredTimelineStaff} currentMonth={timelineDate} onCellClick={handleTimelineCellClick} onStaffClick={(staff) => setSummaryStaff(staff)} getStaffDepartment={getStaffDepartment} activeBranch={activeBranch} companyConfig={companyConfig} />
             ) : (
                 <div className="space-y-4">
                     {!groupByStaff ? (
                         <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700 divide-y divide-gray-700/50">
                             {listRequests.length > 0 ? listRequests.map(req => (
-                                <LeaveRequestItem 
-                                    key={req.id} req={req} userRole={userRole} 
-                                    onUpdateRequest={handleUpdateRequest} onDeleteRequest={handleDeleteRequest} 
-                                    onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange} 
-                                    allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList} 
+                                <LeaveRequestItem
+                                    key={req.id} req={req} userRole={userRole}
+                                    onUpdateRequest={handleUpdateRequest} onDeleteRequest={handleDeleteRequest}
+                                    onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange}
+                                    allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList}
                                     activeBranch={activeBranch} branches={companyConfig?.branches || []}
                                 />
                             )) : (
@@ -424,11 +487,11 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                         </div>
                     ) : (
                         groupedRequests.length > 0 ? groupedRequests.map(group => (
-                            <StaffGroup 
-                                key={group.staffId} group={group} userRole={userRole} 
-                                onUpdateRequest={handleUpdateRequest} onDeleteRequest={handleDeleteRequest} 
-                                onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange} 
-                                allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList} 
+                            <StaffGroup
+                                key={group.staffId} group={group} userRole={userRole}
+                                onUpdateRequest={handleUpdateRequest} onDeleteRequest={handleDeleteRequest}
+                                onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange}
+                                allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList}
                                 expandSignal={expandSignal} activeBranch={activeBranch}
                             />
                         )) : (

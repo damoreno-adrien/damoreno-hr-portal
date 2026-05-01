@@ -1,396 +1,272 @@
 /* src/pages/FinancialsPage.jsx */
-
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot, doc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; // <-- NEW: For secure UID fetching
-import { Plus, Pencil, Trash2, CheckCircle, XCircle, Download, ArrowUp, ArrowDown } from 'lucide-react';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import { Pencil, Trash2, CheckCircle, XCircle, Users, DollarSign, Landmark, LayoutList, Zap, AlertCircle, Download } from 'lucide-react';
+
 import LoanModal from '../components/Financials/LoanModal';
 import AdvanceModal from '../components/SalaryAdvance/AdvanceModal';
 import AdjustmentModal from '../components/Payroll/AdjustmentModal';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import QuickTransactionModal from '../components/FinancialsDashboard/QuickTransactionModal';
+import StaffLedgerSlideOver from '../components/FinancialsDashboard/StaffLedgerSlideOver';
+import useFinancials from '../hooks/useFinancials';
+import * as dateUtils from '../utils/dateUtils';
+import FinancialSummaryCard from '../components/Financials/FinancialSummaryCard';
+import ApproveLoanDateModal from '../components/Financials/ApproveLoanDateModal';
+import TransactionRow from '../components/Financials/TransactionRow';
+import { exportFinancialsPDF } from '../utils/pdfExport';
+import ManualPaymentModal from '../components/Financials/ManualPaymentModal';
+import ConfirmModal from '../components/common/ConfirmModal';
+import PromptModal from '../components/common/PromptModal'; // <-- NOUVEL IMPORT
 
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1];
+const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2];
 
-const StatusBadge = ({ status }) => {
-    const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full";
-    const statusMap = {
-        pending: "bg-yellow-500/20 text-yellow-300",
-        approved: "bg-green-500/20 text-green-300",
-        rejected: "bg-red-500/20 text-red-300",
-        paid: "bg-blue-500/20 text-blue-300",
-    };
-    return <span className={`${baseClasses} ${statusMap[status] || 'bg-gray-500/20 text-gray-300'}`}>{status}</span>;
-};
-
-// --- ENHANCED: Added userRole to props ---
 export default function FinancialsPage({ staffList, db, activeBranch, userRole }) {
-    const [selectedStaffId, setSelectedStaffId] = useState('');
     const [payPeriod, setPayPeriod] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
-    const [showArchived, setShowArchived] = useState(false); 
-
-    const [pendingAdvances, setPendingAdvances] = useState([]);
-    const [isLoadingPending, setIsLoadingPending] = useState(true);
-
-    const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'asc' });
-
+    const [staffFilterId, setStaffFilterId] = useState('');
+    const [slideOverStaffId, setSlideOverStaffId] = useState('');
+    const [activeTab, setActiveTab] = useState('all');
+    const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
+    const [isQuickTxOpen, setIsQuickTxOpen] = useState(false);
+    const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
+    const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
+    const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
+    const [editingEntity, setEditingEntity] = useState(null);
+    const [isManualPaymentOpen, setIsManualPaymentOpen] = useState(false);
+    const [loanForPayment, setLoanForPayment] = useState(null);
+    const [loanToApprove, setLoanToApprove] = useState(null);
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
     const [companyConfig, setCompanyConfig] = useState(null);
 
-    const [loans, setLoans] = useState([]);
-    const [isLoadingLoans, setIsLoadingLoans] = useState(false);
-    const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
-    const [editingLoan, setEditingLoan] = useState(null);
-    
-    const [advances, setAdvances] = useState([]);
-    const [isLoadingAdvances, setIsLoadingAdvances] = useState(false);
-    const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
-    const [editingAdvance, setEditingAdvance] = useState(null);
-    
-    const [adjustments, setAdjustments] = useState([]);
-    const [isLoadingAdjustments, setIsLoadingAdjustments] = useState(false);
-    const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
-    const [editingAdjustment, setEditingAdjustment] = useState(null);
-
-    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
-    const [adminBranchIds, setAdminBranchIds] = useState([]);
+    // --- NOUVEAU STATE POUR LE PROMPT ---
+    const [promptState, setPromptState] = useState({
+        isOpen: false, title: '', message: '', placeholder: '', onConfirm: null, onCancel: null
+    });
 
     useEffect(() => {
         const uid = getAuth().currentUser?.uid;
-        if (userRole === 'admin' && uid && db) {
-            getDoc(doc(db, 'users', uid)).then(snap => {
-                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
-            }).catch(err => console.error("Failed to fetch admin branches:", err));
-        }
+        if (userRole === 'admin' && uid && db) getDoc(doc(db, 'users', uid)).then(snap => { if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []); });
     }, [db, userRole]);
-
-    const getDisplayName = (staff) => staff?.nickname || staff?.firstName || staff?.fullName || 'Unknown';
 
     useEffect(() => {
         if (!db) return;
-        const configRef = doc(db, 'settings', 'company_config');
-        const unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
-            if (docSnap.exists()) {
-                setCompanyConfig(docSnap.data());
-            } else {
-                console.error("Company config not found!");
-            }
+        const unsub = onSnapshot(doc(db, 'settings', 'company_config'), (docSnap) => {
+            if (docSnap.exists()) setCompanyConfig(docSnap.data());
         });
-        return () => unsubscribeConfig();
+        return () => unsub();
     }, [db]);
 
-    useEffect(() => {
-        if (!db || !companyConfig) return;
-        
-        setIsLoadingPending(true);
-        const q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
-        
-        const unsubscribe = onSnapshot(q, (snap) => {
-            const eligibilityPercent = companyConfig.advanceEligibilityPercentage || 50;
+    const { pendingTransactions, monthlyTransactions, globalLoans, globalAdvances, isLoading, deleteRecord, updateRecord, confirmState, closeConfirm } = useFinancials(
+        db, staffList, activeBranch, adminBranchIds, userRole, payPeriod, staffFilterId
+    );
 
-            const pendingList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            const hydratedList = pendingList
-                .map(req => {
-                    const staffMember = staffList.find(s => s.id === req.staffId);
-                    if (!staffMember) return null;
+    const displayedMonthlyTransactions = useMemo(() => {
+        let filtered = monthlyTransactions;
+        if (activeTab === 'advances') filtered = monthlyTransactions.filter(tx => tx.category === 'advance');
+        if (activeTab === 'loans') filtered = monthlyTransactions.filter(tx => tx.category === 'loan');
+        if (activeTab === 'adjustments') filtered = monthlyTransactions.filter(tx => tx.category === 'adjustment');
 
-                    const job = staffMember.jobHistory?.[0] || staffMember;
-                    const salary = Number(job.baseSalary) || Number(job.rate) || 0;
-                    
-                    const maxEligible = (salary * eligibilityPercent) / 100;
+        return [...filtered].sort((a, b) => {
+            let aVal = a[sortConfig.key], bVal = b[sortConfig.key];
+            if (sortConfig.key === 'amount') { aVal = Number(aVal) || 0; bVal = Number(bVal) || 0; }
+            else if (sortConfig.key === 'date') { aVal = new Date(a.date).getTime() || 0; bVal = new Date(b.date).getTime() || 0; }
+            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [monthlyTransactions, activeTab, sortConfig]);
 
-                    return { 
-                        ...req, 
-                        staff: staffMember,
-                        staffName: getDisplayName(staffMember),
-                        maxEligible: maxEligible
-                    };
-                })
-                .filter(req => req && req.staff.status !== 'inactive'); 
+    const handleSort = (key) => setSortConfig({ key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
 
-            // --- THE SECURITY FILTER: Enforce "All My Branches" on Pending Requests ---
-            const branchFilteredList = hydratedList.filter(req => {
-                if (activeBranch === 'global') {
-                    if (userRole === 'admin' && !adminBranchIds.includes(req.staff.branchId)) return false;
-                    return true;
-                }
-                return req.staff.branchId === activeBranch;
-            });
-
-            setPendingAdvances(branchFilteredList);
-            setIsLoadingPending(false);
-        }, (err) => { console.error(err); setIsLoadingPending(false); });
-        
-        return () => unsubscribe();
-    }, [db, staffList, companyConfig, activeBranch, userRole, adminBranchIds]);
-
-    useEffect(() => {
-        if (selectedStaffId && db) {
-            setIsLoadingLoans(true);
-            setIsLoadingAdvances(true);
-            setIsLoadingAdjustments(true);
-            
-            const loansQuery = query(collection(db, 'loans'), where('staffId', '==', selectedStaffId));
-            const unsubLoans = onSnapshot(loansQuery, (snap) => { 
-                setLoans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
-                setIsLoadingLoans(false); 
-            }, (err) => { console.error(err); setIsLoadingLoans(false); });
-            
-            const commonQueries = [where('staffId', '==', selectedStaffId), where('payPeriodMonth', '==', payPeriod.month), where('payPeriodYear', '==', payPeriod.year)];
-            
-            const advancesQuery = query(collection(db, 'salary_advances'), ...commonQueries);
-            const unsubAdvances = onSnapshot(advancesQuery, (snap) => { 
-                setAdvances(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
-                setIsLoadingAdvances(false); 
-            }, (err) => { console.error(err); setIsLoadingAdvances(false); });
-            
-            const adjustmentsQuery = query(collection(db, 'monthly_adjustments'), ...commonQueries);
-            const unsubAdjustments = onSnapshot(adjustmentsQuery, (snap) => { 
-                setAdjustments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
-                setIsLoadingAdjustments(false); 
-            }, (err) => { console.error(err); setIsLoadingAdjustments(false); });
-            
-            return () => { unsubLoans(); unsubAdvances(); unsubAdjustments(); };
-        } else {
-            setLoans([]); setAdvances([]); setAdjustments([]);
-        }
-    }, [selectedStaffId, db, payPeriod]);
-
-    const sortedPendingAdvances = useMemo(() => {
-        let sortableItems = [...pendingAdvances];
-        if (sortConfig.key) {
-            sortableItems.sort((a, b) => {
-                let aValue = a[sortConfig.key];
-                let bValue = b[sortConfig.key];
-
-                if (sortConfig.key === 'amount' || sortConfig.key === 'maxEligible') { 
-                    aValue = a[sortConfig.key] || 0;
-                    bValue = b[sortConfig.key] || 0;
-                } else if (sortConfig.key === 'date') {
-                    aValue = new Date(a.date);
-                    bValue = new Date(b.date);
-                } else {
-                    aValue = ('' + aValue).toLowerCase();
-                    bValue = ('' + bValue).toLowerCase();
-                }
-
-                if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-                if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-                return 0;
-            });
-        }
-        return sortableItems;
-    }, [pendingAdvances, sortConfig]);
-
-    const handleSort = (key) => {
-        let direction = 'asc';
-        if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
-        setSortConfig({ key, direction });
+    const triggerEdit = (e, entity, type) => {
+        e.stopPropagation(); setEditingEntity(entity);
+        if (type === 'advance') setIsAdvanceModalOpen(true);
+        if (type === 'loan') setIsLoanModalOpen(true);
+        if (type === 'adjustment') setIsAdjustmentModalOpen(true);
     };
 
-    const handlePeriodChange = (e) => setPayPeriod(p => ({ ...p, [e.target.name]: Number(e.target.value) }));
-    const handleStaffChange = (e) => setSelectedStaffId(e.target.value);
-    
-    const handleOpenAddLoanModal = () => { setEditingLoan(null); setIsLoanModalOpen(true); };
-    const handleOpenEditLoanModal = (loan) => { setEditingLoan(loan); setIsLoanModalOpen(true); };
-    const handleDeleteLoan = async (id) => { if (window.confirm("Delete this loan record?")) await deleteDoc(doc(db, 'loans', id)); };
-    
-    const handleOpenAddAdvanceModal = () => { setEditingAdvance(null); setIsAdvanceModalOpen(true); };
-    const handleOpenEditAdvanceModal = (adv) => { setEditingAdvance(adv); setIsAdvanceModalOpen(true); };
-    const handleDeleteAdvance = async (id) => { if (window.confirm("Delete this advance record?")) await deleteDoc(doc(db, 'salary_advances', id)); };
-    const handleApproveAdvance = async (id) => { await updateDoc(doc(db, 'salary_advances', id), { status: 'approved', isReadByStaff: false }); };
-    const handleRejectAdvance = async (id) => { const reason = window.prompt("Reason for rejecting?"); if (reason) { await updateDoc(doc(db, 'salary_advances', id), { status: 'rejected', rejectionReason: reason, isReadByStaff: false }); } };
-    
-    const handleOpenAddAdjustmentModal = () => { setEditingAdjustment(null); setIsAdjustmentModalOpen(true); };
-    const handleOpenEditAdjustmentModal = (adj) => { setEditingAdjustment(adj); setIsAdjustmentModalOpen(true); };
-    const handleDeleteAdjustment = async (id) => { if (window.confirm("Delete this adjustment record?")) await deleteDoc(doc(db, 'monthly_adjustments', id)); };
+    const triggerDelete = (e, collectionName, id) => { e.stopPropagation(); deleteRecord(collectionName, id); };
 
-    const handleExportPendingAdvances = () => {
-        if (pendingAdvances.length === 0) {
-            alert("No pending advances to export.");
-            return;
-        }
-
-        const doc = new jsPDF();
-        const today = new Date().toLocaleDateString('en-GB');
-        const totalAmount = pendingAdvances.reduce((sum, req) => sum + req.amount, 0);
-        
-        doc.setFontSize(18);
-        doc.text("Da Moreno Financials", 14, 22);
-        doc.setFontSize(12);
-        doc.text("Pending Salary Advances", 14, 30);
-        doc.setFontSize(10);
-        doc.text(`As of: ${today}`, 14, 36);
-
-        const sortedForPDF = [...pendingAdvances].sort((a, b) => a.staffName.localeCompare(b.staffName));
-
-        const head = [['Staff Name', 'Request Date', 'Amount (THB)', 'Max Eligible (THB)']];
-        
-        const body = sortedForPDF.map(req => {
-            let name = req.staffName;
-            if (activeBranch === 'global' && req.staff.branchId) {
-                const bName = companyConfig?.branches?.find(b => b.id === req.staff.branchId)?.name || req.staff.branchId;
-                name += ` (${bName.replace('Da Moreno ', '')})`;
-            }
-            return [
-                name,
-                req.date, 
-                req.amount.toLocaleString('en-US'),
-                req.maxEligible.toLocaleString('en-US')
-            ];
-        });
-        
-        autoTable(doc, {
-            startY: 45,
-            head: head,
-            body: body,
-            foot: [['Total Pending', '', totalAmount.toLocaleString('en-US'), '']],
-            headStyles: { fillColor: [30, 41, 59] }, 
-            footStyles: { fontWeight: 'bold', fillColor: [241, 245, 249], textColor: 0 },
-            theme: 'striped',
-        });
-
-        doc.save(`pending_advances_${new Date().toISOString().split('T')[0]}.pdf`);
+    // Export PDF via utilitaire
+    const handleExportPDF = () => {
+        exportFinancialsPDF({ activeTab, displayedMonthlyTransactions, payPeriod, months, activeBranch, companyConfig });
     };
 
-    const staffForDropdown = useMemo(() => {
-        let sortedList = [...staffList].sort((a, b) => {
-            const nameA = getDisplayName(a);
-            const nameB = getDisplayName(b);
-            return nameA.localeCompare(nameB);
+    const handleApproveAdvance = (e, id) => { e.stopPropagation(); updateRecord('salary_advances', id, { status: 'approved', isReadByStaff: false }); };
+    
+    // --- MODIFIÉ : Utilisation de PromptModal ---
+    const handleRejectAdvance = (e, id) => { 
+        e.stopPropagation(); 
+        setPromptState({
+            isOpen: true,
+            title: 'Reject Salary Advance',
+            message: 'Please provide a reason for rejecting this advance request.',
+            placeholder: 'Reason for rejection...',
+            onConfirm: (reason) => {
+                if (reason) updateRecord('salary_advances', id, { status: 'rejected', rejectionReason: reason, isReadByStaff: false });
+                setPromptState({ isOpen: false });
+            },
+            onCancel: () => setPromptState({ isOpen: false })
         });
-        
-        if (!showArchived) {
-            sortedList = sortedList.filter(s => s.status !== 'inactive');
-        }
-        
-        // --- THE SECURITY FILTER: Enforce "All My Branches" on Staff Dropdown ---
-        if (activeBranch === 'global') {
-            if (userRole === 'admin') {
-                sortedList = sortedList.filter(s => adminBranchIds.includes(s.branchId));
-            }
-        } else if (activeBranch) {
-            sortedList = sortedList.filter(s => s.branchId === activeBranch);
-        }
-        
-        return sortedList;
-    }, [staffList, showArchived, activeBranch, userRole, adminBranchIds]);
-
-    const SortableHeader = ({ children, sortKey }) => {
-        const isSorted = sortConfig.key === sortKey;
-        const Icon = isSorted ? (sortConfig.direction === 'asc' ? ArrowUp : ArrowDown) : null;
-        return (
-            <th 
-                className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase cursor-pointer hover:bg-gray-600"
-                onClick={() => handleSort(sortKey)}
-            >
-                <div className="flex items-center">
-                    <span>{children}</span>
-                    {Icon && <Icon className="w-4 h-4 ml-1" />}
-                </div>
-            </th>
-        );
     };
+
+    const handleApproveLoan = (e, id) => { e.stopPropagation(); setLoanToApprove(id); };
+    const confirmLoanApproval = (id, startDate) => { updateRecord('loans', id, { status: 'active', startDate }); setLoanToApprove(null); };
+    
+    // --- MODIFIÉ : Utilisation de PromptModal ---
+    const handleRejectLoan = (e, id) => { 
+        e.stopPropagation(); 
+        setPromptState({
+            isOpen: true,
+            title: 'Reject Loan Request',
+            message: 'Please provide a reason for rejecting this loan request.',
+            placeholder: 'Reason for rejection...',
+            onConfirm: (reason) => {
+                if (reason) updateRecord('loans', id, { status: 'rejected', rejectionReason: reason });
+                setPromptState({ isOpen: false });
+            },
+            onCancel: () => setPromptState({ isOpen: false })
+        });
+    };
+
+    const handleTriggerManualPayment = (e, loan) => {
+        e.stopPropagation();
+        setLoanForPayment(loan);
+        setIsManualPaymentOpen(true);
+    };
+
+    const staffForDropdown = useMemo(() => staffList.filter(s => s.status !== 'inactive').sort((a, b) => (a.nickname || a.firstName).localeCompare(b.nickname || b.firstName)), [staffList]);
 
     return (
-        <div>
-            <LoanModal isOpen={isLoanModalOpen} onClose={() => setIsLoanModalOpen(false)} db={db} staffId={selectedStaffId} existingLoan={editingLoan} />
-            <AdvanceModal isOpen={isAdvanceModalOpen} onClose={() => setIsAdvanceModalOpen(false)} db={db} staffId={selectedStaffId} existingAdvance={editingAdvance} />
-            <AdjustmentModal isOpen={isAdjustmentModalOpen} onClose={() => setIsAdjustmentModalOpen(false)} db={db} staffId={selectedStaffId} existingAdjustment={editingAdjustment} payPeriod={payPeriod} />
+        <div className="pb-20">
+            {/* INJECTION DU PROMPT MODAL */}
+            <PromptModal
+                isOpen={promptState.isOpen}
+                title={promptState.title}
+                message={promptState.message}
+                placeholder={promptState.placeholder}
+                onConfirm={promptState.onConfirm}
+                onCancel={promptState.onCancel}
+                confirmText="Reject Request"
+            />
+
+            <ApproveLoanDateModal isOpen={!!loanToApprove} onClose={() => setLoanToApprove(null)} onApprove={confirmLoanApproval} loanId={loanToApprove} />
+            <ManualPaymentModal isOpen={isManualPaymentOpen} onClose={() => setIsManualPaymentOpen(false)} loan={loanForPayment} db={db} />
+            <LoanModal isOpen={isLoanModalOpen} onClose={() => setIsLoanModalOpen(false)} db={db} staffId={editingEntity?.staffId} existingLoan={editingEntity} staffList={staffList} userRole={userRole} />
+            <AdvanceModal isOpen={isAdvanceModalOpen} onClose={() => setIsAdvanceModalOpen(false)} db={db} staffId={editingEntity?.staffId} existingAdvance={editingEntity} />
+            <AdjustmentModal isOpen={isAdjustmentModalOpen} onClose={() => setIsAdjustmentModalOpen(false)} db={db} staffId={editingEntity?.staffId} existingAdjustment={editingEntity} payPeriod={payPeriod} />
+            <QuickTransactionModal isOpen={isQuickTxOpen} onClose={() => setIsQuickTxOpen(false)} db={db} staffList={staffList} />
+            <StaffLedgerSlideOver isOpen={!!slideOverStaffId} onClose={() => setSlideOverStaffId('')} staffId={slideOverStaffId} staffList={staffList} globalLoans={globalLoans} globalAdvances={globalAdvances} allTransactions={[...pendingTransactions, ...monthlyTransactions]} />
+            <ConfirmModal
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={closeConfirm}
+                isDestructive={true}
+                confirmText="Delete"
+            />
 
             <div className="flex flex-col md:flex-row justify-between md:items-end mb-8 gap-4">
-                <h2 className="text-2xl md:text-3xl font-bold text-white flex-shrink-0">Financials Management</h2>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <h2 className="text-2xl md:text-3xl font-bold text-white flex-shrink-0">Financials Management</h2>
+                    <div className="flex gap-2">
+                        <button onClick={() => setIsQuickTxOpen(true)} className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-sm shadow-lg transition-colors">
+                            <Zap className="w-4 h-4 mr-2" /> Quick Transaction
+                        </button>
+                        <button onClick={handleExportPDF} disabled={displayedMonthlyTransactions.length === 0} className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white rounded-lg font-bold text-sm shadow-lg transition-colors">
+                            <Download className="w-4 h-4 mr-2" /> Export PDF
+                        </button>
+                    </div>
+                </div>
                 <div className="flex flex-col sm:flex-row w-full md:w-auto gap-2">
-                    <div className="flex-grow"><select name="month" value={payPeriod.month} onChange={handlePeriodChange} className="w-full p-2 bg-gray-700 rounded-md text-white">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></div>
-                    <div className="flex-grow"><select name="year" value={payPeriod.year} onChange={handlePeriodChange} className="w-full p-2 bg-gray-700 rounded-md text-white">{years.map(y => <option key={y} value={y}>{y}</option>)}</select></div>
-                    <div className="flex-grow">
-                        <select value={selectedStaffId} onChange={handleStaffChange} className="w-full p-2 bg-gray-700 rounded-md text-white">
-                            <option value="">-- Select Staff --</option>
-                            {staffForDropdown.map(s => {
-                                let label = getDisplayName(s);
-                                if (activeBranch === 'global' && s.branchId) {
-                                    const bName = companyConfig?.branches?.find(b => b.id === s.branchId)?.name || s.branchId;
-                                    label += ` (${bName.replace('Da Moreno ', '')})`;
-                                }
-                                return (<option key={s.id} value={s.id}>{label}</option>);
-                            })}
-                        </select>
-                    </div>
-                    <div className="flex items-center flex-shrink-0 pl-2">
-                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"/>
-                        <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
-                    </div>
+                    <select value={staffFilterId} onChange={e => setStaffFilterId(e.target.value)} className="p-2 bg-gray-800 border border-gray-600 rounded-md text-white focus:border-indigo-500">
+                        <option value="">-- All Staff --</option>
+                        {staffForDropdown.map(s => <option key={s.id} value={s.id}>{s.nickname || s.firstName} {s.lastName}</option>)}
+                    </select>
+                    <select name="month" value={payPeriod.month} onChange={e => setPayPeriod(p => ({ ...p, month: Number(e.target.value) }))} className="p-2 bg-gray-700 rounded-md text-white">{months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
+                    <select name="year" value={payPeriod.year} onChange={e => setPayPeriod(p => ({ ...p, year: Number(e.target.value) }))} className="p-2 bg-gray-700 rounded-md text-white">{years.map(y => <option key={y} value={y}>{y}</option>)}</select>
                 </div>
             </div>
 
-            <section className="mb-10">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold text-white">Pending Salary Advance Requests</h3>
-                    <button
-                        onClick={handleExportPendingAdvances}
-                        disabled={isLoadingPending || pendingAdvances.length === 0}
-                        className="flex items-center bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg text-sm disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed"
-                    >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download PDF
-                    </button>
-                </div>
-                
-                <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
+            {pendingTransactions.length > 0 && (
+                <section className="mb-10 animate-in fade-in duration-300">
+                    <h3 className="text-lg font-bold text-amber-400 mb-4 flex items-center">
+                        <AlertCircle className="w-5 h-5 mr-2" /> Action Required (Pending Requests)
+                    </h3>
+                    <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto border border-amber-500/30">
+                        <table className="min-w-full">
+                            <thead className="bg-gray-750 border-b border-gray-700">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Staff Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Type</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {pendingTransactions.map(item => (
+                                    <TransactionRow
+                                        key={`pend_${item.id}`} item={item} isPending={true} activeBranch={activeBranch} companyConfig={companyConfig}
+                                        onApproveAdvance={handleApproveAdvance} onApproveLoan={handleApproveLoan}
+                                        onRejectAdvance={handleRejectAdvance} onRejectLoan={handleRejectLoan} onStaffClick={setSlideOverStaffId}
+                                    />
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
+
+            <section className="mb-10 animate-in fade-in duration-300">
+                <h3 className="text-xl font-semibold text-white mb-4">Records for {months[payPeriod.month - 1]} {payPeriod.year}</h3>
+
+                {isLoading ? (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4"><div className="h-24 bg-gray-800 rounded-lg animate-pulse" /><div className="h-24 bg-gray-800 rounded-lg animate-pulse" /><div className="h-24 bg-gray-800 rounded-lg animate-pulse" /><div className="h-24 bg-gray-800 rounded-lg animate-pulse" /></div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        <FinancialSummaryCard title="All Monthly Activities" value={`${monthlyTransactions.length} items`} isCurrency={false} icon={LayoutList} color="purple" isActive={activeTab === 'all'} onClick={() => setActiveTab('all')} />
+                        <FinancialSummaryCard title="Monthly Advances" value={monthlyTransactions.filter(tx => tx.category === 'advance').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0)} icon={DollarSign} color="amber" isActive={activeTab === 'advances'} onClick={() => setActiveTab('advances')} />
+                        <FinancialSummaryCard title="Active Loans (Displayed)" value={monthlyTransactions.filter(tx => tx.category === 'loan').reduce((sum, tx) => sum + (Number(tx.raw.remainingBalance) || 0), 0)} icon={Landmark} color="red" isActive={activeTab === 'loans'} onClick={() => setActiveTab('loans')} />
+                        {(() => {
+                            const adjustments = monthlyTransactions.filter(tx => tx.category === 'adjustment');
+                            const totalEarnings = adjustments.filter(tx => tx.raw?.type === 'Earning').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+                            const totalDeductions = adjustments.filter(tx => tx.raw?.type === 'Deduction').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+                            return (
+                                <FinancialSummaryCard title="Monthly Adjustments (Net)" value={totalEarnings - totalDeductions} subText={<span className="flex space-x-2"><span className="text-green-400">+{totalEarnings}</span> <span className="text-red-400">-{totalDeductions}</span></span>} icon={Users} color="blue" isActive={activeTab === 'adjustments'} onClick={() => setActiveTab('adjustments')} />
+                            );
+                        })()}
+                    </div>
+                )}
+
+                <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto border border-gray-700">
                     <table className="min-w-full">
                         <thead className="bg-gray-700">
                             <tr>
-                                <SortableHeader sortKey="staffName">Staff Name</SortableHeader>
-                                <SortableHeader sortKey="date">Date</SortableHeader>
-                                <SortableHeader sortKey="amount">Amount</SortableHeader>
-                                <SortableHeader sortKey="maxEligible">Max Eligible</SortableHeader>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase cursor-pointer hover:bg-gray-600" onClick={() => handleSort('staffName')}>Staff Name {sortConfig.key === 'staffName' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Type</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase cursor-pointer hover:bg-gray-600" onClick={() => handleSort('date')}>Date {sortConfig.key === 'date' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase cursor-pointer hover:bg-gray-600" onClick={() => handleSort('amount')}>Amount {sortConfig.key === 'amount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th>
                                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700">
-                            {isLoadingPending ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">Loading...</td></tr>) : sortedPendingAdvances.length === 0 ? (<tr><td colSpan="5" className="text-center py-10 text-gray-500">No pending requests.</td></tr>) : (sortedPendingAdvances.map(req => {
-                                let displayName = req.staffName;
-                                if (activeBranch === 'global' && req.staff.branchId) {
-                                    const bName = companyConfig?.branches?.find(b => b.id === req.staff.branchId)?.name || req.staff.branchId;
-                                    displayName += ` (${bName.replace('Da Moreno ', '')})`;
-                                }
-                                return (
-                                <tr key={req.id}>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{displayName}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{req.date}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-amber-400">{req.amount.toLocaleString()}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{req.maxEligible.toLocaleString()} THB</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right space-x-2">
-                                        <button onClick={() => handleApproveAdvance(req.id)} className="p-2 bg-green-600 rounded-full hover:bg-green-500" title="Approve"><CheckCircle className="h-5 w-5"/></button>
-                                        <button onClick={() => handleRejectAdvance(req.id)} className="p-2 bg-red-600 rounded-full hover:bg-red-500" title="Reject"><XCircle className="h-5 w-5"/></button>
-                                    </td>
-                                </tr>
+                            {isLoading ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">Loading...</td></tr>) : displayedMonthlyTransactions.length === 0 ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">No records found for this selection.</td></tr>) : (
+                                displayedMonthlyTransactions.map(item =>
+                                    <TransactionRow
+                                        key={`mth_${item.id}`} item={item} isPending={false} activeBranch={activeBranch} companyConfig={companyConfig}
+                                        onEdit={triggerEdit} onDelete={triggerDelete} onStaffClick={setSlideOverStaffId} onManualPayment={handleTriggerManualPayment}
+                                    />
                                 )
-                            }))}
+                            )}
                         </tbody>
                     </table>
                 </div>
             </section>
-
-            {selectedStaffId ? (
-                <div className="space-y-10">
-                    <section>
-                        <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-semibold text-white">Long-Term Loans</h3><button onClick={handleOpenAddLoanModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />Add Loan</button></div>
-                        <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto"><table className="min-w-full"><thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Total</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Monthly</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Remaining</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Start Date</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead><tbody className="divide-y divide-gray-700">{isLoadingLoans ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">Loading...</td></tr>) : loans.length === 0 ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">No active loans.</td></tr>) : (loans.map(loan => (<tr key={loan.id} className="hover:bg-gray-700"><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{loan.loanName}</td><td className="px-6 py-4 text-sm text-gray-300">{loan.totalAmount.toLocaleString()}</td><td className="px-6 py-4 text-sm text-gray-300">{loan.monthlyRepayment.toLocaleString()}</td><td className="px-6 py-4 text-sm font-semibold text-amber-400">{loan.remainingBalance.toLocaleString()}</td><td className="px-6 py-4 text-sm text-gray-300">{loan.startDate}</td><td className="px-6 py-4 text-sm text-right"><button onClick={() => handleOpenEditLoanModal(loan)} className="text-blue-400 hover:text-blue-300 mr-4"><Pencil className="h-5 w-5"/></button><button onClick={() => handleDeleteLoan(loan.id)} className="text-red-400 hover:text-red-300"><Trash2 className="h-5 w-5"/></button></td></tr>)))}</tbody></table></div>
-                    </section>
-                    <section>
-                        <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-semibold text-white">Salary Advances History</h3><button onClick={handleOpenAddAdvanceModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />Add Advance</button></div>
-                        <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto"><table className="min-w-full"><thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Date</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Status</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead><tbody className="divide-y divide-gray-700">{isLoadingAdvances ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">Loading...</td></tr>) : advances.length === 0 ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">No advances for this period.</td></tr>) : (advances.map(adv => (<tr key={adv.id} className="hover:bg-gray-700"><td className="px-6 py-4 text-sm text-gray-300">{adv.date}</td><td className="px-6 py-4 text-sm font-semibold text-amber-400">{adv.amount.toLocaleString()}</td><td className="px-6 py-4 text-sm"><StatusBadge status={adv.status} /></td><td className="px-6 py-4 text-sm text-right"><button onClick={() => handleOpenEditAdvanceModal(adv)} className="text-blue-400 hover:text-blue-300 mr-4"><Pencil className="h-5 w-5"/></button><button onClick={() => handleDeleteAdvance(adv.id)} className="text-red-400 hover:text-red-300"><Trash2 className="h-5 w-5"/></button></td></tr>)))}</tbody></table></div>
-                    </section>
-                    <section>
-                         <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-semibold text-white">Other Monthly Adjustments</h3><button onClick={handleOpenAddAdjustmentModal} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"><Plus className="h-5 w-5 mr-2" />Add Adjustment</button></div>
-                         <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto"><table className="min-w-full"><thead className="bg-gray-700"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Type</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Description</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">Amount</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase">Actions</th></tr></thead><tbody className="divide-y divide-gray-700">{isLoadingAdjustments ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">Loading...</td></tr>) : adjustments.length === 0 ? (<tr><td colSpan="4" className="text-center py-10 text-gray-500">No adjustments for this period.</td></tr>) : (adjustments.map(adj => (<tr key={adj.id} className="hover:bg-gray-700"><td className={`px-6 py-4 text-sm font-semibold ${adj.type === 'Earning' ? 'text-green-400' : 'text-red-400'}`}>{adj.type}</td><td className="px-6 py-4 text-sm text-gray-300">{adj.description}</td><td className="px-6 py-4 text-sm font-semibold text-amber-400">{adj.amount.toLocaleString()}</td><td className="px-6 py-4 text-sm text-right"><button onClick={() => handleOpenEditAdjustmentModal(adj)} className="text-blue-400 hover:text-blue-300 mr-4"><Pencil className="h-5 w-5"/></button><button onClick={() => handleDeleteAdjustment(adj.id)} className="text-red-400 hover:text-red-300"><Trash2 className="h-5 w-5"/></button></td></tr>)))}</tbody></table></div>
-                    </section>
-                </div>
-            ) : (
-                <div className="text-center py-10"><p className="text-gray-400">Please select a staff member to view their detailed financial records.</p></div>
-            )}
         </div>
     );
 }

@@ -4,6 +4,7 @@ import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { app, auth, db } from '../firebase';
 import useAuth from './hooks/useAuth';
+import { WifiOff, ServerCrash, ShieldAlert, RefreshCw } from 'lucide-react'; // <-- NOUVEL IMPORT POUR LES ICÔNES D'ERREUR
 
 import useCompanyConfig from './hooks/useCompanyConfig';
 import useStaffList from './hooks/useStaffList';
@@ -51,7 +52,8 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
-    const { user, userRole, hasStaffProfile, isLoading: isAuthLoading } = useAuth(auth, db);
+    // EXTRACTION DU authError POUR LA GESTION DES CRASHS
+    const { user, userRole, hasStaffProfile, isLoading: isAuthLoading, authError } = useAuth(auth, db);
     const companyConfig = useCompanyConfig(db, user);
     const staffList = useStaffList(db, user);
 
@@ -75,13 +77,11 @@ export default function App() {
         }
     }, [db, user, hasStaffProfile]);
 
-    // --- THE MASTER FIX: Resolve the Branch Config at the Top Level! ---
     const resolvedConfig = useMemo(() => {
         if (!companyConfig) return null;
         
         let effectiveBranch = 'global';
         
-        // If viewing as staff, force their native branch config so their Geofence works!
         if (activeRole === 'staff') {
             effectiveBranch = staffProfile?.branchId || 'global';
         } else {
@@ -104,11 +104,9 @@ export default function App() {
         };
     }, [companyConfig, activeBranch, activeRole, staffProfile]);
 
-    // --- MULTI-BRANCH FIX: Leave Requests Badge ---
     useEffect(() => {
         if (!db) return;
         if (['manager', 'admin', 'dept_manager', 'super_admin'].includes(userRole)) {
-            // Apply branch filter if not looking at Global
             let q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'));
             if (activeBranch && activeBranch !== 'global') {
                 q = query(collection(db, 'leave_requests'), where('status', '==', 'pending'), where('branchId', '==', activeBranch));
@@ -121,13 +119,11 @@ export default function App() {
             const unsubscribe = onSnapshot(q, (snap) => setUnreadLeaveUpdatesCount(snap.size));
             return () => unsubscribe();
         }
-    }, [userRole, db, user, activeBranch]); // <-- Added activeBranch dependency
+    }, [userRole, db, user, activeBranch]); 
 
-    // --- MULTI-BRANCH FIX: Financials Badge ---
     useEffect(() => {
         if (!db) return;
         if (['manager', 'admin', 'super_admin'].includes(userRole)) {
-            // Apply branch filter if not looking at Global
             let q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'));
             if (activeBranch && activeBranch !== 'global') {
                 q = query(collection(db, 'salary_advances'), where('status', '==', 'pending'), where('branchId', '==', activeBranch));
@@ -140,10 +136,9 @@ export default function App() {
             const unsubscribe = onSnapshot(q, (snap) => setUnreadAdvanceUpdatesCount(snap.size));
             return () => unsubscribe();
         }
-    }, [userRole, db, user, activeBranch]); // <-- Added activeBranch dependency
+    }, [userRole, db, user, activeBranch]); 
 
     useEffect(() => {
-        // --- Using resolvedConfig to calculate accurate branch-specific holiday payouts ---
         if (hasStaffProfile && db && user && resolvedConfig && staffProfile) {
             const q = query(
                 collection(db, 'leave_requests'),
@@ -177,9 +172,62 @@ export default function App() {
         setActiveRole(null);
     };
 
+    // ==========================================
+    // ECRANS DE BLOCAGE (ERREURS & CHARGEMENT)
+    // ==========================================
+
+    if (authError) {
+        return (
+            <div className="min-h-screen bg-[#111827] flex flex-col items-center justify-center p-4">
+                <div className="bg-gray-800 border border-gray-700 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+                    <div className="mx-auto w-16 h-16 bg-red-900/30 rounded-full flex items-center justify-center mb-6">
+                        {authError.code === 'offline' || authError.code === 'timeout' ? (
+                            <WifiOff className="w-8 h-8 text-red-500" />
+                        ) : authError.code === 'denied' ? (
+                            <ShieldAlert className="w-8 h-8 text-red-500" />
+                        ) : (
+                            <ServerCrash className="w-8 h-8 text-red-500" />
+                        )}
+                    </div>
+                    
+                    <h1 className="text-xl font-bold text-white mb-2">Connection Failed</h1>
+                    <p className="text-gray-400 text-sm mb-8 leading-relaxed">
+                        {authError.message}
+                    </p>
+                    
+                    <button 
+                        onClick={() => window.location.reload()} 
+                        className="w-full flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+                    >
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Retry Connection
+                    </button>
+
+                    <p className="mt-6 text-xs text-gray-600 font-mono">
+                        Error Code: {authError.code.toUpperCase()}
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     const isLoading = !auth || !db || isAuthLoading || (user && companyConfig === null) || (userRole && !activeRole);
-    if (isLoading) { return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><div className="text-xl">Loading Da Moreno HR Portal...</div></div>; }
+    if (isLoading) { 
+        return (
+            <div className="min-h-screen bg-[#111827] flex items-center justify-center">
+                <div className="flex flex-col items-center">
+                    <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <p className="text-gray-400 font-medium tracking-wide animate-pulse">Loading Da Moreno HR Portal...</p>
+                </div>
+            </div>
+        ); 
+    }
+    
     if (!user) { return <LoginPage handleLogin={handleLogin} loginError={loginError} />; }
+
+    // ==========================================
+    // ROUTAGE PRINCIPAL
+    // ==========================================
 
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
@@ -187,7 +235,6 @@ export default function App() {
                 return <AttendancePage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} activeBranch={activeBranch} />;
             }
             if (activeRole === 'staff') {
-                // Safely passing the resolved Branch Config down to fix the Geofence error!
                 return <StaffDashboardPage db={db} user={user} companyConfig={resolvedConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
             }
         }
@@ -230,7 +277,6 @@ export default function App() {
             case 'financials': return requireFullManager(<FinancialsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
             case 'payroll': return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={resolvedConfig} activeBranch={activeBranch} />);
             
-            // Settings needs the RAW config to save things safely, so we pass companyConfig here.
             case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} activeBranch={activeBranch} />);
 
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;

@@ -47,8 +47,15 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
 
         if (!staffProfileRes.exists) throw new OnCallHttpsError("not-found", "Staff profile not found.");
 
+        // --- FIX : Résolution intelligente de la succursale ---
         const staff = staffProfileRes.data();
-        const config = configRes.data() || {};
+        const rawConfig = configRes.data() || {};
+        const branchId = staff.branchId || 'global';
+        const branchOverrides = rawConfig.branchSettings?.[branchId] || {};
+        
+        // On fusionne tout ! Le reste du code lira 'config' normalement.
+        const config = { ...rawConfig, ...branchOverrides }; 
+
         const job = getCurrentJob(staff);
         if (!job) throw new OnCallHttpsError("failed-precondition", "No job history found.");
 
@@ -221,8 +228,9 @@ exports.calculateLivePayEstimateHandler = onCall({ region: "asia-southeast1" }, 
         let ssoAllowance = 0;
 
         if (staff.isSsoRegistered !== false && estimatedGross > 0) {
-            const ssoRate = (config.financialRules?.ssoRate || 5) / 100;
-            const ssoMax = Number(config.financialRules?.ssoMaxContribution) || 875; 
+            // FIX : Prise en compte de la nouvelle structure migrée pour le SSO
+            const ssoRate = (config.ssoRate ?? config.financialRules?.ssoRate ?? 5) / 100;
+            const ssoMax = Number(config.ssoCap ?? config.financialRules?.ssoMaxContribution ?? 875); 
             ssoDeduction = Math.min(Math.max(1650, estimatedGross) * ssoRate, ssoMax);
             ssoAllowance = ssoDeduction; 
         }

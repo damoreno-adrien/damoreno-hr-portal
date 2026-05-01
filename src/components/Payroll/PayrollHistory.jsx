@@ -1,15 +1,19 @@
 /* src/components/Payroll/PayrollHistory.jsx */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../../../firebase.js" 
+import { app } from "../../../firebase.js"
 import usePayrollHistory from '../../hooks/usePayrollHistory';
-import { Trash2 } from 'lucide-react';
-import * as dateUtils from '../../utils/dateUtils.js'; 
+import { Trash2, ChevronDown, ChevronUp, History, Loader2 } from 'lucide-react';
+import * as dateUtils from '../../utils/dateUtils.js';
+import { doc, getDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
-import BulkPayslipGenerator from './BulkPayslipGenerator';
+import BulkPayslipGenerator from './BulkPayslipGenerator.jsx';
+import ConfirmModal from '../common/ConfirmModal';
+import FeedbackModal from '../common/FeedbackModal';
 
-const functions = getFunctions(app, "asia-southeast1"); 
+const functions = getFunctions(app, "asia-southeast1");
 const deletePayrollRun = httpsCallable(functions, 'deletePayrollRun');
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
@@ -25,138 +29,155 @@ const getCurrentJob = (staff) => {
     })[0];
 };
 
-// --- ADDED: userRole and adminBranchIds ---
-export default function PayrollHistory({ db, staffList, companyConfig, onViewHistoryDetails, activeBranch, userRole, adminBranchIds = [] }) {
-    const { history, isLoadingHistory } = usePayrollHistory(db);
-    const [expandedRunId, setExpandedRunId] = useState(null);
-    const [isDeleting, setIsDeleting] = useState(null);
-    const [isBulkGeneratorOpen, setIsBulkGeneratorOpen] = useState(false);
+export default function PayrollHistory({ db, activeBranch, userRole, staffList, branches = [], onViewHistoryDetails }) {
+    const [expandedMonth, setExpandedMonth] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
-    // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
-    const filteredHistory = useMemo(() => {
-        if (!history) return [];
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
-        return history.map(run => {
-            const branchPayslips = run.payslips.filter(p => {
-                if (activeBranch === 'global') {
-                    if (userRole === 'admin') {
-                        const staffMember = staffList.find(s => s.id === p.staffId);
-                        return staffMember && adminBranchIds.includes(staffMember.branchId);
-                    }
-                    return true; // Super admin sees all
-                }
-                const staffMember = staffList.find(s => s.id === p.staffId);
-                return staffMember?.branchId === activeBranch;
-            });
+    // --- COUCHE DE SÉCURITÉ : Récupération des succursales autorisées ---
+    const [adminBranchIds, setAdminBranchIds] = useState([]);
 
-            const branchTotal = branchPayslips.reduce((sum, p) => sum + (Number(p.netPay) || 0), 0);
+    useEffect(() => {
+        const uid = getAuth().currentUser?.uid;
+        if (userRole === 'admin' && uid && db) {
+            getDoc(doc(db, 'users', uid)).then(snap => {
+                if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
+            }).catch(err => console.error("History security error:", err));
+        }
+    }, [db, userRole]);
 
-            return {
-                ...run,
-                payslips: branchPayslips,
-                displayTotal: branchTotal
-            };
-        }).filter(run => run.payslips.length > 0); 
-    }, [history, activeBranch, staffList, userRole, adminBranchIds]);
+    // Appel au hook avec les nouveaux paramètres de filtrage
+    const { history, isLoadingHistory } = usePayrollHistory(db, activeBranch, userRole, adminBranchIds);
 
-    const handleToggleExpand = (runId) => {
-        setExpandedRunId(prevId => (prevId === runId ? null : runId));
+    const toggleMonth = (monthId) => {
+        setExpandedMonth(expandedMonth === monthId ? null : monthId);
     };
 
-    const handleDeletePayrollRun = async (run) => {
-        const bName = run.branchId ? (companyConfig?.branches?.find(b => b.id === run.branchId)?.name || run.branchId) : 'Global';
-        if (!window.confirm(`Are you sure you want to delete the entire payroll for ${run.monthName} ${run.year} (${bName})? This action cannot be undone.`)) {
-            return;
-        }
-
-        setIsDeleting(run.id);
-        try {
-            const result = await deletePayrollRun({ 
-                payPeriod: { year: run.year, month: run.month },
-                branchId: run.branchId 
-            });
-            alert(result.data.result);
-        } catch (error) {
-            console.error("Error deleting payroll run:", error);
-            alert(`Failed to delete payroll run: ${error.message}`);
-        } finally {
-            setIsDeleting(null);
-        }
+    const handleDeleteRun = async (run) => {
+        // --- MODIFIÉ : Remplacement de window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Payroll Run",
+            message: `CRITICAL: You are about to delete ALL payslips for ${run.monthName} ${run.year}. This cannot be undone. Proceed?`,
+            isDestructive: true,
+            confirmText: "Delete Everything",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsDeleting(true);
+                try {
+                    const result = await deletePayrollRun({ 
+                        year: run.year, 
+                        month: run.month,
+                        branchId: (activeBranch && activeBranch !== 'global') ? activeBranch : null
+                    });
+                    
+                    if (result.data.success) {
+                        setFeedbackModal({ type: 'success', title: 'Deleted', message: "Payroll run deleted successfully." });
+                    } else {
+                        throw new Error(result.data.message || "Deletion failed");
+                    }
+                } catch (error) {
+                    console.error("Error deleting payroll run:", error);
+                    setFeedbackModal({ type: 'error', title: 'Error', message: "Failed to delete payroll run: " + error.message });
+                } finally {
+                    setIsDeleting(false);
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     return (
-        <section>
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 gap-4">
-                <h2 className="text-2xl md:text-3xl font-bold text-white">Finalized Payroll History</h2>
-                <button 
-                    onClick={() => setIsBulkGeneratorOpen(true)}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold text-sm shadow-lg transition-colors flex-shrink-0"
-                >
-                    + Emergency Bulk Creator
-                </button>
-            </div>
-
-            <BulkPayslipGenerator 
-                isOpen={isBulkGeneratorOpen} 
-                onClose={() => setIsBulkGeneratorOpen(false)} 
-                staffList={staffList} 
-                companyConfig={companyConfig} 
-                activeBranch={activeBranch} 
+        <section className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden relative">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
             />
 
-            <div className="space-y-4">
-                {isLoadingHistory ? (
-                    <p className="text-center text-gray-500">Loading history...</p>
-                ) : filteredHistory.length === 0 ? (
-                    <p className="text-center text-gray-500">No finalized payrolls found for this location.</p>
-                ) : (
-                    filteredHistory.map(run => {
-                        const runBranchName = run.branchId ? (companyConfig?.branches?.find(b => b.id === run.branchId)?.name || run.branchId) : null;
+            <div className="p-6 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <History className="text-indigo-400 w-6 h-6" />
+                    <h2 className="text-xl font-bold text-white">Payroll History</h2>
+                </div>
+                {history.length > 0 && (
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Global PDF:</span>
+                        <BulkPayslipGenerator history={history} />
+                    </div>
+                )}
+            </div>
 
+            <div className="p-4 space-y-4">
+                {isLoadingHistory ? (
+                    <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>
+                ) : history.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500 italic">No finalized payroll records found.</div>
+                ) : (
+                    history.map((run) => {
+                        const isExpanded = expandedMonth === run.id;
                         return (
-                            <div key={run.id} className="bg-gray-800 rounded-lg shadow-lg">
-                                <div className="p-4 flex justify-between items-center">
-                                    <div onClick={() => handleToggleExpand(run.id)} className="flex-grow cursor-pointer hover:bg-gray-700/50 -m-4 p-4 rounded-l-lg">
-                                        <p className="font-bold text-lg text-white flex items-center gap-2">
-                                            {run.monthName} {run.year}
-                                            {runBranchName && activeBranch === 'global' && (
-                                                <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30 uppercase tracking-wider">
-                                                    {runBranchName.replace('Da Moreno ', '')}
-                                                </span>
-                                            )}
-                                        </p>
-                                        <p className="text-sm text-gray-400 mt-1">{run.payslips.length} employees paid • Total: {formatCurrency(run.displayTotal)} THB</p>
+                            <div key={run.id} className="border border-gray-700 rounded-lg overflow-hidden bg-gray-900/30">
+                                <div 
+                                    className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-700/50 transition-colors"
+                                    onClick={() => toggleMonth(run.id)}
+                                >
+                                    <div className="flex items-center gap-4">
+                                        {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                                        <div>
+                                            <h3 className="text-lg font-bold text-white">{run.monthName} {run.year}</h3>
+                                            <p className="text-xs text-gray-400">{run.payslips.length} payslips issued</p>
+                                        </div>
                                     </div>
-                                    <div className="flex-shrink-0 ml-4">
-                                        {isDeleting === run.id ? (
-                                            <div className="w-6 h-6 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
-                                        ) : (
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleDeletePayrollRun(run); }}
-                                                className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
-                                                title="Delete this payroll run"
+                                    <div className="flex items-center gap-6">
+                                        <div className="text-right">
+                                            <p className="text-sm font-bold text-amber-400">{formatCurrency(run.totalAmount)} THB</p>
+                                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tighter">Total Net Pay</p>
+                                        </div>
+                                        {userRole === 'super_admin' && (
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteRun(run); }}
+                                                className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                                disabled={isDeleting}
                                             >
-                                                <Trash2 className="h-5 w-5" />
+                                                <Trash2 className="w-5 h-5" />
                                             </button>
                                         )}
                                     </div>
                                 </div>
-                                {expandedRunId === run.id && (
-                                    <div className="p-4 border-t border-gray-700">
-                                        <table className="min-w-full">
-                                            <thead className="bg-gray-700/50">
+
+                                {isExpanded && (
+                                    <div className="border-t border-gray-700 bg-gray-800/50 animate-fadeIn">
+                                        <table className="w-full text-left">
+                                            <thead className="bg-gray-900/50 text-[10px] uppercase font-bold text-gray-400">
                                                 <tr>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Staff</th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Net Pay</th>
+                                                    <th className="px-4 py-2">Staff Member</th>
+                                                    <th className="px-4 py-2">Net Pay</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-700">
-                                                {run.payslips.sort((a,b) => (a.staffName || '').localeCompare(b.staffName || '')).map(p => {
+                                            <tbody className="divide-y divide-gray-700/50">
+                                                {run.payslips.map(p => {
                                                     const staffMember = staffList.find(s => s.id === p.staffId);
-                                                    let displayName = staffMember ? `${staffMember.nickname || staffMember.firstName} (${getCurrentJob(staffMember).department || 'N/A'})` : p.name;
+                                                    const job = getCurrentJob(staffMember);
+                                                    let displayName = p.staffName || 'Unknown';
                                                     
                                                     if (activeBranch === 'global' && staffMember?.branchId) {
-                                                        const bName = companyConfig?.branches?.find(b => b.id === staffMember.branchId)?.name || staffMember.branchId;
+                                                        const bName = branches.find(b => b.id === staffMember.branchId)?.name || staffMember.branchId;
                                                         displayName += ` (${bName.replace('Da Moreno ', '')})`;
                                                     }
 
@@ -164,9 +185,12 @@ export default function PayrollHistory({ db, staffList, companyConfig, onViewHis
                                                         <tr
                                                             key={p.id}
                                                             onClick={() => onViewHistoryDetails(p, run)}
-                                                            className="hover:bg-gray-700 cursor-pointer"
+                                                            className="hover:bg-gray-700 cursor-pointer transition-colors"
                                                         >
-                                                            <td className="px-4 py-2 text-sm text-white">{displayName}</td>
+                                                            <td className="px-4 py-2 text-sm text-white">
+                                                                <div>{displayName}</div>
+                                                                <div className="text-[10px] text-gray-500">{job.department}</div>
+                                                            </td>
                                                             <td className="px-4 py-2 text-sm text-amber-400 font-semibold">{formatCurrency(p.netPay)} THB</td>
                                                         </tr>
                                                     )

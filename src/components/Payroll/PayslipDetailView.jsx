@@ -1,8 +1,12 @@
+/* src/components/Payroll/PayslipDetailView.jsx */
+
 import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Info } from 'lucide-react';
+import { Info, FileText, Download, Printer, Banknote } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
+import { generateDocument } from '../../utils/documentGenerator'; 
+import FeedbackModal from '../common/FeedbackModal'; // <-- NOUVEL IMPORT
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -17,26 +21,59 @@ const formatHours = (hours) => {
 export default function PayslipDetailView({ details, companyConfig, payPeriod }) {
     const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false);
     const [showLeaveTooltip, setShowLeaveTooltip] = useState(false);
+    
+    // --- NOUVEAU STATE POUR LA MODALE D'ERREUR ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
 
     if (!details) return null;
 
-    // --- FIX: Handle both 'name' (Generator) and 'staffName' (History) ---
     const staffName = details.name || details.staffName || 'Unknown Staff';
-    // ---------------------------------------------------------------------
 
-    const hasAbsences = details.deductions.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
-    const hasLeavePayout = details.earnings.leavePayout > 0 && details.earnings.leavePayoutDetails;
-    const hasOvertime = details.earnings.overtimePay > 0;
-    
-    const absenceSummary = formatHours(details.deductions.totalAbsenceHours);
+    const hasAbsences = details.deductions?.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
+    const hasLeavePayout = details.earnings?.leavePayout > 0 && details.earnings.leavePayoutDetails;
+    const hasOvertime = details.earnings?.overtimePay > 0;
+
+    const absenceSummary = formatHours(details.deductions?.totalAbsenceHours);
+
+    // --- FONCTION DE GÉNÉRATION DU REÇU .DOCX ---
+    const handleGenerateDocxReceipt = async () => {
+        const monthNum = details.payPeriodMonth || payPeriod?.month;
+        const yearNum = details.payPeriodYear || payPeriod?.year;
+        const periodStr = monthNum && yearNum ? `${months[monthNum - 1]} ${yearNum}` : 'Unknown Period';
+        const todayStr = dateUtils.formatCustom(new Date(), 'dd/MM/yyyy');
+        
+        const mockStaff = { 
+            fullName: staffName,
+            paymentMethod: details.paymentMethod || 'cash',
+            bankAccount: details.bankAccount || '-',
+            idNumber: details.idNumber || '-',
+            idType: details.idType || '-',
+            jobHistory: [{ position: details.position || details.payType || 'Staff', startDate: new Date().toISOString() }]
+        }; 
+        
+        const extraData = {
+            NET_PAY: formatCurrency(details.netPay),
+            NET_PAY_RAW: details.netPay,
+            PAY_PERIOD: periodStr,
+            PAYMENT_DATE: todayStr
+        };
+
+        const result = await generateDocument('receipt', mockStaff, companyConfig, extraData);
+        // MODIFIÉ : Utilisation de FeedbackModal au lieu de alert()
+        if (!result.success) {
+            setFeedbackModal({ type: 'error', title: 'Generation Failed', message: "Erreur lors de la génération : " + result.error });
+        }
+    };
 
     const handleExportIndividualPDF = async () => {
         const doc = new jsPDF();
-        const payPeriodTitle = `${months[payPeriod.month - 1]} ${payPeriod.year}`;
+        const monthNum = details.payPeriodMonth || payPeriod?.month;
+        const yearNum = details.payPeriodYear || payPeriod?.year;
+        const payPeriodTitle = monthNum && yearNum ? `${months[monthNum - 1]} ${yearNum}` : 'Unknown Period';
 
         if (companyConfig?.companyLogoUrl) {
             try {
-                const response = await fetch(companyConfig.companyLogoUrl); 
+                const response = await fetch(companyConfig.companyLogoUrl);
                 const blob = await response.blob();
                 const reader = new FileReader();
                 const base64Image = await new Promise((resolve, reject) => {
@@ -49,18 +86,18 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                 img.src = base64Image;
                 await new Promise(resolve => { img.onload = resolve; });
 
-                const pdfLogoWidth = 30; 
-                const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width; 
-                
+                const pdfLogoWidth = 30;
+                const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width;
+
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const rightMargin = 14;
                 doc.addImage(base64Image, 'PNG', pageWidth - pdfLogoWidth - rightMargin, 10, pdfLogoWidth, pdfLogoHeight);
 
             } catch (error) {
-                console.error("Error loading company logo for PDF:", error);
+                console.error("Logo error:", error);
             }
         }
-        
+
         doc.setFontSize(18);
         doc.text("Salary Statement", 105, 15, { align: 'center' });
         doc.setFontSize(12);
@@ -68,13 +105,11 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
 
         autoTable(doc, {
             body: [
-                // --- FIX: Use the unified staffName variable ---
                 [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, staffName],
-                // -----------------------------------------------
                 [{ content: 'Company:', styles: { fontStyle: 'bold' } }, companyConfig?.companyName || ''],
                 [{ content: 'Address:', styles: { fontStyle: 'bold' } }, companyConfig?.companyAddress || ''],
                 [{ content: 'Tax ID:', styles: { fontStyle: 'bold' } }, companyConfig?.companyTaxId || ''],
-                [{ content: 'Position:', styles: { fontStyle: 'bold' } }, details.position || details.payType],
+                [{ content: 'Position:', styles: { fontStyle: 'bold' } }, details.position || details.payType || 'Staff'],
             ],
             startY: 30,
             theme: 'plain',
@@ -82,28 +117,21 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
         });
 
         let earningsBody = [
-            ['Base Pay', formatCurrency(details.earnings.basePay)],
-            ['Attendance Bonus', formatCurrency(details.earnings.attendanceBonus)],
-            ['Social Security Allowance', formatCurrency(details.earnings.ssoAllowance)],
-            ...details.earnings.others.map(e => [e.description, formatCurrency(e.amount)])
+            ['Base Pay', formatCurrency(details.earnings?.basePay)],
+            ['Attendance Bonus', formatCurrency(details.earnings?.attendanceBonus)],
+            ['Social Security Allowance', formatCurrency(details.earnings?.ssoAllowance)],
+            ...(details.earnings?.others || []).map(e => [e.description, formatCurrency(e.amount)])
         ];
 
-        if (hasOvertime) {
-            earningsBody.splice(1, 0, ['Approved Overtime', formatCurrency(details.earnings.overtimePay)]);
-        }
+        if (hasOvertime) earningsBody.splice(1, 0, ['Approved Overtime', formatCurrency(details.earnings.overtimePay)]);
+        if (hasLeavePayout) earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
 
-        if (hasLeavePayout) {
-            earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
-        }
-        
-        const absenceLabel = `Absences ${absenceSummary}`;
-            
         const deductionsBody = [
-            [absenceLabel, formatCurrency(details.deductions.absences)],
-            ['Social Security', formatCurrency(details.deductions.sso)],
-            ['Salary Advance', formatCurrency(details.deductions.advance)],
-            ['Loan Repayment', formatCurrency(details.deductions.loan)],
-            ...details.deductions.others.map(d => [d.description, formatCurrency(d.amount)])
+            [`Absences ${absenceSummary}`, formatCurrency(details.deductions?.absences)],
+            ['Social Security', formatCurrency(details.deductions?.sso)],
+            ['Salary Advance', formatCurrency(details.deductions?.advance)],
+            ['Loan Repayment', formatCurrency(details.deductions?.loan)],
+            ...(details.deductions?.others || []).map(d => [d.description, formatCurrency(d.amount)])
         ];
 
         autoTable(doc, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: doc.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
@@ -113,36 +141,34 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
         doc.setFont('helvetica', 'bold');
         doc.text("Net Pay:", 14, doc.lastAutoTable.finalY + 10);
         doc.text(`${formatCurrency(details.netPay)} THB`, 196, doc.lastAutoTable.finalY + 10, { align: 'right' });
-        
-        // --- FIX: Use unified staffName for filename ---
-        doc.save(`payslip_${staffName.replace(/ /g, '_')}_${payPeriod.year}_${payPeriod.month}.pdf`);
+
+        doc.save(`payslip_${staffName.replace(/ /g, '_')}_${yearNum}_${monthNum}.pdf`);
     };
 
     return (
-        <div className="text-white">
+        <div className="text-white relative">
+            {/* INJECTION DU FEEDBACK MODAL */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+
             <div className="grid grid-cols-2 gap-8 mb-6">
                 <div>
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Earnings</h4>
                     <div className="space-y-1 text-sm">
-                        <div className="flex justify-between"><p>Base Pay:</p> <p>{formatCurrency(details.earnings.basePay)}</p></div>
-                        
-                        {hasOvertime && (
-                             <div className="flex justify-between text-green-400">
-                                <p>Approved Overtime:</p> 
-                                <p>{formatCurrency(details.earnings.overtimePay)}</p>
-                            </div>
-                        )}
-
+                        <div className="flex justify-between"><p>Base Pay:</p> <p>{formatCurrency(details.earnings?.basePay)}</p></div>
+                        {hasOvertime && <div className="flex justify-between text-green-400"><p>Approved Overtime:</p><p>{formatCurrency(details.earnings.overtimePay)}</p></div>}
                         {hasLeavePayout && (
-                             <div className="flex justify-between relative">
+                            <div className="flex justify-between relative">
                                 <div className="flex items-center gap-2">
                                     <p>Leave Payout:</p>
-                                    <button onMouseEnter={() => setShowLeaveTooltip(true)} onMouseLeave={() => setShowLeaveTooltip(false)} className="text-gray-400 hover:text-white">
-                                        <Info className="h-4 w-4" />
-                                    </button>
+                                    <button onMouseEnter={() => setShowLeaveTooltip(true)} onMouseLeave={() => setShowLeaveTooltip(false)} className="text-gray-400 hover:text-white"><Info className="h-4 w-4" /></button>
                                 </div>
                                 <p>{formatCurrency(details.earnings.leavePayout)}</p>
-                                
                                 {showLeaveTooltip && (
                                     <div className="absolute top-6 left-0 z-20 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-56">
                                         <p className="font-bold text-xs mb-2">Leave Payout Details</p>
@@ -155,44 +181,34 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
                                 )}
                             </div>
                         )}
-
-                        <div className="flex justify-between"><p>Attendance Bonus:</p> <p>{formatCurrency(details.earnings.attendanceBonus)}</p></div>
-                        <div className="flex justify-between"><p>SSO Allowance:</p> <p>{formatCurrency(details.earnings.ssoAllowance)}</p></div>
-                        {details.earnings.others.map((e, i) => <div key={i} className="flex justify-between"><p>{e.description}:</p> <p>{formatCurrency(e.amount)}</p></div>)}
+                        <div className="flex justify-between"><p>Attendance Bonus:</p> <p>{formatCurrency(details.earnings?.attendanceBonus)}</p></div>
+                        <div className="flex justify-between"><p>SSO Allowance:</p> <p>{formatCurrency(details.earnings?.ssoAllowance)}</p></div>
+                        {(details.earnings?.others || []).map((e, i) => <div key={i} className="flex justify-between"><p>{e.description}:</p> <p>{formatCurrency(e.amount)}</p></div>)}
                     </div>
                     <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-gray-500"><p>Total Earnings:</p> <p>{formatCurrency(details.totalEarnings)}</p></div>
                 </div>
-                 <div>
+                <div>
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Deductions</h4>
                     <div className="space-y-1 text-sm">
                         <div className="flex justify-between relative">
                             <div className="flex items-center gap-2">
                                 <p>Absences {absenceSummary}:</p>
-                                {hasAbsences && (
-                                    <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white">
-                                        <Info className="h-4 w-4" />
-                                    </button>
-                                )}
+                                {hasAbsences && <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white"><Info className="h-4 w-4" /></button>}
                             </div>
-                            <p>{formatCurrency(details.deductions.absences)}</p>
-                            
+                            <p>{formatCurrency(details.deductions?.absences)}</p>
                             {showAbsenceTooltip && (
                                 <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
                                     <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
                                     <ul className="list-disc list-inside text-xs text-gray-300">
-                                        {details.deductions.unpaidAbsences.map(abs => 
-                                            <li key={abs.date}>
-                                                {dateUtils.formatDisplayDate(abs.date)} <span className="text-gray-400">{formatHours(abs.hours)}</span>
-                                            </li>
-                                        )}
+                                        {details.deductions.unpaidAbsences.map(abs => <li key={abs.date}>{dateUtils.formatDisplayDate(abs.date)} <span className="text-gray-400">{formatHours(abs.hours)}</span></li>)}
                                     </ul>
                                 </div>
                             )}
                         </div>
-                        <div className="flex justify-between"><p>Social Security:</p> <p>{formatCurrency(details.deductions.sso)}</p></div>
-                        <div className="flex justify-between"><p>Salary Advance:</p> <p>{formatCurrency(details.deductions.advance)}</p></div>
-                        <div className="flex justify-between"><p>Loan Repayment:</p> <p>{formatCurrency(details.deductions.loan)}</p></div>
-                        {details.deductions.others.map((d, i) => <div key={i} className="flex justify-between"><p>{d.description}:</p> <p>{formatCurrency(d.amount)}</p></div>)}
+                        <div className="flex justify-between"><p>Social Security:</p> <p>{formatCurrency(details.deductions?.sso)}</p></div>
+                        <div className="flex justify-between"><p>Salary Advance:</p> <p>{formatCurrency(details.deductions?.advance)}</p></div>
+                        <div className="flex justify-between"><p>Loan Repayment:</p> <p>{formatCurrency(details.deductions?.loan)}</p></div>
+                        {(details.deductions?.others || []).map((d, i) => <div key={i} className="flex justify-between"><p>{d.description}:</p> <p>{formatCurrency(d.amount)}</p></div>)}
                     </div>
                     <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-gray-500"><p>Total Deductions:</p> <p>{formatCurrency(details.totalDeductions)}</p></div>
                 </div>
@@ -200,7 +216,17 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
             <div className="flex justify-between items-center bg-gray-900 p-4 rounded-lg mt-6">
                 <h3 className="text-xl font-bold">NET PAY:</h3><p className="text-2xl font-bold text-amber-400">{formatCurrency(details.netPay)} THB</p>
             </div>
-            <div className="flex justify-end mt-6"><button onClick={handleExportIndividualPDF} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-semibold">Export This Payslip to PDF</button></div>
+            <div className="flex justify-end mt-6">
+                <button onClick={handleExportIndividualPDF} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-semibold">Export Payslip to PDF</button>
+                {details?.paymentMethod === 'cash' && (
+                    <button
+                        onClick={handleGenerateDocxReceipt}
+                        className="flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm shadow-lg ml-2"
+                    >
+                        <Banknote className="w-4 h-4 mr-2" /> Receipt (Cash) .docx
+                    </button>
+                )}
+            </div>
         </div>
     );
 }

@@ -2,16 +2,16 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; 
+import { getAuth } from 'firebase/auth';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
-import { Plus, Download, FileText } from 'lucide-react'; 
-import { 
-    fromFirestore, 
-    differenceInCalendarMonths, 
-    formatISODate, 
+import { Plus, Download, FileText } from 'lucide-react';
+import {
+    fromFirestore,
+    differenceInCalendarMonths,
+    formatISODate,
     formatDisplayDate,
     isStaffActiveOnDate,
     getDynamicStaffStatus
@@ -20,14 +20,17 @@ import { app } from "../../firebase.js";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// --- IMPORT DE LA MODALE ---
+import FeedbackModal from '../components/common/FeedbackModal';
+
 // --- Helper: Currency Formatter ---
 const formatCurrency = (num) => {
     if (typeof num !== 'number') {
         num = 0;
     }
-    return new Intl.NumberFormat('en-US', { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
     }).format(num);
 };
 
@@ -68,6 +71,9 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const [isExporting, setIsExporting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
+    // --- STATE POUR LA MODALE DE FEEDBACK ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+
     // --- THE SECURITY LAYER: Fetch user's assigned branches ---
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
@@ -95,9 +101,9 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             return { position: 'N/A', department: 'Unassigned', displayRate: 0, payType: 'Salary' };
         }
         const latestJob = [...staff.jobHistory].sort((a, b) => {
-             const dateA = fromFirestore(b.startDate) || new Date(0);
-             const dateB = fromFirestore(a.startDate) || new Date(0);
-             return dateA - dateB;
+            const dateA = fromFirestore(b.startDate) || new Date(0);
+            const dateB = fromFirestore(a.startDate) || new Date(0);
+            return dateA - dateB;
         })[0];
         let rate = latestJob.payType === 'Hourly' ? (latestJob.hourlyRate || latestJob.rate || 0) : (latestJob.baseSalary || latestJob.rate || 0);
         return { ...latestJob, displayRate: rate };
@@ -109,7 +115,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         const filteredList = staffList.filter(staff => {
             const isHistoricallyArchived = !isStaffActiveOnDate(staff, new Date());
             if (!showArchived && isHistoricallyArchived) return false;
-            
+
             // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
             if (activeBranch === 'global') {
                 if (userRole === 'admin' && !adminBranchIds.includes(staff.branchId)) return false;
@@ -152,9 +158,9 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const handleExportPDF = () => {
         const doc = new jsPDF();
         const today = new Date().toLocaleDateString('en-GB');
-        doc.setFontSize(18); 
+        doc.setFontSize(18);
         doc.text("Staff List", 14, 20);
-        doc.setFontSize(10); 
+        doc.setFontSize(10);
         doc.text(`Generated on: ${today}`, 14, 26);
 
         const tableBody = [];
@@ -164,23 +170,23 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 const startDate = fromFirestore(staff.startDate);
                 const salaryDisplay = `${formatCurrency(currentJob.displayRate)} ${currentJob.payType === 'Hourly' ? '/hr' : '/mo'}`;
                 tableBody.push([
-                    getDisplayName(staff), 
-                    dept, 
-                    currentJob.position, 
-                    salaryDisplay, 
-                    staff.bonusStreak || 0, 
-                    formatDisplayDate(startDate), 
+                    getDisplayName(staff),
+                    dept,
+                    currentJob.position,
+                    salaryDisplay,
+                    staff.bonusStreak || 0,
+                    formatDisplayDate(startDate),
                     staff.status || 'Active'
                 ]);
             });
         });
 
         autoTable(doc, {
-            startY: 35, 
-            head: [['Name', 'Department', 'Position', 'Salary', 'Streak', 'Start Date', 'Status']], 
+            startY: 35,
+            head: [['Name', 'Department', 'Position', 'Salary', 'Streak', 'Start Date', 'Status']],
             body: tableBody,
-            headStyles: { fillColor: [41, 128, 185], textColor: 255 }, 
-            alternateRowStyles: { fillColor: [245, 245, 245] }, 
+            headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+            alternateRowStyles: { fillColor: [245, 245, 245] },
             styles: { fontSize: 9 },
         });
         doc.save(`staff_list_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -192,49 +198,60 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             const functions = getFunctions(app);
             const exportStaffData = httpsCallable(functions, 'exportStaffData');
             const result = await exportStaffData();
-            if (!result.data.csvData) { 
-                alert("No staff data to export."); 
-                return; 
+            if (!result.data.csvData) {
+                // --- MODIFIÉ : Remplacement de alert() ---
+                setFeedbackModal({ type: 'warning', title: 'No Data', message: "No staff data to export." });
+                return;
             }
             const blob = new Blob([`\uFEFF${result.data.csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url); 
+            link.setAttribute("href", url);
             link.setAttribute("download", result.data.filename || `staff_export_${formatISODate(new Date())}_fallback.csv`);
-            document.body.appendChild(link); 
-            link.click(); 
-            document.body.removeChild(link); 
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             URL.revokeObjectURL(url);
-        } catch (error) { 
-            alert(`Failed to export staff data: ${error.message}`); 
-        } finally { 
-            setIsExporting(false); 
+        } catch (error) {
+            // --- MODIFIÉ : Remplacement de alert() ---
+            setFeedbackModal({ type: 'error', title: 'Export Failed', message: `Failed to export staff data: ${error.message}` });
+        } finally {
+            setIsExporting(false);
         }
     };
 
     return (
-        <div>
+        <div className="relative">
+            {/* INJECTION DU FEEDBACK MODAL */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+
             <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
-                <AddStaffForm 
-                    auth={auth} 
-                    onClose={() => setIsAddModalOpen(false)} 
+                <AddStaffForm
+                    auth={auth}
+                    onClose={() => setIsAddModalOpen(false)}
                     departments={departments}
-                    userRole={userRole} 
-                    activeBranch={activeBranch} 
-                    branches={companyConfig?.branches || []} 
+                    userRole={userRole}
+                    activeBranch={activeBranch}
+                    branches={companyConfig?.branches || []}
                     managerProfile={staffProfile}
                 />
             </Modal>
 
             {selectedStaff && (
-                 <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
-                    <StaffProfileModal 
-                        staff={selectedStaff} 
-                        db={db} 
-                        companyConfig={companyConfig} 
-                        onClose={closeProfileModal} 
-                        departments={departments} 
-                        userRole={userRole} 
+                <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
+                    <StaffProfileModal
+                        staff={selectedStaff}
+                        db={db}
+                        companyConfig={companyConfig}
+                        onClose={closeProfileModal}
+                        departments={departments}
+                        userRole={userRole}
                     />
                 </Modal>
             )}
@@ -243,21 +260,21 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
                 <div className="flex flex-wrap items-center gap-4 justify-start md:justify-end">
                     <div className="flex-grow w-full md:w-auto md:flex-grow-0">
-                        <input 
-                            type="text" 
-                            placeholder="Search by name, nickname, or position..." 
-                            value={searchQuery} 
-                            onChange={(e) => setSearchQuery(e.target.value)} 
-                            className="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-amber-500 focus:border-amber-500" 
+                        <input
+                            type="text"
+                            placeholder="Search by name, nickname, or position..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-amber-500 focus:border-amber-500"
                         />
                     </div>
                     <div className="flex items-center">
-                        <input 
-                            id="showArchived" 
-                            type="checkbox" 
-                            checked={showArchived} 
-                            onChange={(e) => setShowArchived(e.target.checked)} 
-                            className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" 
+                        <input
+                            id="showArchived"
+                            type="checkbox"
+                            checked={showArchived}
+                            onChange={(e) => setShowArchived(e.target.checked)}
+                            className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"
                         />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
@@ -313,7 +330,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                                 <div className="flex items-center">
                                                     <span>{getDisplayName(staff)}</span>
                                                     {activeBranch === 'global' && staff.branchId && (
-                                                        <span className="ml-2 text-[10px] uppercase font-bold text-gray-400 bg-gray-900 px-1.5 py-0.5 rounded border border-gray-600">
+                                                        <span className="ml-2 text-[9px] uppercase tracking-wider font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">
                                                             {bName.replace('Da Moreno ', '')}
                                                         </span>
                                                     )}
@@ -328,7 +345,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                                 {currentJob.position}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">
-                                                {formatCurrency(currentJob.displayRate)} 
+                                                {formatCurrency(currentJob.displayRate)}
                                                 <span className="text-xs text-gray-500 ml-1">
                                                     {currentJob.payType === 'Hourly' ? '/hr' : '/mo'}
                                                 </span>

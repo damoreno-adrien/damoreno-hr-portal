@@ -1,98 +1,69 @@
 /* functions/src/staff/exportStaffData.js */
 
-const { HttpsError, https } = require("firebase-functions/v2");
-const { onCall } = require("firebase-functions/v2/https");
-const { HttpsError: OnCallHttpsError } = require("firebase-functions/v2/https");
+const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { Parser } = require('json2csv');
-
-const { DateTime, parseISO, isValid, timeZone, safeToDate } = require('../utils/dateHelpers');
+const { format } = require('date-fns');
 
 const db = getFirestore();
 
 /**
- * --- UPDATED: Strict Date Formatter ---
+ * --- STRICT DATE FORMATTER ---
  * Helper to format date inputs (Timestamp only) into DD/MM/YYYY.
  * Returns an empty string if input is invalid, null, or not a Timestamp.
  */
 const formatDateForExport = (dateInput) => {
-    // Ensure date-fns functions are loaded
-    if (!isValid || !format) {
-        console.error("exportStaffData/formatDate: date-fns functions not loaded!");
-        return '';
-    }
-    
-    // Handle null/undefined/empty string immediately
     if (!dateInput) return '';
 
-    // We ONLY accept Firestore Timestamps from the database
     if (dateInput instanceof Timestamp) {
         try {
             const dateObj = dateInput.toDate();
-            if (isValid(dateObj)) {
-                return format(dateObj, 'dd/MM/yyyy'); // Format to standard
+            if (dateObj instanceof Date && !isNaN(dateObj.getTime())) {
+                return format(dateObj, 'dd/MM/yyyy');
             } else {
-                 console.warn(`exportStaffData/formatDate: Converted Timestamp resulted in invalid JS Date:`, dateInput);
-                 return '';
+                console.warn(`exportStaffData/formatDate: Converted Timestamp resulted in invalid JS Date:`, dateInput);
+                return '';
             }
         } catch(e) {
-             console.error(`exportStaffData/formatDate: Error converting Timestamp to Date:`, dateInput, e);
-             return '';
+            console.error(`exportStaffData/formatDate: Error converting Timestamp to Date:`, dateInput, e);
+            return '';
         }
     }
 
-    // If input wasn't a Timestamp (e.g., a bad string), return empty
     console.warn(`exportStaffData/formatDate: Input was not a Timestamp:`, dateInput);
     return '';
 };
-// --- END UPDATED FUNCTION ---
-
-
-// Helper to get display name
-const getDisplayName = (staff) => {
-    // ... (rest of function is unchanged) ...
-    if (!staff) return 'Unknown Staff';
-    if (staff.nickname) return staff.nickname;
-    if (staff.firstName && staff.lastName) return `${staff.firstName} ${staff.lastName}`;
-    if (staff.firstName) return staff.firstName; // Fallback if only first name
-    return staff.fullName || 'Unknown Staff'; // Final fallback
-};
-
 
 exports.exportStaffDataHandler = onCall({
-    region: "us-central1",
+    region: "asia-southeast1",
     timeoutSeconds: 300,
     memory: "512MiB"
 }, async (request) => {
     console.log("exportStaffDataHandler: Function execution started.");
 
-    // Ensure date-fns loaded
-     if (!isValid || !format) {
-         console.error("exportStaffDataHandler: CRITICAL - date-fns functions not loaded!");
-         throw new OnCallHttpsError("internal", "Core Date library failed to load, cannot export dates correctly.");
-     }
-
     // Auth check
     if (!request.auth) {
         console.error("exportStaffDataHandler: Unauthenticated access attempt.");
-        throw new OnCallHttpsError("unauthenticated", "You must be logged in to perform this action.");
+        throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
     const callerUid = request.auth.uid;
     console.log(`exportStaffDataHandler: Received call from authenticated user: ${callerUid}`);
 
-    // Role check
+    // Role check (Règle 3 - RBAC hiérarchique)
     try {
         const callerDoc = await db.collection("users").doc(callerUid).get();
-        if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-            console.error(`exportStaffDataHandler: Permission denied for user ${callerUid}. Role: ${callerDoc.data()?.role}`);
-            throw new OnCallHttpsError("permission-denied", "Only managers can export staff data.");
+        const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+        
+        if (!['manager', 'admin', 'super_admin'].includes(callerRole)) {
+            console.error(`exportStaffDataHandler: Permission denied for user ${callerUid}. Role: ${callerRole}`);
+            throw new HttpsError("permission-denied", "Only managers, admins, and super admins can export staff data.");
         }
-        console.log(`exportStaffDataHandler: User ${callerUid} authorized as manager.`);
+        console.log(`exportStaffDataHandler: User ${callerUid} authorized as ${callerRole}.`);
     } catch(err) {
-         console.error(`exportStaffDataHandler: Error verifying manager role for ${callerUid}:`, err);
-         if (err instanceof OnCallHttpsError) throw err;
-         throw new OnCallHttpsError("internal", "Failed to verify user role.", err.message);
+        console.error(`exportStaffDataHandler: Error verifying user role for ${callerUid}:`, err);
+        if (err instanceof HttpsError) throw err;
+        throw new HttpsError("internal", "Failed to verify user role.", err.message);
     }
 
     // --- Main Export Logic ---
@@ -122,7 +93,6 @@ exports.exportStaffDataHandler = onCall({
                 Nickname: staff.nickname || '',
                 Email: staff.email || '',
                 PhoneNumber: staff.phoneNumber || '',
-                // Use the robust date formatting helper
                 Birthdate: formatDateForExport(staff.birthdate),
                 StartDate: formatDateForExport(staff.startDate),
                 Status: staff.status || 'active',
@@ -152,7 +122,7 @@ exports.exportStaffDataHandler = onCall({
 
     } catch (error) {
         console.error("exportStaffDataHandler: Error during CSV generation or data fetching:", error);
-        if (error instanceof OnCallHttpsError) throw error;
-        throw new OnCallHttpsError("internal", `An unexpected error occurred while exporting data. ${error.message}`, error.stack);
+        if (error instanceof HttpsError) throw error;
+        throw new HttpsError("internal", `An unexpected error occurred while exporting data. ${error.message}`, error.stack);
     }
 });

@@ -1,12 +1,10 @@
 /* functions/src/attendance/importAttendanceData.js */
 
-const functions = require("firebase-functions/v2");
-const { HttpsError } = functions.https;
+const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { DateTime } = require('luxon');
-const { isEqual: isDateEqual, isValid: isJsDateValid } = require('date-fns');
 
 const db = getFirestore();
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
@@ -27,12 +25,11 @@ const parseDateString = (dateString) => {
 
 const parseDateTimeToTimestamp = (dateStr, timeStr) => {
     if (!dateStr || !timeStr || timeStr === '-' || timeStr.trim() === '') return null;
-    
+
     let dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm', { zone: THAILAND_TIMEZONE });
     if (!dt.isValid) dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd H:mm', { zone: THAILAND_TIMEZONE });
     if (!dt.isValid) dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm:ss', { zone: THAILAND_TIMEZONE });
     if (!dt.isValid) dt = DateTime.fromISO(timeStr, { zone: THAILAND_TIMEZONE });
-
     if (!dt.isValid) return null;
     return Timestamp.fromDate(dt.toJSDate());
 };
@@ -43,18 +40,22 @@ const areValuesEqual = (val1, val2) => {
     return val1 === val2;
 };
 
-exports.importAttendanceDataHandler = functions.https.onCall({
-    region: "us-central1",
+exports.importAttendanceDataHandler = onCall({
+    region: "asia-southeast1",
     timeoutSeconds: 540,
     memory: "1GiB"
 }, async (request) => {
-    
+
     if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+
     const callerUid = request.auth.uid;
-    
+
+    // Règle 3 - RBAC hiérarchique
     const callerDoc = await db.collection("users").doc(callerUid).get();
-    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-        throw new HttpsError("permission-denied", "Manager role required.");
+    const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+
+    if (!['manager', 'admin', 'super_admin'].includes(callerRole)) {
+        throw new HttpsError("permission-denied", "Only managers, admins, and super admins can import attendance data.");
     }
 
     const { csvData, confirm } = request.data;
@@ -81,7 +82,7 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 const staffId = row['staff id'] || row['staffid'];
                 const rawDate = row['date'];
                 let attendanceDocId = row['attendance doc id'] || row['attendancedocid'];
-                
+
                 if (!staffId || !rawDate) throw new Error("Missing Staff ID or Date");
 
                 const date = parseDateString(rawDate);
@@ -107,12 +108,12 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                         analysis.name = docSnap.data().staffName || 'Unknown';
                         analysis.details = { note: "Deleting record because Check-In is empty in CSV" };
                     } else {
-                        analysis.action = 'nochange'; 
+                        analysis.action = 'nochange';
                     }
                     analysisResults.push(analysis);
-                    continue; 
+                    continue;
                 }
-                
+
                 let checkInTime = parseDateTimeToTimestamp(date, rawCheckIn);
                 let checkOutTime = parseDateTimeToTimestamp(date, row['check-out'] || row['checkouttime']);
                 let breakStart = parseDateTimeToTimestamp(date, row['break start'] || row['breakstarttime']);
@@ -121,7 +122,7 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                 if (checkInTime && checkOutTime && checkOutTime.toMillis() < checkInTime.toMillis()) {
                     checkOutTime = new Timestamp(checkOutTime.seconds + 86400, checkOutTime.nanoseconds);
                 }
-                
+
                 const newData = {
                     staffId,
                     date,
@@ -159,26 +160,26 @@ exports.importAttendanceDataHandler = functions.https.onCall({
                     analysis.createData = newData;
                     analysis.name = newData.staffName;
                 }
-
             } catch (err) {
                 analysis.action = 'error';
                 analysis.errors.push(err.message);
             }
+
             analysisResults.push(analysis);
         }
 
         if (isDryRun) {
             const summary = analysisResults.reduce((acc, cur) => {
-                 const k = cur.action + 's'; 
-                 if (!acc[k]) acc[k] = [];
-                 acc[k].push(cur);
-                 return acc;
+                const k = cur.action + 's';
+                if (!acc[k]) acc[k] = [];
+                acc[k].push(cur);
+                return acc;
             }, {});
             return { analysis: summary };
         } else {
             const batch = db.batch();
             let count = 0;
-            
+
             analysisResults.forEach(res => {
                 if (res.action === 'create') {
                     const ref = db.collection('attendance').doc(res.docId);
@@ -198,7 +199,6 @@ exports.importAttendanceDataHandler = functions.https.onCall({
             if (count > 0) await batch.commit();
             return { result: `Success! Processed ${count} records.` };
         }
-
     } catch (error) {
         throw new HttpsError("internal", error.message);
     }

@@ -7,14 +7,14 @@ import Modal from '../components/common/Modal';
 import PayslipDetailView from '../components/Payroll/PayslipDetailView';
 import PayrollHistory from '../components/Payroll/PayrollHistory';
 import PayrollGenerator from '../components/Payroll/PayrollGenerator';
-import * as dateUtils from '../utils/dateUtils'; 
+import * as dateUtils from '../utils/dateUtils';
 
 export default function PayrollPage({ db, staffList, companyConfig, activeBranch }) {
     const [selectedStaffDetails, setSelectedStaffDetails] = useState(null);
-    
-    const [payPeriod, setPayPeriod] = useState({ 
-        month: dateUtils.getMonth(new Date()), 
-        year: dateUtils.getYear(new Date()) 
+
+    const [payPeriod, setPayPeriod] = useState({
+        month: dateUtils.getMonth(new Date()),
+        year: dateUtils.getYear(new Date())
     });
 
     const [selectedHistoryDetails, setSelectedHistoryDetails] = useState(null);
@@ -59,10 +59,10 @@ export default function PayrollPage({ db, staffList, companyConfig, activeBranch
         if (!activeBranch || activeBranch === 'global') return companyConfig; // Global uses root settings
 
         const branchOverrides = companyConfig.branchSettings?.[activeBranch] || {};
-        
+
         return {
             ...companyConfig,
-            ...branchOverrides, 
+            ...branchOverrides,
             attendanceBonus: branchOverrides.attendanceBonus || companyConfig.attendanceBonus || {},
             disciplinaryRules: branchOverrides.disciplinaryRules || companyConfig.disciplinaryRules || {},
             geofence: branchOverrides.geofence || companyConfig.geofence || {},
@@ -73,25 +73,29 @@ export default function PayrollPage({ db, staffList, companyConfig, activeBranch
         <div>
             {selectedStaffDetails && (
                 <Modal isOpen={true} onClose={() => setSelectedStaffDetails(null)} title={`Payslip Details for ${selectedStaffDetails.name}`}>
-                    <PayslipDetailView 
-                        details={selectedStaffDetails} 
+                    <PayslipDetailView
+                        details={selectedStaffDetails}
                         companyConfig={resolvedConfig} // <-- Pass resolved config!
-                        payPeriod={payPeriod} 
+                        payPeriod={payPeriod}
                     />
                 </Modal>
             )}
 
             {selectedHistoryDetails && historyPayPeriod && (
-                <Modal isOpen={true} onClose={() => setSelectedHistoryDetails(null)} title={`Payslip for ${selectedHistoryDetails.name || 'Unknown Staff'} (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}>
-                     <PayslipDetailView 
-                        details={selectedHistoryDetails} 
-                        companyConfig={resolvedConfig} // <-- Pass resolved config!
-                        payPeriod={historyPayPeriod} 
+                <Modal
+                    isOpen={true}
+                    onClose={() => setSelectedHistoryDetails(null)}
+                    title={`Payslip for ${selectedHistoryDetails.name || 'Unknown Staff'} (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}
+                >
+                    <PayslipDetailView
+                        details={selectedHistoryDetails}
+                        companyConfig={resolvedConfig}
+                        payPeriod={historyPayPeriod}
                     />
                 </Modal>
             )}
 
-            <PayrollGenerator 
+            <PayrollGenerator
                 db={db}
                 staffList={activeStaffList}
                 companyConfig={resolvedConfig} // <-- Pass resolved config!
@@ -103,8 +107,8 @@ export default function PayrollPage({ db, staffList, companyConfig, activeBranch
 
             <hr className="border-gray-800 my-12" />
 
-            <PayrollHistory 
-                db={db} 
+            <PayrollHistory
+                db={db}
                 staffList={staffList}
                 onViewHistoryDetails={handleViewHistoryDetails}
                 companyConfig={resolvedConfig} // <-- Pass resolved config!

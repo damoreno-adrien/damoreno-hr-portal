@@ -15,6 +15,11 @@ import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTake
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../common/FeedbackModal';
+import ConfirmModal from '../common/ConfirmModal';
+import PromptModal from '../common/PromptModal';
+
 const functionsDefault = getFunctions(app);
 const functionsAsia = getFunctions(app, "asia-southeast1");
 
@@ -35,7 +40,7 @@ const getInitialFormData = (staff) => {
         isSsoRegistered: staff.isSsoRegistered ?? true,
         idType: staff.idType || 'None',
         idNumber: staff.idNumber || '',
-        branchId: staff.branchId || '', 
+        branchId: staff.branchId || '',
     };
     if (staff.firstName || staff.lastName) return { ...initialData, firstName: staff.firstName || '', lastName: staff.lastName || '', nickname: staff.nickname || '' };
     const nameParts = (staff.fullName || '').split(' ');
@@ -48,9 +53,12 @@ const getInitialFormData = (staff) => {
 const StaffHRRecords = ({ db, staffId, staffName }) => {
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
-    
+
     const [filterType, setFilterType] = useState('All');
     const [showRevoked, setShowRevoked] = useState(false);
+
+    // Modal pour cette section
+    const [feedbackModal, setFeedbackModal] = useState(null);
 
     useEffect(() => {
         const fetchRecords = async () => {
@@ -69,7 +77,7 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
         fetchRecords();
     }, [db, staffId]);
 
-    if (loading) return <div className="p-8 text-center text-gray-400"><Loader2 className="h-6 w-6 animate-spin mx-auto mb-2"/> Loading HR history...</div>;
+    if (loading) return <div className="p-8 text-center text-gray-400"><Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" /> Loading HR history...</div>;
 
     const filteredRecords = records.filter(r => {
         if (!showRevoked && r.status === 'revoked') return false;
@@ -93,11 +101,14 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
     };
 
     const handleExportCSV = () => {
-        if (filteredRecords.length === 0) return alert("No records to export.");
+        if (filteredRecords.length === 0) {
+            setFeedbackModal({ type: 'error', title: 'Export Failed', message: "No records to export." });
+            return;
+        }
         const headers = ["Date", "Type", "Original Message", "Status"];
         const rows = filteredRecords.map(r => {
             const friendlyType = r.type === 'overtime_request' ? 'Overtime' : r.type.includes('late') ? 'Lateness' : 'Absence';
-            return [ r.date, friendlyType, `"${r.message || ''}"`, r.status.toUpperCase() ];
+            return [r.date, friendlyType, `"${r.message || ''}"`, r.status.toUpperCase()];
         });
         const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
         const encodedUri = encodeURI(csvContent);
@@ -109,8 +120,10 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
 
     return (
         <div className="space-y-6 animate-fadeIn">
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center"><History className="mr-2 text-indigo-400"/> Lifetime Punctuality & HR Stats</h3>
-            
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+
+            <h3 className="text-xl font-bold text-white mb-4 flex items-center"><History className="mr-2 text-indigo-400" /> Lifetime Punctuality & HR Stats</h3>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
                     <div className="flex items-center gap-2 mb-2"><ShieldAlert className="h-5 w-5 text-amber-400" /><h4 className="font-bold text-gray-300">Lateness</h4></div>
@@ -168,16 +181,16 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
                                     <tr key={r.id} className={`hover:bg-gray-700/50 transition-colors ${r.status === 'revoked' ? 'opacity-50' : ''}`}>
                                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{r.date}</td>
                                         <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                                            {r.type === 'risk_late' && <span className="text-amber-400 flex items-center"><ShieldAlert className="h-4 w-4 mr-1"/> Late</span>}
-                                            {r.type === 'risk_absence' && <span className="text-red-400 flex items-center"><AlertOctagon className="h-4 w-4 mr-1"/> Absence</span>}
-                                            {r.type === 'overtime_request' && <span className="text-green-400 flex items-center"><Clock className="h-4 w-4 mr-1"/> Overtime</span>}
+                                            {r.type === 'risk_late' && <span className="text-amber-400 flex items-center"><ShieldAlert className="h-4 w-4 mr-1" /> Late</span>}
+                                            {r.type === 'risk_absence' && <span className="text-red-400 flex items-center"><AlertOctagon className="h-4 w-4 mr-1" /> Absence</span>}
+                                            {r.type === 'overtime_request' && <span className="text-green-400 flex items-center"><Clock className="h-4 w-4 mr-1" /> Overtime</span>}
                                         </td>
                                         <td className="px-4 py-3 text-sm text-gray-400 max-w-xs truncate" title={r.message}>{r.message}</td>
                                         <td className="px-4 py-3 whitespace-nowrap">
-                                            {r.status === 'approved' || r.status === 'enforced' ? <span className="px-2 py-1 bg-green-900/50 text-green-400 rounded text-xs border border-green-700/50 flex items-center w-max"><CheckCircle className="w-3 h-3 mr-1"/> {r.status.toUpperCase()}</span> : 
-                                             r.status === 'dismissed' ? <span className="px-2 py-1 bg-gray-800 text-gray-400 rounded text-xs border border-gray-600 flex items-center w-max"><XCircle className="w-3 h-3 mr-1"/> DISMISSED</span> :
-                                             r.status === 'revoked' ? <span className="px-2 py-1 bg-red-900/50 text-red-400 rounded text-xs border border-red-700/50 flex items-center w-max"><RotateCcw className="w-3 h-3 mr-1"/> REVOKED</span> :
-                                             <span className="px-2 py-1 bg-yellow-900/50 text-yellow-400 rounded text-xs border border-yellow-700/50">PENDING</span>}
+                                            {r.status === 'approved' || r.status === 'enforced' ? <span className="px-2 py-1 bg-green-900/50 text-green-400 rounded text-xs border border-green-700/50 flex items-center w-max"><CheckCircle className="w-3 h-3 mr-1" /> {r.status.toUpperCase()}</span> :
+                                                r.status === 'dismissed' ? <span className="px-2 py-1 bg-gray-800 text-gray-400 rounded text-xs border border-gray-600 flex items-center w-max"><XCircle className="w-3 h-3 mr-1" /> DISMISSED</span> :
+                                                    r.status === 'revoked' ? <span className="px-2 py-1 bg-red-900/50 text-red-400 rounded text-xs border border-red-700/50 flex items-center w-max"><RotateCcw className="w-3 h-3 mr-1" /> REVOKED</span> :
+                                                        <span className="px-2 py-1 bg-yellow-900/50 text-yellow-400 rounded text-xs border border-yellow-700/50">PENDING</span>}
                                         </td>
                                     </tr>
                                 ))}
@@ -206,10 +219,15 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
 
+    // --- MODALES ETATS ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
+    const [promptState, setPromptState] = useState({ isOpen: false, title: '', message: '', placeholder: '', onConfirm: null, onCancel: null, type: 'text' });
+
     // Permet l'accès aux onglets basiques
     const isFullManager = ['manager', 'admin', 'super_admin'].includes(userRole);
-    
-    // FIX 2: Contrôle d'accès strict pour les actions destructrices
+
+    // Contrôle d'accès strict pour les actions destructrices
     const canManageLifecycle = ['admin', 'super_admin'].includes(userRole);
 
     useEffect(() => {
@@ -232,54 +250,76 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setFormData(prev => ({ ...prev, [e.target.id]: value }));
     };
 
+    const executeSaveDetails = async (updateData) => {
+        try {
+            await updateDoc(doc(db, 'staff_profiles', staff.id), updateData);
+            setIsEditing(false);
+        } catch (err) {
+            setFeedbackModal({ type: 'error', title: 'Save Failed', message: err.message || "Failed to save profile details." });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const handleSaveDetails = async () => {
         setIsSaving(true); setError('');
-        try {
-            const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            const updateData = {
-                firstName: formData.firstName || null, lastName: formData.lastName || null, nickname: formData.nickname || null,
-                email: formData.email || null, phoneNumber: formData.phoneNumber || null,
-                birthdate: dateUtils.parseISODateString(formData.birthdate) ? formData.birthdate : null,
-                startDate: dateUtils.parseISODateString(formData.startDate) ? formData.startDate : null,
-                bankAccount: formData.bankAccount || null, address: formData.address || null,
-                emergencyContactName: formData.emergencyContactName || null, emergencyContactPhone: formData.emergencyContactPhone || null,
-                isSsoRegistered: formData.isSsoRegistered,
-                idType: formData.idType || null,
-                idNumber: formData.idNumber || null,
-                branchId: formData.branchId || null, 
-            };
-            if (updateData.firstName) updateData.fullName = null;
 
-            const oldEmail = staff.email || '';
-            const newEmail = formData.email || '';
+        const updateData = {
+            firstName: formData.firstName || null,
+            lastName: formData.lastName || null,
+            nickname: formData.nickname || null,
+            email: formData.email || null,
+            phoneNumber: formData.phoneNumber || null,
+            birthdate: dateUtils.parseISODateString(formData.birthdate) ? formData.birthdate : null,
+            startDate: dateUtils.parseISODateString(formData.startDate) ? formData.startDate : null,
+            bankAccount: formData.bankAccount || null,
+            paymentMethod: formData.paymentMethod || null,
+            address: formData.address || null,
+            emergencyContactName: formData.emergencyContactName || null,
+            emergencyContactPhone: formData.emergencyContactPhone || null,
+            isSsoRegistered: formData.isSsoRegistered,
+            idType: formData.idType || null,
+            idNumber: formData.idNumber || null,
+            branchId: formData.branchId || null,
+        };
+        if (updateData.firstName) updateData.fullName = null;
 
-            if (newEmail && newEmail !== oldEmail) {
-                const confirmAuthUpdate = window.confirm(
-                    `You changed the email from ${oldEmail || 'None'} to ${newEmail}.\n\nDo you want to securely update their actual LOGIN email to match? (Highly Recommended)`
-                );
+        const oldEmail = staff.email || '';
+        const newEmail = formData.email || '';
 
-                if (confirmAuthUpdate) {
+        if (newEmail && newEmail !== oldEmail) {
+            setConfirmState({
+                isOpen: true,
+                title: "Email Address Changed",
+                message: `You changed the email from ${oldEmail || 'None'} to ${newEmail}.\n\nDo you want to securely update their actual LOGIN email to match? (Highly Recommended)`,
+                confirmText: "Update Login",
+                cancelText: "Skip Update",
+                isDestructive: false,
+                onConfirm: async () => {
+                    setConfirmState({ isOpen: false });
                     try {
                         await updateStaffEmailFunc({ targetUid: staff.id, newEmail: newEmail });
                     } catch (funcError) {
                         console.error(funcError);
-                        throw new Error(funcError.message || 'Failed to update login email. Profile was not changed.');
+                        setFeedbackModal({ type: 'error', title: 'Auth Update Failed', message: funcError.message || 'Failed to update login email.' });
                     }
+                    await executeSaveDetails(updateData);
+                },
+                onCancel: async () => {
+                    setConfirmState({ isOpen: false });
+                    await executeSaveDetails(updateData);
                 }
-            }
-
-            await updateDoc(staffDocRef, updateData);
-            setIsEditing(false);
-            
-        } catch (err) { 
-            setError(err.message || "Failed to save profile details."); 
-        } finally { 
-            setIsSaving(false); 
+            });
+        } else {
+            await executeSaveDetails(updateData);
         }
     };
 
     const handleAddNewJob = async (newJobData) => {
-        if (!dateUtils.parseISODateString(newJobData.startDate)) { alert("Invalid start date provided."); return; }
+        if (!dateUtils.parseISODateString(newJobData.startDate)) {
+            setFeedbackModal({ type: 'error', title: 'Invalid Date', message: "Invalid start date provided." });
+            return;
+        }
 
         if (newJobData.baseSalary) {
             newJobData.baseSalary = Math.round(Number(String(newJobData.baseSalary).replace(/,/g, '')));
@@ -296,23 +336,40 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             const isPromotion = (newTitle !== oldTitle || newJobData.department !== oldDept);
             const docType = isPromotion ? 'promotion' : 'salary_increase';
 
-            if (window.confirm(`Job role saved! Would you like to generate the ${isPromotion ? 'Promotion' : 'Salary Increase'} Addendum document for them to sign?`)) {
-                const newSalaryNum = Number(newJobData.baseSalary || 0);
-                const extraData = {
-                    NEW_JOB_TITLE: newTitle,
-                    NEW_DEPARTMENT: newJobData.department,
-                    NEW_START_DATE: dateUtils.formatCustom(new Date(newJobData.startDate), 'dd MMMM yyyy'),
-                    NEW_SALARY: newSalaryNum.toLocaleString(),
-                    NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'),
-                    NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'),
-                };
-                await handleGenerate(docType, extraData);
-            }
-        } catch (err) { alert("Failed to add job role."); } finally { setIsSaving(false); }
+            const newSalaryNum = Number(newJobData.baseSalary || 0);
+            const extraData = {
+                NEW_JOB_TITLE: newTitle,
+                NEW_DEPARTMENT: newJobData.department,
+                NEW_START_DATE: dateUtils.formatCustom(new Date(newJobData.startDate), 'dd MMMM yyyy'),
+                NEW_SALARY: newSalaryNum.toLocaleString(),
+                NEW_SALARY_EN: translateNumber(newSalaryNum, 'EN'),
+                NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'),
+            };
+
+            setConfirmState({
+                isOpen: true,
+                title: "Job Role Saved",
+                message: `Would you like to generate the ${isPromotion ? 'Promotion' : 'Salary Increase'} Addendum document for them to sign?`,
+                confirmText: "Generate",
+                cancelText: "No thanks",
+                isDestructive: false,
+                onConfirm: async () => {
+                    setConfirmState({ isOpen: false });
+                    await handleGenerate(docType, extraData);
+                },
+                onCancel: () => setConfirmState({ isOpen: false })
+            });
+
+        } catch (err) {
+            setFeedbackModal({ type: 'error', title: 'Save Failed', message: "Failed to add job role." });
+        } finally { setIsSaving(false); }
     };
 
     const handleEditJob = async (oldJob, updatedJob) => {
-        if (!dateUtils.parseISODateString(updatedJob.startDate)) { alert("Invalid start date provided."); return; }
+        if (!dateUtils.parseISODateString(updatedJob.startDate)) {
+            setFeedbackModal({ type: 'error', title: 'Invalid Date', message: "Invalid start date provided." });
+            return;
+        }
 
         if (updatedJob.baseSalary) {
             updatedJob.baseSalary = Math.round(Number(String(updatedJob.baseSalary).replace(/,/g, '')));
@@ -323,47 +380,82 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { jobHistory: arrayRemove(oldJob) });
             await updateDoc(staffDocRef, { jobHistory: arrayUnion(updatedJob) });
-        } catch (err) { alert("Failed to update job role."); } finally { setIsSaving(false); }
+        } catch (err) {
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: "Failed to update job role." });
+        } finally { setIsSaving(false); }
     };
 
     const handleDeleteJob = async (jobToDelete) => {
-        if (window.confirm(`Are you sure you want to delete this role?`)) {
-            setIsSaving(true); setError('');
-            try {
-                const staffDocRef = doc(db, 'staff_profiles', staff.id);
-                await updateDoc(staffDocRef, { jobHistory: arrayRemove(jobToDelete) });
-            } catch (err) { alert("Failed to delete job."); } finally { setIsSaving(false); }
-        }
+        setConfirmState({
+            isOpen: true, title: "Delete Role", message: "Are you sure you want to delete this job role?", isDestructive: true, confirmText: "Delete",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsSaving(true); setError('');
+                try {
+                    const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                    await updateDoc(staffDocRef, { jobHistory: arrayRemove(jobToDelete) });
+                } catch (err) {
+                    setFeedbackModal({ type: 'error', title: 'Delete Failed', message: "Failed to delete job." });
+                } finally { setIsSaving(false); }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     const handleDeleteStaff = async () => {
-        if (window.confirm(`DELETE STAFF?`) && window.confirm("Final confirmation: Delete this staff member?")) {
-            setIsSaving(true); setError('');
-            try { await deleteStaffFunc({ staffId: staff.id }); onClose(); } catch (err) { alert(`Error deleting staff: ${err.message}`); } finally { setIsSaving(false); }
-        }
+        setConfirmState({
+            isOpen: true,
+            title: "DELETE STAFF PERMANENTLY?",
+            message: "Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone. Are you absolutely sure you want to proceed?",
+            isDestructive: true,
+            confirmText: "Yes, Delete Everything",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false }); // Ferme la modale de confirmation
+                setIsSaving(true); // Active le chargement (et le futur bouclier)
+
+                try {
+                    await deleteStaffFunc({ staffId: staff.id });
+
+                    // --- AJOUT DU MESSAGE DE SUCCÈS ---
+                    setFeedbackModal({
+                        type: 'success',
+                        title: 'Deleted',
+                        message: 'Staff member and all associated data have been permanently removed.'
+                    });
+
+                    // On attend 2 secondes pour laisser le temps de lire le message
+                    setTimeout(() => {
+                        onClose(); // Ferme le profil complet
+                    }, 2000);
+
+                } catch (err) {
+                    setFeedbackModal({ type: 'error', title: 'Deletion Failed', message: `Error: ${err.message}` });
+                    setIsSaving(false); // On libère l'interface seulement en cas d'erreur
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
-    // FIX 3: Réactivation Sécurisée (Ordre des opérations inversé)
     const handleReactivateStaff = async () => {
-        setIsSaving(true); setError('');
-        try {
-            if (!window.confirm(`Set ${displayName} as Active?`)) return;
-            
-            // 1. On tente D'ABORD de réactiver l'accès Auth. Si ça plante, on s'arrête là !
-            await setStaffAuthStatus({ staffId: staff.id, disabled: false });
-            
-            // 2. Si Auth a réussi, on met à jour la base de données.
-            const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            const userDocRef = doc(db, 'users', staff.id);
-            await updateDoc(staffDocRef, { status: 'active', endDate: null });
-            try { await updateDoc(userDocRef, { status: 'active' }); } catch (e) { /* Ignore si doc User absent */ }
-            
-            onClose();
-        } catch (err) { 
-            alert(`Failed to activate staff access in Firebase. The database was NOT modified to prevent desync. Reason: ${err.message}`); 
-        } finally { 
-            setIsSaving(false); 
-        }
+        setConfirmState({
+            isOpen: true, title: "Reactivate Staff", message: `Set ${displayName} as Active? They will regain access to the portal.`, isDestructive: false, confirmText: "Reactivate",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsSaving(true); setError('');
+                try {
+                    await setStaffAuthStatus({ staffId: staff.id, disabled: false });
+                    const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                    const userDocRef = doc(db, 'users', staff.id);
+                    await updateDoc(staffDocRef, { status: 'active', endDate: null });
+                    try { await updateDoc(userDocRef, { status: 'active' }); } catch (e) { }
+                    onClose();
+                } catch (err) {
+                    setFeedbackModal({ type: 'error', title: 'Reactivation Error', message: `Failed to activate staff access in Firebase. The database was NOT modified to prevent desync. Reason: ${err.message}` });
+                } finally { setIsSaving(false); }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     const handleUploadFile = async (fileToUpload, metadata) => {
@@ -374,37 +466,43 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             const storageRef = ref(storage, `staff_documents/${staff.id}/${Date.now()}_${safeFileName}`);
             await uploadBytes(storageRef, fileToUpload);
             const downloadURL = await getDownloadURL(storageRef);
-            const fileMetadata = { 
-                name: metadata.customName, 
-                category: metadata.category, 
-                expiryDate: metadata.expiryDate, 
+            const fileMetadata = {
+                name: metadata.customName,
+                category: metadata.category,
+                expiryDate: metadata.expiryDate,
                 isVisibleToStaff: metadata.isVisibleToStaff,
-                url: downloadURL, 
-                path: storageRef.fullPath, 
+                url: downloadURL,
+                path: storageRef.fullPath,
                 uploadedAt: Timestamp.now()
             };
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { documents: arrayUnion(fileMetadata) });
         } catch (err) {
-            alert(`Failed to upload file: ${err.message}`);
+            setFeedbackModal({ type: 'error', title: 'Upload Failed', message: `Failed to upload file: ${err.message}` });
         } finally { setIsSaving(false); }
     };
 
     const handleDeleteFile = async (fileToDelete) => {
-        if (!window.confirm(`Are you sure you want to delete "${fileToDelete.name}"?`)) return;
-        setIsSaving(true); setError('');
-        try {
-            const storage = getStorage();
-            if (!fileToDelete.path) throw new Error("File path is missing.");
-            const fileRef = ref(storage, fileToDelete.path);
-            await deleteObject(fileRef);
-            const staffDocRef = doc(db, 'staff_profiles', staff.id);
-            await updateDoc(staffDocRef, { documents: arrayRemove(fileToDelete) });
-        } catch (error) {
-            alert(`Failed to delete file: ${error.message}`);
-        } finally { setIsSaving(false); }
+        setConfirmState({
+            isOpen: true, title: "Delete Document", message: `Are you sure you want to delete "${fileToDelete.name}"?`, isDestructive: true, confirmText: "Delete",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsSaving(true); setError('');
+                try {
+                    const storage = getStorage();
+                    if (!fileToDelete.path) throw new Error("File path is missing.");
+                    const fileRef = ref(storage, fileToDelete.path);
+                    await deleteObject(fileRef);
+                    const staffDocRef = doc(db, 'staff_profiles', staff.id);
+                    await updateDoc(staffDocRef, { documents: arrayRemove(fileToDelete) });
+                } catch (error) {
+                    setFeedbackModal({ type: 'error', title: 'Delete Failed', message: `Failed to delete file: ${error.message}` });
+                } finally { setIsSaving(false); }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
-    
+
     const handleEditDocument = async (docPath, updatedMetadata) => {
         setIsSaving(true); setError('');
         try {
@@ -417,36 +515,45 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             });
             await updateDoc(staffDocRef, { documents: updatedDocuments });
         } catch (error) {
-            alert(`Failed to update document: ${error.message}`);
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: `Failed to update document: ${error.message}` });
         } finally { setIsSaving(false); }
     };
 
     const handleResetPassword = async (staffId) => {
-        const newPassword = window.prompt(`Enter a new temporary password for ${displayName} (minimum 6 characters):`);
-        if (!newPassword) return;
-        if (newPassword.length < 6) { alert("Password must be at least 6 characters long."); return; }
-        setIsSaving(true); setError('');
-        try {
-            const result = await setStaffPassword({ staffId: staffId, newPassword: newPassword });
-            alert(result.data.result);
-        } catch (err) {
-            alert(`Failed to reset password: ${err.message}`);
-        } finally { setIsSaving(false); }
+        setPromptState({
+            isOpen: true, title: "Reset Password", message: `Enter a new temporary password for ${displayName} (minimum 6 characters):`, placeholder: "Secret123", type: "text",
+            onConfirm: async (newPassword) => {
+                setPromptState({ isOpen: false });
+                if (!newPassword) return;
+                if (newPassword.length < 6) {
+                    setFeedbackModal({ type: 'error', title: 'Invalid Input', message: "Password must be at least 6 characters long." });
+                    return;
+                }
+                setIsSaving(true); setError('');
+                try {
+                    const result = await setStaffPassword({ staffId: staffId, newPassword: newPassword });
+                    setFeedbackModal({ type: 'success', title: 'Password Reset', message: result.data.result });
+                } catch (err) {
+                    setFeedbackModal({ type: 'error', title: 'Reset Failed', message: `Failed to reset password: ${err.message}` });
+                } finally { setIsSaving(false); }
+            },
+            onCancel: () => setPromptState({ isOpen: false })
+        });
     };
 
     const handleSetBonusStreak = async () => {
         const staffDocRef = doc(db, 'staff_profiles', staff.id);
         const streakValue = Number(bonusStreak);
         if (isNaN(streakValue) || streakValue < 0) {
-            alert("Please enter a valid non-negative number for the bonus streak.");
+            setFeedbackModal({ type: 'error', title: 'Invalid Input', message: "Please enter a valid non-negative number for the bonus streak." });
             return;
         }
         setIsSaving(true); setError('');
         try {
             await updateDoc(staffDocRef, { bonusStreak: streakValue });
-            alert(`Bonus streak for ${displayName} has been set to ${streakValue}.`);
+            setFeedbackModal({ type: 'success', title: 'Streak Updated', message: `Bonus streak for ${displayName} has been set to ${streakValue}.` });
         } catch (err) {
-            alert("Failed to update bonus streak.");
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: "Failed to update bonus streak." });
         } finally { setIsSaving(false); }
     };
 
@@ -458,7 +565,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             const staffDocRef = doc(db, 'staff_profiles', staff.id);
             await updateDoc(staffDocRef, { isAttendanceBonusEligible: newValue });
         } catch (err) {
-            alert("Failed to update bonus eligibility.");
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: "Failed to update bonus eligibility." });
             setIsBonusEligible(!newValue);
         } finally { setIsSaving(false); }
     };
@@ -466,10 +573,13 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const handleGenerate = async (docType, extraData = {}) => {
         setIsGenerating(true);
         const result = await generateDocument(docType, staff, companyConfig, extraData);
-        if (!result.success) alert("Failed to generate document: " + result.error);
+        if (!result.success) {
+            setFeedbackModal({ type: 'error', title: 'Generation Failed', message: "Failed to generate document: " + result.error });
+        }
         setIsGenerating(false);
     };
 
+    // --- LOGIQUE ASYNCHRONE DE FORMULAIRE SÉQUENTIEL ---
     const triggerDocumentForm = (docType) => {
         let extraData = {};
 
@@ -477,7 +587,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             const sortedJobs = [...(staff.jobHistory || [])].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0));
 
             if (sortedJobs.length < 2) {
-                alert("Cannot generate automatically: Staff needs at least 2 job history entries (an old one and a new one) to calculate the changes.");
+                setFeedbackModal({ type: 'error', title: 'Action Blocked', message: "Cannot generate automatically: Staff needs at least 2 job history entries (an old one and a new one) to calculate the changes." });
                 return;
             }
 
@@ -495,34 +605,106 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 NEW_SALARY_TH: translateNumber(newSalaryNum, 'TH'),
                 ORIGINAL_START_DATE: dateUtils.formatCustom(new Date(oldJob.startDate), 'dd MMMM yyyy')
             };
+            handleGenerate(docType, extraData);
+            return;
         }
 
         if (docType === 'warning') {
-            const level = window.prompt("What level is this warning? (e.g., 1st Warning, Final Warning)"); if (!level) return;
-            const incident = window.prompt("Date of the incident? (e.g., 15 March 2026)"); if (!incident) return;
-            const reason = window.prompt("Reason for warning? (e.g., Late arrival by 2 hours without notice)"); if (!reason) return;
-            const consequence = window.prompt("Consequence? (e.g., 1-day suspension without pay)"); if (!consequence) return;
-            extraData = { WARNING_LEVEL: level, INCIDENT_DATE: incident, REASON: reason, CONSEQUENCE: consequence };
+            setPromptState({
+                isOpen: true, title: "Warning Level", message: "What level is this warning? (e.g., 1st Warning, Final Warning)",
+                onConfirm: (level) => {
+                    if (!level) { setPromptState({ isOpen: false }); return; }
+                    setTimeout(() => {
+                        setPromptState({
+                            isOpen: true, title: "Incident Date", message: "Date of the incident? (e.g., 15 March 2026)",
+                            onConfirm: (incident) => {
+                                if (!incident) { setPromptState({ isOpen: false }); return; }
+                                setTimeout(() => {
+                                    setPromptState({
+                                        isOpen: true, title: "Reason", message: "Reason for warning?",
+                                        onConfirm: (reason) => {
+                                            if (!reason) { setPromptState({ isOpen: false }); return; }
+                                            setTimeout(() => {
+                                                setPromptState({
+                                                    isOpen: true, title: "Consequence", message: "Consequence? (e.g., 1-day suspension)",
+                                                    onConfirm: (consequence) => {
+                                                        setPromptState({ isOpen: false });
+                                                        if (!consequence) return;
+                                                        handleGenerate('warning', { WARNING_LEVEL: level, INCIDENT_DATE: incident, REASON: reason, CONSEQUENCE: consequence });
+                                                    },
+                                                    onCancel: () => setPromptState({ isOpen: false })
+                                                });
+                                            }, 10);
+                                        },
+                                        onCancel: () => setPromptState({ isOpen: false })
+                                    });
+                                }, 10);
+                            },
+                            onCancel: () => setPromptState({ isOpen: false })
+                        });
+                    }, 10);
+                },
+                onCancel: () => setPromptState({ isOpen: false })
+            });
+            return;
         }
+
         if (docType === 'leave') {
-            const start = window.prompt("Leave Start Date? (e.g., 10 April 2026)"); if (!start) return;
-            const end = window.prompt("Leave End Date? (e.g., 15 April 2026)"); if (!end) return;
-            const reason = window.prompt("Reason for special leave?"); if (!reason) return;
-            extraData = { LEAVE_START_DATE: start, LEAVE_END_DATE: end, LEAVE_REASON: reason };
+            setPromptState({
+                isOpen: true, title: "Leave Start Date", message: "Leave Start Date? (e.g., 10 April 2026)",
+                onConfirm: (start) => {
+                    if (!start) { setPromptState({ isOpen: false }); return; }
+                    setTimeout(() => {
+                        setPromptState({
+                            isOpen: true, title: "Leave End Date", message: "Leave End Date? (e.g., 15 April 2026)",
+                            onConfirm: (end) => {
+                                if (!end) { setPromptState({ isOpen: false }); return; }
+                                setTimeout(() => {
+                                    setPromptState({
+                                        isOpen: true, title: "Reason", message: "Reason for special leave?",
+                                        onConfirm: (reason) => {
+                                            setPromptState({ isOpen: false });
+                                            if (!reason) return;
+                                            handleGenerate(docType, { LEAVE_START_DATE: start, LEAVE_END_DATE: end, LEAVE_REASON: reason });
+                                        },
+                                        onCancel: () => setPromptState({ isOpen: false })
+                                    });
+                                }, 10);
+                            },
+                            onCancel: () => setPromptState({ isOpen: false })
+                        });
+                    }, 10);
+                },
+                onCancel: () => setPromptState({ isOpen: false })
+            });
+            return;
         }
+
         handleGenerate(docType, extraData);
     };
 
     const getTabClasses = (tabName) => {
         return `${activeTab === tabName ? 'border-amber-500 text-amber-500' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors focus:outline-none`;
     };
-    
-    // FIX 4: On regarde l'endDate pour savoir si la personne est VRAIMENT inactive
+
     const todayISO = new Date().toISOString().split('T')[0];
     const isCurrentlyWorking = staff.status === 'active' || !staff.status || (staff.endDate && staff.endDate > todayISO);
 
     return (
         <div className="space-y-6 relative">
+            {/* BOUCLIER ANTI-CLIC : S'affiche si isSaving ou isGenerating est true */}
+            {(isSaving || isGenerating) && (
+                <div className="absolute inset-0 z-[150] bg-gray-900/60 backdrop-blur-sm flex flex-col items-center justify-center rounded-xl cursor-wait">
+                    <Loader2 className="w-12 h-12 animate-spin text-indigo-500 mb-4" />
+                    <p className="text-white font-bold tracking-widest animate-pulse uppercase">
+                        {isGenerating ? "Generating..." : "Processing..."}
+                    </p>
+                </div>
+            )}
+            {/* --- INJECTION GLOBALE DES MODALES --- */}
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} confirmText={confirmState.confirmText || "Confirm"} cancelText={confirmState.cancelText || "Cancel"} isDestructive={confirmState.isDestructive} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} />
+            <PromptModal isOpen={promptState.isOpen} title={promptState.title} message={promptState.message} placeholder={promptState.placeholder} type={promptState.type} onConfirm={promptState.onConfirm} onCancel={promptState.onCancel} />
 
             {isOffboardingModalOpen && (
                 <OffboardingModal
@@ -530,31 +712,35 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     onClose={() => setIsOffboardingModalOpen(false)}
                     onSuccess={async (shouldDisableImmediately) => {
                         setIsOffboardingModalOpen(false);
-                        
+
                         try {
                             const staffDocRef = doc(db, 'staff_profiles', staff.id);
                             const userDocRef = doc(db, 'users', staff.id);
-                            
-                            // FIX 5: Ordre sécurisé et respect de la logique métier (Payroll)
-                            if (shouldDisableImmediately) { 
-                                // Blocage immédiat exigé
-                                await setStaffAuthStatus({ staffId: staff.id, disabled: true }); 
+
+                            if (shouldDisableImmediately) {
+                                await setStaffAuthStatus({ staffId: staff.id, disabled: true });
                                 await updateDoc(staffDocRef, { status: 'archived' });
-                                try { await updateDoc(userDocRef, { status: 'archived' }); } catch(e) {}
+                                try { await updateDoc(userDocRef, { status: 'archived' }); } catch (e) { }
                             } else {
-                                // Fin de contrat dans le futur : on ne bloque pas encore l'accès
-                                // Et on ne force PAS le statut à "archived" tout de suite, 
-                                // car OffboardingModal s'est déjà chargé de mettre l'endDate en DB.
                                 console.log("Staff will remain active until their end date.");
                             }
                         } catch (error) {
-                            alert(`Error during offboarding sync: ${error.message}`);
+                            setFeedbackModal({ type: 'error', title: 'Sync Error', message: `Error during offboarding sync: ${error.message}` });
                         }
 
-                        if (window.confirm("Offboarding details saved! Would you like to print the Resignation/Termination Letter for them to sign?")) {
-                            await handleGenerate('resignation', { RESIGNATION_NOTICE_DATE: dateUtils.formatCustom(new Date(), 'dd MMMM yyyy'), LAST_WORKING_DAY: dateUtils.formatCustom(new Date(staff.endDate || new Date()), 'dd MMMM yyyy') });
-                        }
-                        onClose();
+                        // Demande d'impression après offboarding
+                        setTimeout(() => {
+                            setConfirmState({
+                                isOpen: true, title: "Offboarding Complete", message: "Offboarding details saved! Would you like to print the Resignation/Termination Letter for them to sign?",
+                                confirmText: "Generate Letter", cancelText: "No thanks", isDestructive: false,
+                                onConfirm: async () => {
+                                    setConfirmState({ isOpen: false });
+                                    await handleGenerate('resignation', { RESIGNATION_NOTICE_DATE: dateUtils.formatCustom(new Date(), 'dd MMMM yyyy'), LAST_WORKING_DAY: dateUtils.formatCustom(new Date(staff.endDate || new Date()), 'dd MMMM yyyy') });
+                                    onClose();
+                                },
+                                onCancel: () => { setConfirmState({ isOpen: false }); onClose(); }
+                            });
+                        }, 500);
                     }}
                 />
             )}
@@ -564,13 +750,13 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>Profile Details</button>
                     <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
-                    
+
                     {isFullManager && (
                         <button onClick={() => setActiveTab('hr-records')} className={getTabClasses('hr-records')}>
                             <span className="flex items-center gap-2"><History className="h-4 w-4" /> HR Records</span>
                         </button>
                     )}
-                    
+
                     {isFullManager && (
                         <button onClick={() => setActiveTab('forms')} className={getTabClasses('forms')}>
                             <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> HR Forms</span>
@@ -650,11 +836,11 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             )}
 
             {activeTab === 'details' && (
-                <div className="space-y-6"> 
-                    {isEditing ? 
-                        <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} branches={companyConfig?.branches} userRole={userRole} /> : 
+                <div className="space-y-6">
+                    {isEditing ?
+                        <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} branches={companyConfig?.branches} userRole={userRole} /> :
                         <ProfileDetailsView staff={staff} currentJob={currentJob} branches={companyConfig?.branches} />
-                    } 
+                    }
                 </div>
             )}
 
@@ -670,11 +856,11 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     />
                 </div>
             )}
-            
+
             {activeTab === 'documents' && (
-                <DocumentManager 
-                    documents={staff.documents} 
-                    onUploadFile={handleUploadFile} 
+                <DocumentManager
+                    documents={staff.documents}
+                    onUploadFile={handleUploadFile}
                     onDeleteFile={handleDeleteFile}
                     onEditDocument={handleEditDocument}
                 />
@@ -710,31 +896,30 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         </div>
                     </div>
 
-                    {/* SEULS LES ADMINS PEUVENT GÉRER LE CYCLE DE VIE DU STAFF */}
-                    {canManageLifecycle && (
+                    {canManageLifecycle && userRole === 'super_admin' && (
                         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
                             <h4 className="text-base font-semibold text-white">Critical Staff Actions</h4>
                             <div>
                                 {isCurrentlyWorking ? (
-                                    <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff"> 
-                                        <Archive className="h-4 w-4 mr-2" /> Archive Staff Member 
+                                    <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff">
+                                        <Archive className="h-4 w-4 mr-2" /> Archive Staff Member
                                     </button>
                                 ) : (
-                                    <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff"> 
-                                        <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active 
+                                    <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff">
+                                        <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active
                                     </button>
                                 )}
                             </div>
                             <div>
-                                <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password"> 
-                                    <Key className="h-4 w-4 mr-2" /> Reset Password 
+                                <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password">
+                                    <Key className="h-4 w-4 mr-2" /> Reset Password
                                 </button>
                             </div>
-                            
+
                             {!isCurrentlyWorking && (
                                 <div className="pt-4 border-t border-gray-700">
-                                    <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently"> 
-                                        <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently 
+                                    <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently">
+                                        <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently
                                     </button>
                                     <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
                                 </div>

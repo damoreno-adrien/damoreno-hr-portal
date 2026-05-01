@@ -9,52 +9,84 @@ import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase';
 import { logSystemAction } from '../../utils/auditLogger';
 
+// --- IMPORTS DES MODALES ---
+import ConfirmModal from '../common/ConfirmModal';
+import FeedbackModal from '../common/FeedbackModal';
+
 // --- 1. THE DANGER ZONE SUB-COMPONENT ---
-const DangerZoneBranchDelete = ({ branches, db }) => { // <-- Ajout de 'db' ici
+const DangerZoneBranchDelete = ({ branches, db }) => { 
     const [branchToDelete, setBranchToDelete] = useState('');
     const [confirmText, setConfirmText] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
     
+    // --- NOUVEAUX STATES POUR LES MODALES ---
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+    const [feedbackModal, setFeedbackModal] = useState(null);
+
     const auth = getAuth(app); // Initialisation auth
 
     const handleDelete = async () => {
         if (confirmText !== branchToDelete) {
-            alert("Confirmation text does not match the Branch ID.");
+            setFeedbackModal({ type: 'error', title: 'Mismatch', message: "Confirmation text does not match the Branch ID." });
             return;
         }
 
-        if (window.confirm(`FINAL WARNING: This will permanently erase ALL staff, attendance, and financial data for ${branchToDelete}. This cannot be undone.`)) {
-            setIsDeleting(true);
-            try {
-                const functions = getFunctions(app, "asia-southeast1");
-                const deleteBranchData = httpsCallable(functions, 'deleteBranchData');
-                
-                const result = await deleteBranchData({ branchId: branchToDelete });
-                
-                // --- LOG ACTION (CRITIQUE) ---
-                await logSystemAction(
-                    db, 
-                    auth.currentUser, 
-                    'global', // Action globale car on supprime une branche
-                    'DELETE_BRANCH', 
-                    `CRITICAL: Permanently erased all data for branch ID: ${branchToDelete}`
-                );
-                // -----------------------------
+        setConfirmState({
+            isOpen: true,
+            title: "Erase Branch",
+            message: `FINAL WARNING: This will permanently erase ALL staff, attendance, and financial data for ${branchToDelete}. This cannot be undone.`,
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null });
+                setIsDeleting(true);
+                try {
+                    const functions = getFunctions(app, "asia-southeast1");
+                    const deleteBranchData = httpsCallable(functions, 'deleteBranchData');
+                    
+                    const result = await deleteBranchData({ branchId: branchToDelete });
+                    
+                    // --- LOG ACTION (CRITIQUE) ---
+                    await logSystemAction(
+                        db, 
+                        auth.currentUser, 
+                        'global', // Action globale car on supprime une branche
+                        'DELETE_BRANCH', 
+                        `CRITICAL: Permanently erased all data for branch ID: ${branchToDelete}`
+                    );
+                    // -----------------------------
 
-                alert(result.data.message);
-                
-                setBranchToDelete('');
-                setConfirmText('');
-            } catch (error) {
-                alert(`Deletion failed: ${error.message}`);
-            } finally {
-                setIsDeleting(false);
+                    setFeedbackModal({ type: 'success', title: 'Branch Erased', message: result.data.message });
+                    
+                    setBranchToDelete('');
+                    setConfirmText('');
+                } catch (error) {
+                    setFeedbackModal({ type: 'error', title: 'Deletion Failed', message: `Deletion failed: ${error.message}` });
+                } finally {
+                    setIsDeleting(false);
+                }
             }
-        }
+        });
     };
 
     return (
-        <div className="mt-12 bg-red-900/20 border border-red-700/50 rounded-xl p-6">
+        <div className="mt-12 bg-red-900/20 border border-red-700/50 rounded-xl p-6 relative">
+            {/* INJECTION DES MODALES POUR DANGER ZONE */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={() => setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null })}
+                isDestructive={true}
+                confirmText="Destroy Branch"
+            />
+
             <div className="flex items-center gap-3 mb-4">
                 <AlertTriangle className="w-6 h-6 text-red-500" />
                 <h3 className="text-xl font-bold text-red-500">Danger Zone: Erase Branch</h3>
@@ -111,6 +143,9 @@ export function BranchManager({ db, config }) {
     const [newBranchId, setNewBranchId] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [branchStats, setBranchStats] = useState({});
+
+    // --- STATE POUR LA MODALE DU BRANCH MANAGER ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
 
     const auth = getAuth(app); // Initialisation auth
 
@@ -191,7 +226,7 @@ export function BranchManager({ db, config }) {
         if (!newBranchName || !newBranchId) return;
 
         if (branches.some(b => b.id === newBranchId)) {
-            alert("This Branch ID already exists! Please use a unique ID.");
+            setFeedbackModal({ type: 'error', title: 'ID Exists', message: "This Branch ID already exists! Please use a unique ID." });
             return;
         }
 
@@ -216,18 +251,29 @@ export function BranchManager({ db, config }) {
             );
             // ------------------
 
+            setFeedbackModal({ type: 'success', title: 'Branch Registered', message: 'The new branch has been registered successfully.' });
+            
             setNewBranchName('');
             setNewBranchId('');
         } catch (error) {
             console.error("Error adding branch:", error);
-            alert("Failed to add branch.");
+            setFeedbackModal({ type: 'error', title: 'Error', message: "Failed to add branch." });
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <div className="space-y-6 animate-fadeIn">
+        <div className="space-y-6 animate-fadeIn relative">
+            {/* INJECTION DU FEEDBACK MODAL DU BRANCH MANAGER */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+
             <div className="bg-gray-900/50 p-6 border-b border-gray-700">
                 <div className="flex items-center gap-3">
                     <div className="bg-indigo-500/20 p-2 rounded-lg">

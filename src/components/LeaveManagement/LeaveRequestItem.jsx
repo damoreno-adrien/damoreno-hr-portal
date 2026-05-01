@@ -39,11 +39,11 @@ export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteReque
 
         let limitType = 'Yearly'; let used = 0; let total = 0; let remaining = 0;
 
-        if (req.leaveType === 'Annual Leave') { used = balances.annual.used; total = balances.annual.total; remaining = balances.annual.remaining; } 
-        else if (req.leaveType === 'Sick Leave') { used = balances.sick.used; total = balances.sick.total; remaining = balances.sick.remaining; } 
-        else if (req.leaveType === 'Personal Leave') { used = balances.personal.used; total = balances.personal.total; remaining = balances.personal.remaining; } 
-        else if (req.leaveType === 'Public Holiday (In Lieu)') { limitType = 'Lifetime'; used = balances.ph.used; total = balances.ph.total; remaining = balances.ph.remaining; } 
-        else if (req.leaveType === 'Cash Out Holiday Credits') { limitType = 'Cashable Window'; used = balances.ph.used; total = balances.ph.total; remaining = balances.ph.cashable; } 
+        if (req.leaveType === 'Annual Leave') { used = balances.annual.used; total = balances.annual.total; remaining = balances.annual.remaining; }
+        else if (req.leaveType === 'Sick Leave') { used = balances.sick.used; total = balances.sick.total; remaining = balances.sick.remaining; }
+        else if (req.leaveType === 'Personal Leave') { used = balances.personal.used; total = balances.personal.total; remaining = balances.personal.remaining; }
+        else if (req.leaveType === 'Public Holiday (In Lieu)') { limitType = 'Lifetime'; used = balances.ph.used; total = balances.ph.total; remaining = balances.ph.remaining; }
+        else if (req.leaveType === 'Cash Out Holiday Credits') { limitType = 'Cashable Window'; used = balances.ph.used; total = balances.ph.total; remaining = balances.ph.cashable; }
         else { return null; }
 
         return { limitType, used, total, remaining };
@@ -58,15 +58,14 @@ export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteReque
                 <div className="flex-grow min-w-[200px]">
                     <div className="flex items-center gap-2">
                         <div className="flex items-center gap-2">
-                            <p className="font-bold text-white text-lg">{req.displayStaffName}</p>
-                            
-                            {/* --- THE FIX: Branch Badge for Global View --- */}
-                            {activeBranch === 'global' && req.branchId && (
-                                <span className="text-[8px] uppercase tracking-wider font-bold bg-gray-700/50 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 truncate max-w-[80px]">
-                                    {(branches.find(b => b.id === req.branchId)?.name || req.branchId).replace('Da Moreno ', '')}
-                                </span>
-                            )}
+                            <p className="font-bold text-white text-lg">{req.displayStaffName} {activeBranch === 'global' && (() => {
+                                const staff = staffList.find(s => s.id === req.staffId);
+                                if (!staff?.branchId) return null;
+                                const bName = branches?.find(b => b.id === staff.branchId)?.name || staff.branchId;
+                                return <span className="ml-2 text-[9px] uppercase tracking-wider font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">{bName.replace('Da Moreno ', '')}</span>;
+                            })()}</p>
 
+                            
                             {(req.leaveType === 'Public Holiday (In Lieu)' || req.leaveType === 'Cash Out Holiday Credits') && (
                                 <span className="bg-blue-500/20 border border-blue-500 text-blue-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full flex items-center ml-2">
                                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5 animate-pulse"></span> Holiday Credit
@@ -119,7 +118,7 @@ export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteReque
                             </p>
                         )}
                     </div>
-                    
+
                     {isFullManager && (
                         <div className="flex items-center space-x-1 ml-2 pl-2 border-l border-gray-700">
                             <button onClick={() => onEditRequest(req)} className="p-2 rounded-lg bg-gray-600 hover:bg-gray-500" title="Edit Request"><Briefcase className="h-4 w-4" /></button>

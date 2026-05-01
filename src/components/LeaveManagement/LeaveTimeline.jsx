@@ -3,7 +3,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import * as dateUtils from '../../utils/dateUtils';
 
-export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new Date(), onCellClick, onStaffClick, getStaffDepartment }) => {
+export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new Date(), onCellClick, onStaffClick, getStaffDepartment, activeBranch, companyConfig }) => {
     const [attData, setAttData] = useState([]);
     const [schedData, setSchedData] = useState([]);
     const [shiftData, setShiftData] = useState([]);
@@ -187,10 +187,15 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
                                         <tr key={staff.id} className="border-b border-gray-700 hover:bg-gray-750 transition-colors">
                                             <td 
                                                 onClick={() => onStaffClick && onStaffClick(staff)}
-                                                className="px-4 py-3 font-medium text-white sticky left-0 bg-gray-800 z-10 border-r border-gray-700 shadow-[2px_0_5px_rgba(0,0,0,0.1)] truncate max-w-[150px] cursor-pointer hover:text-indigo-400 transition-colors group"
+                                                className="px-4 py-3 font-medium text-white sticky left-0 bg-gray-800 z-10 border-r border-gray-700 shadow-[2px_0_5px_rgba(0,0,0,0.1)] truncate max-w-[150px] cursor-pointer hover:text-indigo-400 transition-colors group flex items-center"
                                             >
-                                                {staff.nickname || staff.firstName}
-                                                <span className="hidden group-hover:inline ml-2 text-[10px] text-indigo-500 font-bold tracking-wider">(VIEW)</span>
+                                                <span className="truncate">{staff.nickname || staff.firstName}</span>
+                                                {activeBranch === 'global' && staff.branchId && (
+                                                    <span className="ml-2 text-[9px] uppercase tracking-wider font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30 flex-shrink-0">
+                                                        {(companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId).replace('Da Moreno ', '')}
+                                                    </span>
+                                                )}
+                                                <span className="hidden group-hover:inline ml-2 text-[10px] text-indigo-500 font-bold tracking-wider flex-shrink-0">(VIEW)</span>
                                             </td>
                                             {daysInMonth.map(day => {
                                                 const status = getDayStatus(staff.id, requests, day);

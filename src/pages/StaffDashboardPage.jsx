@@ -11,6 +11,9 @@ import { formatCustom, formatISODate, addDays, fromFirestore, isStaffActiveOnDat
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 
+// --- IMPORT DE LA MODALE ---
+import ConfirmModal from '../components/common/ConfirmModal';
+
 export default function StaffDashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
@@ -21,6 +24,9 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     const [tomorrowsSchedule, setTomorrowsSchedule] = useState(null);
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [upcomingLeave, setUpcomingLeave] = useState(null);
+
+    // --- STATE POUR LA MODALE DE CONFIRMATION ---
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     // Safety check for stats to prevent app crash or NaN display
     const rawStats = useMonthlyStats(db, user, companyConfig);
@@ -186,18 +192,44 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     const handleCheckOut = async () => {
         const now = new Date();
-        let proceedCheckout = true;
+        let requiresConfirmation = false;
+        
         if (todaysSchedule && todaysSchedule.endTime) {
             try {
                 const [endHours, endMinutes] = todaysSchedule.endTime.split(':');
                 const scheduledEndTime = new Date(now);
                 scheduledEndTime.setHours(parseInt(endHours, 10), parseInt(endMinutes, 10), 0, 0);
                 if (now < scheduledEndTime) {
-                    proceedCheckout = window.confirm("Checking out early?");
+                    requiresConfirmation = true;
                 }
             } catch (e) { console.error("Error parsing time", e); }
         }
-        if (proceedCheckout) await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
+
+        const executeCheckout = async () => {
+            try {
+                await updateDoc(getDocRef(), { checkOutTime: serverTimestamp() });
+            } catch (error) {
+                console.error("Error during check-out:", error);
+            }
+        };
+
+        if (requiresConfirmation) {
+            // --- MODIFIÉ : Remplacement de window.confirm() ---
+            setConfirmState({
+                isOpen: true,
+                title: "Early Check-Out",
+                message: "You are checking out before your scheduled end time. Are you sure you want to check out early?",
+                isDestructive: false,
+                confirmText: "Check Out Early",
+                onConfirm: async () => {
+                    setConfirmState({ isOpen: false });
+                    await executeCheckout();
+                },
+                onCancel: () => setConfirmState({ isOpen: false })
+            });
+        } else {
+            await executeCheckout();
+        }
     };
 
     // --- FIX: Dynamic Buttons based on Shift Type ---
@@ -273,7 +305,18 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     const sanitizeTime = (val) => (val && !val.includes('NaN') ? val : "0h 0m");
 
     return (
-        <div>
+        <div className="relative">
+            {/* INJECTION DE LA MODALE */}
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
+
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday! 🎂</div>}
             {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p>🎈 It's {colleaguesWithBirthday.map(getDisplayName).join(', ')}'s Birthday!</p></div>}
 

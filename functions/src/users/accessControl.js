@@ -1,22 +1,17 @@
-/* functions/src/users/accessControl.js */
-
-const functions = require("firebase-functions/v2");
-const { HttpsError } = functions.https;
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore } = require('firebase-admin/firestore');
 
 const db = getFirestore();
 
 // --- FUNCTION 1: Invite a Pure Admin (Branch Director) ---
-exports.inviteAdminHandler = functions.https.onCall({
-    region: "asia-southeast1"
-}, async (request) => {
+exports.inviteAdminHandler = onCall({ region: "asia-southeast1" }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
 
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
     const callerRole = callerDoc.exists ? callerDoc.data().role : null;
     
-    if (callerRole !== 'super_admin') {
+    if (!['super_admin'].includes(callerRole)) {
         throw new HttpsError("permission-denied", "Only the Super Admin can invite new Directors.");
     }
 
@@ -49,9 +44,7 @@ exports.inviteAdminHandler = functions.https.onCall({
 });
 
 // --- FUNCTION 2: Update an Existing Staff Member's Role ---
-exports.updateUserRoleHandler = functions.https.onCall({
-    region: "asia-southeast1"
-}, async (request) => {
+exports.updateUserRoleHandler = onCall({ region: "asia-southeast1" }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
 
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
@@ -77,13 +70,11 @@ exports.updateUserRoleHandler = functions.https.onCall({
 });
 
 // --- FUNCTION 3: Link/Unlink Branches for Existing Admins ---
-exports.updateAdminBranchesHandler = functions.https.onCall({
-    region: "asia-southeast1"
-}, async (request) => {
+exports.updateAdminBranchesHandler = onCall({ region: "asia-southeast1" }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "You must be logged in.");
 
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
-    if (!callerDoc.exists || callerDoc.data().role !== 'super_admin') {
+    if (!callerDoc.exists || !['super_admin'].includes(callerDoc.data().role)) {
         throw new HttpsError("permission-denied", "Only Super Admins can reassign branches.");
     }
 

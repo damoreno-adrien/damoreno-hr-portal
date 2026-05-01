@@ -1,144 +1,282 @@
 /* src/components/Settings/AttendanceBonusSettings.jsx */
-
 import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check, ShieldAlert, Award } from 'lucide-react';
 
-// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
+// --- IMPORTS POUR L'AUDIT LOG ---
 import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
 import { logSystemAction } from '../../utils/auditLogger';
 
+// --- IMPORT DE LA MODALE DE FEEDBACK ---
+import FeedbackModal from '../common/FeedbackModal.jsx';
+
 export const AttendanceBonusSettings = ({ db, config, selectedBranchId }) => {
-    const [localData, setLocalData] = useState({
-        month1: 0, month2: 0, month3: 0, allowedAbsences: 0, allowedLates: 3, maxLateMinutesAllowed: 30, gracePeriodMinutes: 5,
-        tier1Name: "Verbal Warning", tier1Strikes: 1, tier2Name: "Written Warning", tier2Strikes: 2, tier2Window: 1, tier3Name: "1-Day Suspension", tier3Strikes: 3, tier3Window: 3
-    });
-    const [originalData, setOriginalData] = useState({});
-    const [isSaving, setIsSaving] = useState(false);
-    const [isSaved, setIsSaved] = useState(false);
+  const [localData, setLocalData] = useState({
+    month1: 0, month2: 0, month3: 0, allowedAbsences: 0, allowedLates: 3, maxLateMinutesAllowed: 30, gracePeriodMinutes: 5,
+    tier1Name: "Verbal Warning", tier1Strikes: 1, tier2Name: "Written Warning", tier2Strikes: 2, tier2Window: 1, tier3Name: "1-Day Suspension", tier3Strikes: 3, tier3Window: 3
+  });
+  const [originalData, setOriginalData] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
 
-    // Initialisation de l'authentification pour le logger
-    const auth = getAuth(app);
+  // --- ÉTAT POUR LA MODALE D'ERREUR ---
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [feedbackModalTitle, setFeedbackModalTitle] = useState('');
+  const [feedbackModalMessage, setFeedbackModalMessage] = useState('');
+  const [feedbackModalType, setFeedbackModalType] = useState('error');
 
-    useEffect(() => {
-        if (config) {
-            // --- FIX : Charger les données spécifiques à la branche si elles existent ---
-            const branchOverrides = (selectedBranchId && selectedBranchId !== 'global' && config.branchSettings?.[selectedBranchId]) 
-                ? config.branchSettings[selectedBranchId] 
-                : {};
+  // Initialisation de l'authentification pour le logger
+  const auth = getAuth(app);
 
-            const bonus = branchOverrides.attendanceBonus || config.attendanceBonus || {};
-            const disc = branchOverrides.disciplinaryRules || config.disciplinaryRules || {};
-            
-            const data = {
-                month1: bonus.month1 ?? 0, month2: bonus.month2 ?? 0, month3: bonus.month3 ?? 0,
-                allowedAbsences: bonus.allowedAbsences ?? 0, allowedLates: bonus.allowedLates ?? 3, maxLateMinutesAllowed: bonus.maxLateMinutesAllowed ?? 30, gracePeriodMinutes: bonus.gracePeriodMinutes ?? 5,
-                tier1Name: disc.tier1?.name || "Verbal Warning", tier1Strikes: disc.tier1?.strikes ?? 1,
-                tier2Name: disc.tier2?.name || "Written Warning", tier2Strikes: disc.tier2?.strikes ?? 2, tier2Window: disc.tier2?.windowMonths ?? 1,
-                tier3Name: disc.tier3?.name || "1-Day Suspension", tier3Strikes: disc.tier3?.strikes ?? 3, tier3Window: disc.tier3?.windowMonths ?? 3,
-            };
-            setLocalData(data); 
-            setOriginalData(data);
-        }
-    }, [config, selectedBranchId]); // <-- IMPORTANT : Se met à jour quand on change de branche dans le menu
+  useEffect(() => {
+    if (config) {
+      const branchOverrides = (selectedBranchId && selectedBranchId !== 'global' && config.branchSettings?.[selectedBranchId])
+        ? config.branchSettings[selectedBranchId]
+        : {};
+        
+      const bonus = branchOverrides.attendanceBonus || config.attendanceBonus || {};
+      const disc = branchOverrides.disciplinaryRules || config.disciplinaryRules || {};
+      
+      const data = {
+        month1: bonus.month1 ?? 0, month2: bonus.month2 ?? 0, month3: bonus.month3 ?? 0,
+        allowedAbsences: bonus.allowedAbsences ?? 0, allowedLates: bonus.allowedLates ?? 3, maxLateMinutesAllowed: bonus.maxLateMinutesAllowed ?? 30, gracePeriodMinutes: bonus.gracePeriodMinutes ?? 5,
+        tier1Name: disc.tier1?.name ?? "Verbal Warning", tier1Strikes: disc.tier1?.strikes ?? 1,
+        tier2Name: disc.tier2?.name ?? "Written Warning", tier2Strikes: disc.tier2?.strikes ?? 2, tier2Window: disc.tier2?.windowMonths ?? 1,
+        tier3Name: disc.tier3?.name ?? "1-Day Suspension", tier3Strikes: disc.tier3?.strikes ?? 3, tier3Window: disc.tier3?.windowMonths ?? 3
+      };
+      setLocalData(data);
+      setOriginalData(data);
+    }
+  }, [config, selectedBranchId]);
 
-    const handleChange = (e) => {
-        const { id, value } = e.target;
-        const parsedValue = id.includes('Name') ? value : (Number(value) || 0);
-        setLocalData(prev => ({ ...prev, [id]: parsedValue }));
-    };
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const configRef = doc(db, 'settings', 'company_config');
+      
+      const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.` : '';
 
-    const hasChanges = JSON.stringify(localData) !== JSON.stringify(originalData);
+      const dataToSave = {
+          [`${prefix}attendanceBonus`]: {
+              month1: localData.month1, month2: localData.month2, month3: localData.month3,
+              allowedAbsences: localData.allowedAbsences, allowedLates: localData.allowedLates, 
+              maxLateMinutesAllowed: localData.maxLateMinutesAllowed, gracePeriodMinutes: localData.gracePeriodMinutes
+          },
+          [`${prefix}disciplinaryRules`]: {
+              tier1: { name: localData.tier1Name, strikes: localData.tier1Strikes },
+              tier2: { name: localData.tier2Name, strikes: localData.tier2Strikes, windowMonths: localData.tier2Window },
+              tier3: { name: localData.tier3Name, strikes: localData.tier3Strikes, windowMonths: localData.tier3Window },
+          }
+      };
 
-    const handleSave = async () => {
-        setIsSaving(true); 
-        setIsSaved(false);
-        try {
-            // --- THE STAMP: Sauvegarde isolée (empêche le bug du dossier 'global') ---
-            const prefix = (selectedBranchId && selectedBranchId !== 'global') ? `branchSettings.${selectedBranchId}.` : '';
+      await updateDoc(configRef, dataToSave);
 
-            const dataToSave = {
-                [`${prefix}attendanceBonus`]: {
-                    month1: localData.month1, month2: localData.month2, month3: localData.month3,
-                    allowedAbsences: localData.allowedAbsences, allowedLates: localData.allowedLates, 
-                    maxLateMinutesAllowed: localData.maxLateMinutesAllowed, gracePeriodMinutes: localData.gracePeriodMinutes
-                },
-                [`${prefix}disciplinaryRules`]: {
-                    tier1: { name: localData.tier1Name, strikes: localData.tier1Strikes },
-                    tier2: { name: localData.tier2Name, strikes: localData.tier2Strikes, windowMonths: localData.tier2Window },
-                    tier3: { name: localData.tier3Name, strikes: localData.tier3Strikes, windowMonths: localData.tier3Window },
-                }
-            };
+      const changedKeys = Object.keys(localData).filter(key => localData[key] !== originalData[key]);
+      const changesDetails = changedKeys.map(key => `${key} (${originalData[key]} -> ${localData[key]})`).join(', ');
+      await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_ATTENDANCE_RULES', `Updated attendance/disciplinary rules: ${changesDetails}`);
+      
+      setOriginalData(localData);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2000);
+      
+    } catch (error) {
+      setFeedbackModalTitle('Error Saving Settings');
+      setFeedbackModalMessage(`Failed to save settings: ${error.message}`);
+      setFeedbackModalType('error');
+      setFeedbackModalOpen(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-            await updateDoc(doc(db, 'settings', 'company_config'), dataToSave);
-            
-            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
-            // On détecte exactement quels champs ont été modifiés
-            const changedKeys = Object.keys(localData).filter(key => localData[key] !== originalData[key]);
-            const changesDetails = changedKeys.map(key => `${key} (${originalData[key]} -> ${localData[key]})`).join(', ');
-            
-            await logSystemAction(
-                db, 
-                auth.currentUser, 
-                selectedBranchId, 
-                'UPDATE_ATTENDANCE_RULES', 
-                `Updated attendance/disciplinary rules: ${changesDetails}`
-            );
-            // ------------------------------------------------
+  // --- CORRECTION DU BUG ICI ---
+  // On compare de manière simple si les données actuelles diffèrent de celles d'origine
+  const hasChanges = JSON.stringify(localData) !== JSON.stringify(originalData);
 
-            setOriginalData(localData); 
-            setIsSaved(true); 
-            setTimeout(() => setIsSaved(false), 2000);
-        } catch (error) { 
-            alert('Failed to save settings: ' + error.message); 
-        } finally { 
-            setIsSaving(false); 
-        }
-    };
+  return (
+    <div id="attendance-bonus" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 space-y-8 border border-gray-700 relative">
+      <FeedbackModal
+        isOpen={feedbackModalOpen}
+        type={feedbackModalType}
+        title={feedbackModalTitle}
+        message={feedbackModalMessage}
+        onClose={() => setFeedbackModalOpen(false)}
+      />
 
-    return (
-        <div id="attendance-bonus" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 space-y-8 border border-gray-700">
-            <div>
-                <h3 className="text-xl font-semibold text-white flex items-center gap-2"><Award className="h-5 w-5 text-amber-400" /> Attendance Bonus</h3>
-                <p className="text-gray-400 mt-2 text-sm">Configure attendance rewards for this location.</p>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
-                    <div><label htmlFor="month1" className="block text-sm font-medium text-gray-300 mb-1">Month 1 Bonus (THB)</label><input type="number" id="month1" value={localData.month1} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                    <div><label htmlFor="month2" className="block text-sm font-medium text-gray-300 mb-1">Month 2 Bonus (THB)</label><input type="number" id="month2" value={localData.month2} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                    <div><label htmlFor="month3" className="block text-sm font-medium text-gray-300 mb-1">Month 3+ Bonus (THB)</label><input type="number" id="month3" value={localData.month3} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
-                    <div><label htmlFor="gracePeriodMinutes" className="block text-sm font-medium text-gray-300 mb-1">Grace Period (Mins)</label><input type="number" id="gracePeriodMinutes" value={localData.gracePeriodMinutes} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                    <div><label htmlFor="allowedAbsences" className="block text-sm font-medium text-gray-300 mb-1">Max Absences</label><input type="number" id="allowedAbsences" value={localData.allowedAbsences} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                    <div><label htmlFor="allowedLates" className="block text-sm font-medium text-gray-300 mb-1">Max Late Incidents</label><input type="number" id="allowedLates" value={localData.allowedLates} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                    <div><label htmlFor="maxLateMinutesAllowed" className="block text-sm font-medium text-gray-300 mb-1">Max Late Time (Mins)</label><input type="number" id="maxLateMinutesAllowed" value={localData.maxLateMinutesAllowed} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" /></div>
-                </div>
-            </div>
-            <div>
-                <h3 className="text-xl font-semibold text-white flex items-center gap-2"><ShieldAlert className="h-5 w-5 text-red-400" /> Disciplinary Actions</h3>
-                <div className="space-y-3 mt-4">
-                    <div className="flex items-end gap-3 bg-gray-900/50 p-3 rounded-lg border border-gray-700">
-                        <div className="flex-1"><label className="block text-xs text-gray-400 mb-1">Tier 1 Action</label><input type="text" id="tier1Name" value={localData.tier1Name} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div>
-                        <div className="w-24"><label className="block text-xs text-gray-400 mb-1">At Strike</label><input type="number" id="tier1Strikes" value={localData.tier1Strikes} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div>
-                        <div className="w-32 text-xs text-gray-500 pb-2">Anytime</div>
-                    </div>
-                    <div className="flex items-end gap-3 bg-gray-900/50 p-3 rounded-lg border border-gray-700">
-                        <div className="flex-1"><label className="block text-xs text-gray-400 mb-1">Tier 2 Action</label><input type="text" id="tier2Name" value={localData.tier2Name} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div>
-                        <div className="w-24"><label className="block text-xs text-gray-400 mb-1">At Strike</label><input type="number" id="tier2Strikes" value={localData.tier2Strikes} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div>
-                        <div className="w-32 flex items-center gap-2"><span className="text-xs text-gray-400 pb-2">within</span><div><label className="block text-xs text-gray-400 mb-1">Months</label><input type="number" id="tier2Window" value={localData.tier2Window} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div></div>
-                    </div>
-                    <div className="flex items-end gap-3 bg-gray-900/50 p-3 rounded-lg border border-gray-700">
-                        <div className="flex-1"><label className="block text-xs text-gray-400 mb-1">Tier 3 Action</label><input type="text" id="tier3Name" value={localData.tier3Name} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div>
-                        <div className="w-24"><label className="block text-xs text-gray-400 mb-1">At Strike</label><input type="number" id="tier3Strikes" value={localData.tier3Strikes} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div>
-                        <div className="w-32 flex items-center gap-2"><span className="text-xs text-gray-400 pb-2">within</span><div><label className="block text-xs text-gray-400 mb-1">Months</label><input type="number" id="tier3Window" value={localData.tier3Window} onChange={handleChange} className="w-full bg-gray-700 text-white border border-gray-600 rounded p-2 text-sm" /></div></div>
-                    </div>
-                </div>
-            </div>
-             <div className="flex justify-end pt-4 border-t border-gray-700">
-                <button onClick={handleSave} disabled={isSaving || !hasChanges} className="flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors">
-                    {isSaving ? 'Saving...' : (isSaved ? <><Check className="h-5 w-5 mr-2" /> Saved</> : 'Save Changes')}
-                </button>
-            </div>
+      <div>
+        <h3 className="text-xl font-semibold text-white flex items-center gap-2"><Award className="h-5 w-5 text-amber-400" /> Attendance Bonus</h3>
+        <p className="text-gray-400 text-sm mt-1">Configure bonus amounts for consecutive months of perfect attendance.</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Month 1 Bonus</label>
+            <input
+              type="number"
+              value={localData.month1}
+              onChange={(e) => setLocalData({ ...localData, month1: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Month 2 Bonus</label>
+            <input
+              type="number"
+              value={localData.month2}
+              onChange={(e) => setLocalData({ ...localData, month2: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Month 3 Bonus</label>
+            <input
+              type="number"
+              value={localData.month3}
+              onChange={(e) => setLocalData({ ...localData, month3: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
         </div>
-    );
+        
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Grace Period (Mins)</label>
+            <input
+              type="number"
+              value={localData.gracePeriodMinutes}
+              onChange={(e) => setLocalData({ ...localData, gracePeriodMinutes: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Max Absences</label>
+            <input
+              type="number"
+              value={localData.allowedAbsences}
+              onChange={(e) => setLocalData({ ...localData, allowedAbsences: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Max Late Incidents</label>
+            <input
+              type="number"
+              value={localData.allowedLates}
+              onChange={(e) => setLocalData({ ...localData, allowedLates: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Max Late Time (Mins)</label>
+            <input
+              type="number"
+              value={localData.maxLateMinutesAllowed}
+              onChange={(e) => setLocalData({ ...localData, maxLateMinutesAllowed: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-xl font-semibold text-white flex items-center gap-2"><ShieldAlert className="h-5 w-5 text-red-400" /> Disciplinary Rules</h3>
+        <p className="text-gray-400 text-sm mt-1">Define the progressive disciplinary system for attendance violations.</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 1 Name</label>
+            <input
+              type="text"
+              value={localData.tier1Name}
+              onChange={(e) => setLocalData({ ...localData, tier1Name: e.target.value })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 1 Strikes</label>
+            <input
+              type="number"
+              value={localData.tier1Strikes}
+              onChange={(e) => setLocalData({ ...localData, tier1Strikes: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 2 Name</label>
+            <input
+              type="text"
+              value={localData.tier2Name}
+              onChange={(e) => setLocalData({ ...localData, tier2Name: e.target.value })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 2 Strikes</label>
+            <input
+              type="number"
+              value={localData.tier2Strikes}
+              onChange={(e) => setLocalData({ ...localData, tier2Strikes: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 2 Window (months)</label>
+            <input
+              type="number"
+              value={localData.tier2Window}
+              onChange={(e) => setLocalData({ ...localData, tier2Window: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 3 Name</label>
+            <input
+              type="text"
+              value={localData.tier3Name}
+              onChange={(e) => setLocalData({ ...localData, tier3Name: e.target.value })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 3 Strikes</label>
+            <input
+              type="number"
+              value={localData.tier3Strikes}
+              onChange={(e) => setLocalData({ ...localData, tier3Strikes: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">Tier 3 Window (months)</label>
+            <input
+              type="number"
+              value={localData.tier3Window}
+              onChange={(e) => setLocalData({ ...localData, tier3Window: parseInt(e.target.value) || 0 })}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end items-center gap-4 pt-4 border-t border-gray-700">
+        {isSaved && (
+          <div className="flex items-center gap-2 text-green-400">
+            <Check className="h-5 w-5" />
+            <span className="font-medium">Settings saved successfully!</span>
+          </div>
+        )}
+        <button
+          onClick={handleSave}
+          disabled={isSaving || !hasChanges}
+          className={`px-6 py-2 rounded-lg font-semibold flex items-center ${isSaving || !hasChanges ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
+        >
+          {isSaving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </div>
+    </div>
+  );
 };

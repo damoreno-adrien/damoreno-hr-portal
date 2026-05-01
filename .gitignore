@@ -68,3 +68,8 @@ node_modules/
 # dataconnect generated files
 .dataconnect
 .env.local
+functions/firestore_schema_complet.md
+functions/damorenohr-firebase-adminsdk-fbsvc-ceaf320f57.json
+functions/seedLocalDb.js
+functions/generateSchema.js
+functions/firestore_schema_profond.md

@@ -7,11 +7,19 @@ import LeaveRequestForm from '../components/LeaveManagement/LeaveRequestForm';
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem';
 import { calculateStaffLeaveBalances } from '../utils/leaveCalculator'; 
 
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../components/common/FeedbackModal';
+import ConfirmModal from '../components/common/ConfirmModal';
+
 export default function MyLeavePage({ db, user, userRole, staffList, companyConfig }) {
     const [myRequests, setMyRequests] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [requestToEdit, setRequestToEdit] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
+
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     // 1. Fetch ONLY the logged-in user's requests
     useEffect(() => {
@@ -57,13 +65,24 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
     const ph = richBalances?.ph || {};
 
     const handleDeleteRequest = async (id) => {
-        if (window.confirm("Are you sure you want to cancel and delete this leave request?")) {
-            try {
-                await deleteDoc(doc(db, "leave_requests", id));
-            } catch (error) {
-                alert("Failed to delete request.");
-            }
-        }
+        // --- MODIFIÉ : Remplacement de window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Leave Request",
+            message: "Are you sure you want to cancel and delete this leave request?",
+            isDestructive: true,
+            confirmText: "Delete Request",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                try {
+                    await deleteDoc(doc(db, "leave_requests", id));
+                } catch (error) {
+                    // --- MODIFIÉ : Remplacement de alert() ---
+                    setFeedbackModal({ type: 'error', title: 'Delete Failed', message: "Failed to delete request." });
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     const openEditModal = (request) => {
@@ -80,9 +99,27 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
         setIsModalOpen(false);
         setRequestToEdit(null);
     };
+    const isFullManager = ['admin', 'manager', 'super_admin'].includes(userRole);
 
     return (
-        <div className="pb-10 animate-fadeIn">
+        <div className="pb-10 animate-fadeIn relative">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
             
             <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Request Leave"}>
                 <LeaveRequestForm 
@@ -130,7 +167,8 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                     </div>
                 </div>
 
-                {/* Paid Sick Leave */}
+                {/* Paid Sick Leave - SEULEMENT POUR LE MANAGEMENT */}
+                {isFullManager && (
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg flex flex-col justify-between">
                     <h3 className="text-gray-400 font-bold uppercase tracking-wider text-xs mb-2">Paid Sick Leave</h3>
                     <div className="flex items-baseline gap-2 mb-4">
@@ -141,8 +179,10 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                         {sick.used ?? 0} Used / {sick.total ?? 0} Total
                     </div>
                 </div>
+                )}
 
-                {/* Personal Leave */}
+                {/* Personal Leave - SEULEMENT POUR LE MANAGEMENT */}
+                {isFullManager && (
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg flex flex-col justify-between">
                     <h3 className="text-gray-400 font-bold uppercase tracking-wider text-xs mb-2">Personal Leave</h3>
                     <div className="flex items-baseline gap-2 mb-4">
@@ -153,6 +193,7 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                         {personal.used ?? 0} Used / {personal.total ?? 0} Total
                     </div>
                 </div>
+                )}
 
                 {/* Public Holiday Credits */}
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg flex flex-col justify-between">

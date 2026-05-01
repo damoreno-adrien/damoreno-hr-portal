@@ -5,6 +5,10 @@ import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } fr
 import { RotateCcw, Filter, Search, ShieldAlert, Clock, CheckCircle, XCircle, Download, Calendar, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils'; 
 
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../common/FeedbackModal';
+import ConfirmModal from '../common/ConfirmModal';
+
 // --- ADDED: userRole and adminBranchIds ---
 export default function HRActionLog({ db, activeBranch, branches = [], userRole, adminBranchIds = [] }) {
     const [logs, setLogs] = useState([]);
@@ -17,6 +21,10 @@ export default function HRActionLog({ db, activeBranch, branches = [], userRole,
     const [filterType, setFilterType] = useState('All');
     const [filterStaff, setFilterStaff] = useState('');
     const [collapsedGroups, setCollapsedGroups] = useState({}); 
+
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     useEffect(() => {
         fetchLogs();
@@ -39,25 +47,37 @@ export default function HRActionLog({ db, activeBranch, branches = [], userRole,
             setLogs(fetchedLogs);
         } catch (error) {
             console.error("Error fetching HR logs:", error);
-            alert("Failed to fetch history logs.");
+            // --- MODIFIÉ : Remplacement du alert() ---
+            setFeedbackModal({ type: 'error', title: 'Fetch Failed', message: "Failed to fetch history logs." });
         } finally {
             setIsLoading(false);
         }
     };
 
     const handleRevoke = async (logId, staffName, type) => {
-        if (!window.confirm(`Are you sure you want to revoke this decision for ${staffName}? The database will automatically adjust their payroll/bonus.`)) return;
-        
-        try {
-            const alertRef = doc(db, 'manager_alerts', logId);
-            await updateDoc(alertRef, {
-                status: 'revoked',
-                revokedAt: serverTimestamp()
-            });
-            setLogs(prev => prev.map(log => log.id === logId ? { ...log, status: 'revoked' } : log));
-        } catch (error) {
-            alert("Failed to revoke action: " + error.message);
-        }
+        // --- MODIFIÉ : Remplacement du window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Revoke Decision",
+            message: `Are you sure you want to revoke this decision for ${staffName}? The database will automatically adjust their payroll/bonus.`,
+            isDestructive: true,
+            confirmText: "Revoke",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                try {
+                    const alertRef = doc(db, 'manager_alerts', logId);
+                    await updateDoc(alertRef, {
+                        status: 'revoked',
+                        revokedAt: serverTimestamp()
+                    });
+                    setLogs(prev => prev.map(log => log.id === logId ? { ...log, status: 'revoked' } : log));
+                } catch (error) {
+                    // --- MODIFIÉ : Remplacement du alert() ---
+                    setFeedbackModal({ type: 'error', title: 'Revoke Failed', message: "Failed to revoke action: " + error.message });
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     const toggleGroup = (staffName) => {
@@ -104,7 +124,8 @@ export default function HRActionLog({ db, activeBranch, branches = [], userRole,
 
     const handleExportCSV = () => {
         if (filteredLogs.length === 0) {
-            alert("No data to export based on current filters.");
+            // --- MODIFIÉ : Remplacement du alert() ---
+            setFeedbackModal({ type: 'error', title: 'Export Failed', message: "No data to export based on current filters." });
             return;
         }
 
@@ -143,8 +164,25 @@ export default function HRActionLog({ db, activeBranch, branches = [], userRole,
     };
 
     return (
-        <div className="overflow-hidden animate-fadeIn">
-            
+        <div className="overflow-hidden animate-fadeIn relative">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
+
             <div className="p-4 sm:p-6 border-b border-gray-700 bg-gray-800/50 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                     <Calendar className="h-5 w-5 text-indigo-400" />

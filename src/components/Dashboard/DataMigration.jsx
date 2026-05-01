@@ -1,60 +1,103 @@
+/* src/components/Dashboard/DataMigration.jsx */
+
 import React, { useState } from 'react';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Database, Play, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+
+// --- IMPORTS DES MODALES ---
+import ConfirmModal from '../common/ConfirmModal';
+import FeedbackModal from '../common/FeedbackModal';
 
 export default function DataMigration({ db }) {
     const [status, setStatus] = useState('idle'); // idle, running, success, error
     const [progress, setProgress] = useState({ current: 0, total: 0 });
 
+    // --- STATES POUR LES MODALES ---
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
+    const [feedbackModal, setFeedbackModal] = useState(null);
+
     const runBreakPolicyMigration = async () => {
-        if (!db || !window.confirm("This will update all shifts in the current month with the 7-hour break rule. Proceed?")) return;
-        
-        setStatus('running');
-        try {
-            // Target the current month (or adjust date range as needed)
-            const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-            
-            const q = query(collection(db, "schedules"), where("date", ">=", startOfMonth));
-            const snapshot = await getDocs(q);
-            
-            const batch = writeBatch(db);
-            let count = 0;
-
-            snapshot.forEach((docSnap) => {
-                const data = docSnap.data();
-                if (data.startTime && data.endTime) {
-                    const [startH, startM] = data.startTime.split(':').map(Number);
-                    const [endH, endM] = data.endTime.split(':').map(Number);
-                    
-                    let durationMinutes = (endH * 60 + endM) - (startH * 60 + startM);
-                    if (durationMinutes < 0) durationMinutes += 24 * 60; // Handle overnight shifts
-
-                    // 7-HOUR RULE (420 minutes)
-                    const shouldIncludeBreak = durationMinutes >= 420;
-
-                    batch.update(docSnap.ref, {
-                        includesBreak: shouldIncludeBreak,
-                        migrationLog: `Auto-set by 7h rule on ${new Date().toLocaleDateString()}`
-                    });
-                    count++;
-                }
-            });
-
-            if (count > 0) {
-                await batch.commit();
-            }
-            
-            setProgress({ current: count, total: count });
-            setStatus('success');
-        } catch (error) {
-            console.error("Migration failed:", error);
-            setStatus('error');
+        if (!db) {
+            setFeedbackModal({ type: 'error', title: 'Database Error', message: "Database connection not found." });
+            return;
         }
+        
+        // --- MODIFIÉ : Remplacement de window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Run Data Migration",
+            message: "This will update all shifts in the current month with the 7-hour break rule. Proceed?",
+            isDestructive: false,
+            confirmText: "Run Migration",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setStatus('running');
+                try {
+                    // Target the current month (or adjust date range as needed)
+                    const now = new Date();
+                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+                    
+                    const q = query(collection(db, "schedules"), where("date", ">=", startOfMonth));
+                    const snapshot = await getDocs(q);
+                    
+                    const batch = writeBatch(db);
+                    let count = 0;
+
+                    snapshot.forEach((docSnap) => {
+                        const data = docSnap.data();
+                        if (data.startTime && data.endTime) {
+                            const [startH, startM] = data.startTime.split(':').map(Number);
+                            const [endH, endM] = data.endTime.split(':').map(Number);
+                            
+                            let durationMinutes = (endH * 60 + endM) - (startH * 60 + startM);
+                            if (durationMinutes < 0) durationMinutes += 24 * 60; // Handle overnight shifts
+
+                            // 7-HOUR RULE (420 minutes)
+                            const shouldIncludeBreak = durationMinutes >= 420;
+
+                            batch.update(docSnap.ref, {
+                                includesBreak: shouldIncludeBreak,
+                                migrationLog: `Auto-set by 7h rule on ${new Date().toLocaleDateString()}`
+                            });
+                            count++;
+                        }
+                    });
+
+                    if (count > 0) {
+                        await batch.commit();
+                    }
+                    
+                    setProgress({ current: count, total: count });
+                    setStatus('success');
+                } catch (error) {
+                    console.error("Migration failed:", error);
+                    setStatus('error');
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     return (
-        <div className="p-6 bg-gray-900 rounded-xl border border-gray-800 max-w-md">
+        <div className="p-6 bg-gray-900 rounded-xl border border-gray-800 max-w-md relative">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
+
             <div className="flex items-center gap-3 mb-4">
                 <Database className="text-indigo-400 w-6 h-6" />
                 <h3 className="text-white font-bold text-lg">Shift Break Migration</h3>

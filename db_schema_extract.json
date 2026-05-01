@@ -1,0 +1,242 @@
+{
+  "attendance": {
+    "staffId": "string",
+    "branchId": "string",
+    "date": "string",
+    "staffName": "string",
+    "checkInTime": "timestamp",
+    "checkOutTime": "timestamp",
+    "createdAt": "timestamp",
+    "updatedAt": "timestamp"
+  },
+  "loans": {
+    "staffId": "string",
+    "branchId": "string",
+    "loanName": "string",
+    "totalAmount": "number",
+    "monthlyRepayment": "number",
+    "startDate": "string",
+    "status": "string",
+    "isActive": "boolean",
+    "createdAt": "timestamp",
+    "remainingBalance": "number",
+    "updatedAt": "timestamp",
+    "nextInstallmentOverride": "number"
+  },
+  "monthly_adjustments": {
+    "staffId": "string",
+    "branchId": "string",
+    "type": "string",
+    "description": "string",
+    "amount": "number",
+    "payPeriodMonth": "number",
+    "payPeriodYear": "number",
+    "date": "string",
+    "createdAt": "timestamp",
+    "staffName": "string",
+    "category": "string",
+    "status": "string"
+  },
+  "payroll_runs": {
+    "branchId": "string",
+    "finalizedBy": "string",
+    "totalNetPay": "number",
+    "payslipCount": "number",
+    "month": "number",
+    "year": "number",
+    "finalizedAt": "timestamp"
+  },
+  "salary_advances": {
+    "staffId": "string",
+    "requestedBy": "string",
+    "branchId": "string",
+    "amount": "number",
+    "isReadByStaff": "boolean",
+    "payPeriodMonth": "number",
+    "payPeriodYear": "number",
+    "date": "string",
+    "createdAt": "timestamp",
+    "status": "string"
+  },
+  "schedules": {
+    "staffId": "string",
+    "staffName": "string",
+    "branchId": "string",
+    "date": "string",
+    "startTime": "string",
+    "endTime": "string",
+    "type": "string"
+  },
+  "settings": {
+    "companyName": "string",
+    "companyTaxId": "string",
+    "companyAddress": "string",
+    "companyLogoUrl": "string",
+    "tradingName": "string",
+    "super_admin": {
+      "canApproveLeave": "boolean",
+      "canEditFinancialRules": "boolean",
+      "canEditGeofence": "boolean",
+      "canManageUsers": "boolean",
+      "canRunPayroll": "boolean",
+      "canViewFinancialRules": "boolean"
+    },
+    "admin": {
+      "canApproveLeave": "boolean",
+      "canEditFinancialRules": "boolean",
+      "canEditGeofence": "boolean",
+      "canManageUsers": "boolean",
+      "canRunPayroll": "boolean",
+      "canViewFinancialRules": "boolean"
+    },
+    "manager": {
+      "canApproveLeave": "boolean",
+      "canEditFinancialRules": "boolean",
+      "canEditGeofence": "boolean",
+      "canManageUsers": "boolean",
+      "canRunPayroll": "boolean",
+      "canViewFinancialRules": "boolean"
+    },
+    "dept_manager": {
+      "canApproveLeave": "boolean",
+      "canEditFinancialRules": "boolean",
+      "canEditGeofence": "boolean",
+      "canManageUsers": "boolean",
+      "canRunPayroll": "boolean",
+      "canViewFinancialRules": "boolean"
+    },
+    "staff": {
+      "canApproveLeave": "boolean",
+      "canEditFinancialRules": "boolean",
+      "canEditGeofence": "boolean",
+      "canManageUsers": "boolean",
+      "canRunPayroll": "boolean",
+      "canViewFinancialRules": "boolean"
+    },
+    "directors": [
+      {
+        "NAME": "string"
+      }
+    ],
+    "annualLeaveDays": "number",
+    "cashOutWindowDays": "number",
+    "maxHolidayBalance": "number",
+    "publicHolidayCreditCap": "number",
+    "dailyAllowanceTHB": "number",
+    "mealDiscountPercent": "number",
+    "overtimeRate": "number",
+    "overtimeThreshold": "number",
+    "paidPersonalDays": "number",
+    "paidSickDays": "number",
+    "probationMonths": "number",
+    "ssoCap": "number",
+    "ssoRate": "number",
+    "staffUniforms": "number",
+    "standardStartTime": "string",
+    "advanceEligibilityPercentage": "number",
+    "holidayPayMultiplier": "number",
+    "departments": [
+      "string"
+    ],
+    "attendanceBonus": {
+      "allowedAbsences": "number",
+      "allowedLates": "number",
+      "gracePeriodMinutes": "number",
+      "maxLateMinutesAllowed": "number",
+      "month1": "number",
+      "month2": "number",
+      "month3": "number"
+    },
+    "disciplinaryRules": {
+      "tier1": {
+        "name": "string",
+        "strikes": "number"
+      },
+      "tier2": {
+        "name": "string",
+        "strikes": "number",
+        "windowMonths": "number"
+      },
+      "tier3": {
+        "name": "string",
+        "strikes": "number",
+        "windowMonths": "number"
+      }
+    },
+    "geofence": {
+      "latitude": "number",
+      "longitude": "number",
+      "radius": "number"
+    },
+    "branches": [
+      {
+        "id": "string",
+        "name": "string",
+        "createdAt": "string"
+      }
+    ],
+    "branchSettings": {
+      "br_phuket_town": {
+        "annualLeaveDays": "number"
+      },
+      "br_rawai": {
+        "annualLeaveDays": "number"
+      }
+    },
+    "publicHolidays": [
+      {
+        "date": "string",
+        "name": "string"
+      }
+    ],
+    "roleDescriptions": {
+      "Manager": "string"
+    }
+  },
+  "staff_profiles": {
+    "id": "string",
+    "uid": "string",
+    "firstName": "string",
+    "lastName": "string",
+    "nickname": "string",
+    "status": "string",
+    "address": "string",
+    "bankAccount": "string",
+    "birthdate": "string",
+    "idNumber": "string",
+    "idType": "string",
+    "email": "string",
+    "phoneNumber": "string",
+    "startDate": "string",
+    "isAttendanceBonusEligible": "boolean",
+    "isSsoRegistered": "boolean",
+    "jobHistory": [
+      {
+        "baseSalary": "number",
+        "department": "string",
+        "position": "string",
+        "startDate": "string",
+        "payType": "string",
+        "standardDayHours": "number",
+        "rate": "number"
+      }
+    ],
+    "branchId": "string",
+    "createdAt": "timestamp",
+    "updatedAt": "timestamp",
+    "emergencyContactPhone": "null",
+    "emergencyContactName": "null",
+    "fullName": "null",
+    "paymentMethod": "string",
+    "bonusStreak": "number"
+  },
+  "users": {
+    "role": "string",
+    "status": "string",
+    "email": "string",
+    "name": "string",
+    "branchIds": [
+      "string"
+    ]
+  }
+}

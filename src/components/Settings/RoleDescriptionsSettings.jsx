@@ -2,12 +2,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { Check, Plus, Trash2, ChevronDown, ChevronRight, Save, AlertCircle, Download, Upload, Loader2 } from 'lucide-react'; // <-- Ajout de Loader2
+import { Check, Plus, Trash2, ChevronDown, ChevronRight, Save, AlertCircle, Download, Upload, Loader2 } from 'lucide-react';
 
 // --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
 import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
 import { logSystemAction } from '../../utils/auditLogger';
+
+// --- IMPORT DE LA MODALE ---
+import ConfirmModal from '../common/ConfirmModal';
 
 export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
     const [roles, setRoles] = useState([]);
@@ -17,6 +20,9 @@ export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
     const [error, setError] = useState('');
     
+    // --- STATE POUR LA MODALE DE CONFIRMATION ---
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+
     const fileInputRef = useRef(null);
 
     // Initialisation de l'authentification pour le logger
@@ -51,13 +57,20 @@ export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
         setError(''); 
     };
 
+    // --- MODIFIÉ: Utilisation de ConfirmModal ---
     const handleDeleteRole = (index) => {
-        if (window.confirm('Are you sure you want to delete this role description?')) {
-            const newRoles = roles.filter((_, i) => i !== index);
-            setRoles(newRoles);
-            setHasUnsavedChanges(true);
-            if (expandedIndex === index) setExpandedIndex(null);
-        }
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Role",
+            message: "Are you sure you want to delete this role description?",
+            onConfirm: () => {
+                const newRoles = roles.filter((_, i) => i !== index);
+                setRoles(newRoles);
+                setHasUnsavedChanges(true);
+                if (expandedIndex === index) setExpandedIndex(null);
+                setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null });
+            }
+        });
     };
 
     const handleSave = async () => {
@@ -134,7 +147,18 @@ export const RoleDescriptionsSettings = ({ db, config, selectedBranchId }) => {
     };
 
     return (
-        <div id="role-descriptions" className="bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700 flex flex-col h-[calc(100vh-12rem)]">
+        <div id="role-descriptions" className="bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700 flex flex-col h-[calc(100vh-12rem)] relative">
+            {/* INJECTION DE LA MODALE DE CONFIRMATION */}
+            <ConfirmModal
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={() => setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null })}
+                isDestructive={true}
+                confirmText="Delete"
+            />
+
             <div className="flex flex-col md:flex-row justify-between md:items-start gap-4 mb-6 flex-shrink-0">
                 <div>
                     <h3 className="text-xl font-semibold text-white">Role Descriptions</h3>

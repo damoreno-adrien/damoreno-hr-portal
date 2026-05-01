@@ -33,13 +33,21 @@ exports.calculateBonusHandler = onCall({ region: "asia-southeast1" }, async (req
         const [configSnap, staffProfileSnap] = await Promise.all([configRef, staffProfileRef]);
 
         if (!configSnap.exists) { throw new OnCallHttpsError("not-found", "Company configuration not found."); }
-        const bonusRules = configSnap.data().attendanceBonus;
-        if (!bonusRules || typeof bonusRules.allowedAbsences !== 'number' || typeof bonusRules.allowedLates !== 'number') {
-            throw new OnCallHttpsError("failed-precondition", "Attendance bonus rules are not configured correctly.");
+        if (!staffProfileSnap.exists) { throw new OnCallHttpsError("not-found", "Staff profile not found."); }
+        
+        const configData = configSnap.data();
+        const staffData = staffProfileSnap.data();
+        const branchId = staffData.branchId || 'global';
+
+        // FIX : On va chercher les règles de la succursale de l'employé, ou on prend les globales par défaut
+        const branchOverrides = configData.branchSettings?.[branchId] || {};
+        const bonusRules = branchOverrides.attendanceBonus || configData.attendanceBonus || {};
+
+        if (typeof bonusRules.allowedAbsences !== 'number' || typeof bonusRules.allowedLates !== 'number') {
+            throw new OnCallHttpsError("failed-precondition", `Attendance bonus rules are missing for branch: ${branchId}`);
         }
 
-        if (!staffProfileSnap.exists) { throw new OnCallHttpsError("not-found", "Staff profile not found."); }
-        const currentStreak = staffProfileSnap.data().bonusStreak || 0;
+        const currentStreak = staffData.bonusStreak || 0;
 
         // 3. Date Range Calculation (Using our centralized Luxon helper)
         const startOfMonthUtc = DateTime.utc(year, month, 1);

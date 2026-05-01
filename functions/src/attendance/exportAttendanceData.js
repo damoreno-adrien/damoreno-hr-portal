@@ -30,14 +30,26 @@ const formatTime = (timestamp) => {
     } catch (e) { return ''; }
 };
 
-exports.exportAttendanceDataHandler = onCall({ region: "us-central1" }, async (request) => {
-    const { startDate, endDate, staffIds } = request.data;
+exports.exportAttendanceDataHandler = onCall({ region: "asia-southeast1" }, async (request) => {
+    // Règle 3 - RBAC hiérarchique
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
+    }
 
+    const callerUid = request.auth.uid;
+    const callerDoc = await db.collection("users").doc(callerUid).get();
+    const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+
+    if (!['manager', 'admin', 'super_admin'].includes(callerRole)) {
+        throw new HttpsError("permission-denied", "Only managers, admins, and super admins can export attendance data.");
+    }
+
+    const { startDate, endDate, staffIds } = request.data;
     if (!startDate || !endDate) {
         throw new HttpsError("invalid-argument", "Start date and end date are required.");
     }
 
-    console.log(`Exporting matrix from ${startDate} to ${endDate}`);
+    console.log(`Exporting matrix from ${startDate} to ${endDate} by ${callerRole}`);
 
     try {
         // 1. Fetch Staff
@@ -62,7 +74,6 @@ exports.exportAttendanceDataHandler = onCall({ region: "us-central1" }, async (r
         // 3. Build Lookup Maps
         const attendanceMap = new Map();
         attSnap.forEach(doc => {
-            // Key: staffId_YYYY-MM-DD
             attendanceMap.set(`${doc.data().staffId}_${doc.data().date}`, { id: doc.id, ...doc.data() });
         });
 
@@ -89,7 +100,7 @@ exports.exportAttendanceDataHandler = onCall({ region: "us-central1" }, async (r
         const rows = [];
         const startDt = DateTime.fromISO(startDate);
         const endDt = DateTime.fromISO(endDate);
-        
+
         // Sort staff by name for nicer output
         staffList.sort((a, b) => (a.nickname || a.firstName).localeCompare(b.nickname || b.firstName));
 
@@ -98,7 +109,7 @@ exports.exportAttendanceDataHandler = onCall({ region: "us-central1" }, async (r
             while (currentDt <= endDt) {
                 const dateStr = currentDt.toISODate();
                 const key = `${staff.id}_${dateStr}`;
-                
+
                 const att = attendanceMap.get(key);
                 const sched = scheduleMap.get(key);
                 const leave = leaveMap.get(key);
@@ -137,11 +148,11 @@ exports.exportAttendanceDataHandler = onCall({ region: "us-central1" }, async (r
         }
 
         const header = [
-            "Attendance Doc ID", "Staff ID", "Date", "Staff Name", 
+            "Attendance Doc ID", "Staff ID", "Date", "Staff Name",
             "Check-In", "Check-Out", "Break Start", "Break End", "Status"
         ];
-        const csvContent = [header.join(","), ...rows].join("\n");
 
+        const csvContent = [header.join(","), ...rows].join("\n");
         return {
             csvData: csvContent,
             filename: `attendance_${startDate}_${endDate}.csv`

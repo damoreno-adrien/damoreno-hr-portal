@@ -6,18 +6,18 @@ import { getAuth } from 'firebase/auth'; // <-- NEW
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
-import { 
-    ChevronLeft, ChevronRight, ChevronDown, Download, Upload, 
-    Clock, Coffee, Flame, Plus, Loader2, ArrowUpDown, 
+import {
+    ChevronLeft, ChevronRight, ChevronDown, Download, Upload,
+    Clock, Coffee, Flame, Plus, Loader2, ArrowUpDown,
     User, Briefcase, Calendar, Fingerprint, X, AlertCircle
 } from 'lucide-react';
-import ShiftModal from '../components/Planning/ShiftModal.jsx'; 
+import ShiftModal from '../components/Planning/ShiftModal.jsx';
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
-import ExportOptionsModal from '../components/common/ExportOptionsModal.jsx'; 
-import * as dateUtils from '../utils/dateUtils'; 
+import ExportOptionsModal from '../components/common/ExportOptionsModal.jsx';
+import * as dateUtils from '../utils/dateUtils';
 import Modal from '../components/common/Modal.jsx';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
-import ShiftCreator from '../components/Dashboard/ShiftCreator.jsx';
+import ShiftCreator from '../components/Planning/ShiftCreator.jsx';
 
 const DEPT_STYLES = {
     'Service': { border: 'border-l-4 border-l-blue-500', text: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -40,21 +40,21 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
     const { weekData, weekDates, loading, refetchWeekData } = useWeeklyPlannerData(db, weekStart);
 
-    const [sortOrder, setSortOrder] = useState('asc'); 
+    const [sortOrder, setSortOrder] = useState('asc');
     const [showBulkCreator, setShowBulkCreator] = useState(false);
     const [bulkCreatorProps, setBulkCreatorProps] = useState({});
 
-    const [actionMenu, setActionMenu] = useState(null); 
+    const [actionMenu, setActionMenu] = useState(null);
     const [selectedShift, setSelectedShift] = useState(null);
     const [selectedAttendance, setSelectedAttendance] = useState(null);
-    
+
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
 
     const displayMonthYear = useMemo(() => {
         const dominantDate = new Date(weekStart);
-        dominantDate.setDate(dominantDate.getDate() + 3); 
+        dominantDate.setDate(dominantDate.getDate() + 3);
         return dateUtils.formatCustom(dominantDate, 'MMMM yyyy').toUpperCase();
     }, [weekStart]);
 
@@ -68,7 +68,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
     const getShiftStatus = (schedule, attendance, dateString) => {
         const now = new Date();
         const currentTodayStr = now.toISOString().split('T')[0];
-        
+
         if (!schedule || !schedule.startTime) return { status: 'off' };
 
         const isPast = dateString < currentTodayStr;
@@ -89,10 +89,10 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
             const [sh, sm] = schedule.startTime.split(':').map(Number);
             const scheduledIn = new Date(checkIn);
             scheduledIn.setHours(sh, sm, 0);
-            
+
             const lateness = Math.floor((checkIn - scheduledIn) / 60000);
             if (lateness > 0) return { status: 'late', minutes: lateness };
-            
+
         } catch (e) { return { status: 'on-time' }; }
 
         return { status: 'on-time' };
@@ -105,7 +105,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
     // --- THE SECURITY LAYER: Fetch user's assigned branches ---
     const [adminBranchIds, setAdminBranchIds] = useState([]);
-    
+
     useEffect(() => {
         const uid = getAuth().currentUser?.uid;
         if (userRole === 'admin' && uid && db) {
@@ -118,14 +118,14 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
     const groupedAndSortedStaff = useMemo(() => {
         if (!staffList || !weekDates || weekDates.length === 0) return {};
         let activeStaff = staffList.filter(s => dateUtils.isStaffActiveOnDate(s, weekDates[0].dateObject));
-        
+
         // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
         if (activeBranch === 'global') {
             if (userRole === 'admin') activeStaff = activeStaff.filter(s => adminBranchIds.includes(s.branchId));
         } else if (activeBranch) {
             activeStaff = activeStaff.filter(s => s.branchId === activeBranch);
         }
-        
+
         const groups = activeStaff.reduce((acc, staff) => {
             const job = getCurrentJob(staff);
             const dept = job.department || 'Unassigned';
@@ -154,9 +154,9 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
         const configDepts = companyConfig?.departments || [];
         const activeDepts = Object.keys(groupedAndSortedStaff);
         let allDepts = Array.from(new Set([...configDepts, ...activeDepts]));
-        
+
         if (userRole === 'dept_manager' && currentUserDept) allDepts = [currentUserDept];
-        
+
         return allDepts.filter(c => groupedAndSortedStaff[c] && groupedAndSortedStaff[c].length > 0);
     }, [companyConfig, groupedAndSortedStaff, userRole, currentUserDept]);
 
@@ -213,7 +213,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                             {userRole === 'dept_manager' ? `${currentUserDept} Department` : 'Da Moreno Schedules'}
                         </p>
                     </div>
-                    
+
                     <div className="flex flex-col gap-1 w-full md:w-auto">
                         <div className="flex justify-between items-end px-1 mb-1">
                             <span className="text-sm font-black text-indigo-400 uppercase tracking-widest">{displayMonthYear}</span>
@@ -226,9 +226,9 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
                         <div className="flex items-center bg-gray-900 rounded-xl p-1.5 border border-gray-700 relative">
                             <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); }} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-all"><ChevronLeft className="w-5 h-5" /></button>
-                            
-                            <button 
-                                onClick={() => setIsDatePickerOpen(!isDatePickerOpen)} 
+
+                            <button
+                                onClick={() => setIsDatePickerOpen(!isDatePickerOpen)}
                                 className="px-4 py-1 flex items-center justify-center gap-2 hover:bg-gray-800 rounded-lg transition-colors min-w-[200px] flex-grow"
                             >
                                 <span className="text-sm font-bold text-indigo-100 text-center">
@@ -246,7 +246,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                         </div>
                                         <div className="max-h-64 overflow-y-auto py-2">
                                             {getSurroundingWeeks().map((week, idx) => (
-                                                <button 
+                                                <button
                                                     key={idx}
                                                     onClick={() => { setWeekStart(week.start); setIsDatePickerOpen(false); }}
                                                     className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex justify-between items-center
@@ -271,14 +271,23 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                     <button onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')} className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold border border-gray-700 transition-all">
                         <ArrowUpDown className="w-4 h-4 text-indigo-400" /> {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}
                     </button>
-                    <button onClick={() => { setBulkCreatorProps({}); setShowBulkCreator(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg">
+                    <button
+                        onClick={() => {
+                            setBulkCreatorProps({
+                                initialStartDate: weekDates[0].dateString,
+                                initialEndDate: weekDates[6].dateString
+                            });
+                            setShowBulkCreator(true);
+                        }}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg"
+                    >
                         <Plus className="w-4 h-4" /> Bulk Creator
                     </button>
                 </div>
             </div>
 
             <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl relative flex-grow overflow-hidden flex flex-col">
-                <div className="overflow-auto flex-grow h-full"> 
+                <div className="overflow-auto flex-grow h-full">
                     <table className="w-full text-left border-collapse min-w-[1200px]">
                         <thead className="sticky top-0 z-30">
                             <tr className="bg-gray-900 shadow-md">
@@ -309,25 +318,25 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                         </tr>
                                         {groupedAndSortedStaff[category].map(staff => {
                                             const branchName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unknown';
-                                            
+
                                             return (
                                                 <tr key={staff.id} className="hover:bg-indigo-500/5 transition-colors group text-sm">
-                                                    <td 
+                                                    <td
                                                         onClick={() => handleStaffNameClick(staff)}
                                                         className={`p-4 sticky left-0 z-20 bg-gray-800 group-hover:bg-[#1f2937] transition-colors shadow-[4px_0_10px_rgba(0,0,0,0.3)] ${style.border} cursor-pointer hover:brightness-110 active:scale-[0.98]`}
                                                         title="Click to plan schedule for this week"
                                                     >
                                                         <div className="flex items-center gap-3">
                                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${style.bg} ${style.text}`}>
-                                                                {(staff.nickname || staff.firstName).substring(0,2).toUpperCase()}
+                                                                {(staff.nickname || staff.firstName).substring(0, 2).toUpperCase()}
                                                             </div>
                                                             <div>
                                                                 <div className="flex items-center gap-1.5">
                                                                     <p className="font-black text-white leading-tight">{staff.nickname || staff.firstName}</p>
-                                                                    
+
                                                                     {activeBranch === 'global' && staff.branchId && (
-                                                                        <span 
-                                                                            className="text-[8px] uppercase tracking-wider font-bold bg-gray-700/50 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 truncate max-w-[80px]" 
+                                                                        <span
+                                                                            className="text-[8px] uppercase tracking-wider font-bold bg-gray-700/50 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 truncate max-w-[80px]"
                                                                             title={branchName}
                                                                         >
                                                                             {branchName.replace('Da Moreno ', '')}
@@ -346,10 +355,10 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                                         const { schedule, attendance, leave } = dayData;
                                                         const statusInfo = getShiftStatus(schedule, attendance, date.dateString);
                                                         const isToday = date.dateString === todayStr;
-                                                        
+
                                                         return (
                                                             <td key={date.dateString} className={`p-2 text-center align-top min-w-[140px] transition-colors ${isToday ? 'bg-indigo-900/5 border-x border-indigo-500/10' : ''}`}>
-                                                                <div 
+                                                                <div
                                                                     onClick={() => setActionMenu({ staff, date: date.dateString, dayData })}
                                                                     className={`min-h-[105px] p-3 rounded-xl cursor-pointer transition-all flex flex-col justify-between group/cell relative border
                                                                         ${leave ? 'bg-indigo-500/10 border-indigo-500/30' : schedule ? 'bg-gray-700/30 border-gray-600/50 hover:bg-gray-700/60' : 'bg-transparent border border-dashed border-gray-700/30'}
@@ -373,7 +382,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                                                             {statusInfo.status === 'late' && <div className="text-[9px] font-black text-amber-500 uppercase tracking-tighter text-center bg-amber-500/10 rounded py-0.5">Late +{statusInfo.minutes}m</div>}
                                                                         </div>
                                                                     ) : <div className="mt-6 opacity-0 group-hover/cell:opacity-100 transition-opacity"><Plus className="w-4 h-4 text-gray-600" /></div>}
-                                                                    
+
                                                                     {attendance && (
                                                                         <div className="mt-auto pt-2 border-t border-gray-700/50">
                                                                             <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono font-black">
@@ -409,14 +418,14 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                     <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
                         <div className="p-4 bg-gray-900/50 border-b border-gray-700 flex justify-between items-center">
                             <h3 className="text-white font-bold">{actionMenu.staff.nickname || actionMenu.staff.firstName}</h3>
-                            <button onClick={() => setActionMenu(null)} className="text-gray-400 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                            <button onClick={() => setActionMenu(null)} className="text-gray-400 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
                         </div>
                         <div className="p-6 grid grid-cols-1 gap-4">
                             <button onClick={() => { setSelectedShift({ staff: actionMenu.staff, date: actionMenu.date, shift: actionMenu.dayData.schedule }); setActionMenu(null); }} className="flex items-center gap-4 p-4 bg-gray-700 hover:bg-indigo-600 rounded-xl transition-all group">
                                 <div className="p-2 bg-gray-800 rounded-lg group-hover:bg-indigo-500 text-indigo-400 group-hover:text-white transition-colors"><Calendar className="w-6 h-6" /></div>
                                 <div className="text-left"><p className="font-bold text-white">Manage Schedule</p><p className="text-xs text-gray-400">Edit shift times & break policy</p></div>
                             </button>
-                            
+
                             {['manager', 'admin', 'super_admin'].includes(userRole) && (
                                 <button onClick={() => { setSelectedAttendance(actionMenu.dayData.attendance || { staffId: actionMenu.staff.id, staffName: actionMenu.staff.nickname || actionMenu.staff.firstName, date: actionMenu.date, checkInTime: new Date(actionMenu.date + "T14:00:00") }); setActionMenu(null); }} className="flex items-center gap-4 p-4 bg-gray-700 hover:bg-green-600 rounded-xl transition-all group">
                                     <div className="p-2 bg-gray-800 rounded-lg group-hover:bg-green-500 text-green-400 group-hover:text-white transition-colors"><Fingerprint className="w-6 h-6" /></div>
@@ -430,10 +439,19 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
             {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} activeBranch={activeBranch} />}
             {selectedAttendance && <Modal isOpen={true} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} title="Attendance Correction"><EditAttendanceModal db={db} record={selectedAttendance} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} /></Modal>}
-            
+
             {showBulkCreator && (
                 <Modal isOpen={true} onClose={() => { setShowBulkCreator(false); setBulkCreatorProps({}); }} title="Bulk Generator">
-                    <ShiftCreator db={db} staffList={staffList} onSuccess={() => { setShowBulkCreator(false); setBulkCreatorProps({}); refetchWeekData(); }} {...bulkCreatorProps} activeBranch={activeBranch} branches={companyConfig?.branches || []} />
+                    <ShiftCreator
+                        db={db}
+                        staffList={staffList}
+                        userRole={userRole}
+                        existingWeekData={bulkCreatorProps.initialStaffId ? weekData[bulkCreatorProps.initialStaffId] : null} // <-- Ajouté
+                        onSuccess={() => { setShowBulkCreator(false); setBulkCreatorProps({}); refetchWeekData(); }}
+                        {...bulkCreatorProps}
+                        activeBranch={activeBranch}
+                        branches={companyConfig?.branches || []}
+                    />
                 </Modal>
             )}
         </div>

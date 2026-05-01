@@ -3,17 +3,23 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getAuth } from 'firebase/auth'; // <-- NOUVEAU: Pour identifier le directeur actuel
+import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
 import { Shield, UserCog, UserPlus, Loader2, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown, Edit2, Check, X, Trash2 } from 'lucide-react';
-import { logSystemAction } from '../../utils/auditLogger'; // <-- Import du logger d'audit
+import { logSystemAction } from '../../utils/auditLogger';
+import ConfirmModal from '../common/ConfirmModal';
+import FeedbackModal from '../common/FeedbackModal'; // <-- AJOUT
 
 const functions = getFunctions(app, "asia-southeast1");
 const inviteAdminFunc = httpsCallable(functions, 'inviteAdmin'); 
 const updateUserRoleFunc = httpsCallable(functions, 'updateUserRole');
-const updateAdminBranchesFunc = httpsCallable(functions, 'updateAdminBranchesHandler'); // Attention, celui-ci a bien "Handler" à la fin !
+const updateAdminBranchesFunc = httpsCallable(functions, 'updateAdminBranchesHandler');
 
 export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches = [] }) => {
+    // --- CORRECTION : Les Hooks doivent être ICI, à l'intérieur du composant ---
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+    const [feedbackModal, setFeedbackModal] = useState(null);
+
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -33,7 +39,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
     const [editingAdminId, setEditingAdminId] = useState(null);
     const [editingBranches, setEditingBranches] = useState([]);
 
-    const auth = getAuth(app); // Initialisation de l'auth pour les logs
+    const auth = getAuth(app);
 
     const fetchUsers = async () => {
         setLoading(true);
@@ -78,8 +84,12 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
 
     const handleInviteAdmin = async (e) => {
         e.preventDefault();
-        if (!newAdminName || !newAdminEmail || newAdminPassword.length < 6) return alert("Please fill all fields. Password must be at least 6 characters.");
-        if (newAdminRole === 'admin' && newAdminBranches.length === 0) return alert("Please select at least one branch for this Admin.");
+        if (!newAdminName || !newAdminEmail || newAdminPassword.length < 6) {
+            return setFeedbackModal({ type: 'error', title: 'Validation Error', message: "Please fill all fields. Password must be at least 6 characters." });
+        }
+        if (newAdminRole === 'admin' && newAdminBranches.length === 0) {
+            return setFeedbackModal({ type: 'error', title: 'Validation Error', message: "Please select at least one branch for this Admin." });
+        }
         
         setIsSaving(true);
         try {
@@ -91,20 +101,20 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                 branchIds: newAdminRole === 'super_admin' ? ['global'] : newAdminBranches
             });
             
-            // --- LOG ACTION ---
             await logSystemAction(db, auth.currentUser, selectedBranchId, 'CREATE_EXECUTIVE', `Created a new ${newAdminRole} account for ${newAdminEmail}.`);
 
             setNewAdminName(''); setNewAdminEmail(''); setNewAdminPassword(''); setNewAdminBranches([]);
-            alert(`Success! ${newAdminRole === 'super_admin' ? 'Global Super Admin' : 'Branch Admin'} account created.`);
+            setFeedbackModal({ type: 'success', title: 'Account Created', message: `Success! ${newAdminRole === 'super_admin' ? 'Global Super Admin' : 'Branch Admin'} account created.` });
             await fetchUsers();
-        } catch (error) { alert(`Error: ${error.message}`); }
-        finally { setIsSaving(false); }
+        } catch (error) { 
+            setFeedbackModal({ type: 'error', title: 'Error', message: error.message }); 
+        } finally { setIsSaving(false); }
     };
 
     const handlePromoteStaff = async (e) => {
         e.preventDefault();
-        if (!selectedExistingUserId) return alert("Please select a staff member to promote.");
-        if (newAdminRole === 'admin' && newAdminBranches.length === 0) return alert("Please select at least one branch for this Admin.");
+        if (!selectedExistingUserId) return setFeedbackModal({ type: 'error', title: 'Validation Error', message: "Please select a staff member to promote." });
+        if (newAdminRole === 'admin' && newAdminBranches.length === 0) return setFeedbackModal({ type: 'error', title: 'Validation Error', message: "Please select at least one branch for this Admin." });
 
         setIsSaving(true);
         try {
@@ -117,109 +127,134 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                 branchIds: newAdminRole === 'super_admin' ? ['global'] : newAdminBranches
             }, { merge: true });
 
-            // --- LOG ACTION ---
             await logSystemAction(db, auth.currentUser, selectedBranchId, 'PROMOTE_EXECUTIVE', `Promoted staff member ${targetUser.name} to ${newAdminRole}.`);
 
             setSelectedExistingUserId(''); setNewAdminBranches([]);
-            alert(`Success! ${targetUser.name} has been promoted to ${newAdminRole === 'super_admin' ? 'Super Admin' : 'Branch Admin'}.`);
+            setFeedbackModal({ type: 'success', title: 'Staff Promoted', message: `Success! ${targetUser.name} has been promoted to ${newAdminRole === 'super_admin' ? 'Super Admin' : 'Branch Admin'}.` });
             await fetchUsers();
-        } catch (error) { alert(`Error: ${error.message}`); }
-        finally { setIsSaving(false); }
+        } catch (error) { 
+            setFeedbackModal({ type: 'error', title: 'Error', message: error.message }); 
+        } finally { setIsSaving(false); }
     };
 
     const handleSaveAdminBranches = async (adminId) => {
-        if (editingBranches.length === 0) return alert("Admin must be assigned to at least one branch.");
+        if (editingBranches.length === 0) return setFeedbackModal({ type: 'error', title: 'Validation Error', message: "Admin must be assigned to at least one branch." });
         setIsSaving(true);
         try {
             await updateAdminBranchesFunc({ targetUid: adminId, branchIds: editingBranches });
             
-            // --- LOG ACTION ---
             const targetAdmin = users.find(u => u.id === adminId);
             await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_EXECUTIVE_BRANCHES', `Modified branch assignments for executive ${targetAdmin?.name || adminId}.`);
 
             setEditingAdminId(null);
             await fetchUsers();
-        } catch (error) { alert(`Error: ${error.message}`); }
-        finally { setIsSaving(false); }
+        } catch (error) { 
+            setFeedbackModal({ type: 'error', title: 'Error', message: error.message }); 
+        } finally { setIsSaving(false); }
     };
 
     const handleRevokeAdmin = async (adminId, adminName) => {
-        if (!window.confirm(`DANGER: Are you sure you want to revoke executive access for ${adminName}? They will no longer be able to access the Command Center.`)) return;
-        setIsSaving(true);
-        try {
-            await deleteDoc(doc(db, 'users', adminId));
-            
-            // --- LOG ACTION ---
-            await logSystemAction(db, auth.currentUser, selectedBranchId, 'REVOKE_EXECUTIVE', `Permanently revoked executive access for ${adminName}.`);
+        setConfirmState({
+            isOpen: true,
+            title: "Revoke Admin Access",
+            message: `DANGER: Are you sure you want to revoke executive access for ${adminName}? They will no longer be able to access the Command Center.`,
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null });
+                setIsSaving(true);
+                try {
+                    await deleteDoc(doc(db, 'users', adminId));
+                    await logSystemAction(db, auth.currentUser, selectedBranchId, 'REVOKE_EXECUTIVE', `Permanently revoked executive access for ${adminName}.`);
 
-            alert(`Executive access revoked for ${adminName}.`);
-            await fetchUsers();
-        } catch (error) { alert(`Error revoking access: ${error.message}`); }
-        finally { setIsSaving(false); }
+                    setFeedbackModal({ type: 'success', title: 'Access Revoked', message: `Executive access revoked for ${adminName}.` });
+                    await fetchUsers();
+                } catch (error) { 
+                    setFeedbackModal({ type: 'error', title: 'Error revoking access', message: error.message }); 
+                } finally { setIsSaving(false); }
+            }
+        });
     };
 
     const handleDemoteExecutive = async (admin) => {
         if (!admin.hasStaffProfile) {
-            return alert(`Cannot demote ${admin.name}. They must have a Staff Profile first to ensure they are assigned to a specific branch.`);
+            return setFeedbackModal({ type: 'error', title: 'Action Blocked', message: `Cannot demote ${admin.name}. They must have a Staff Profile first to ensure they are assigned to a specific branch.` });
         }
-        if (!window.confirm(`Are you sure you want to demote ${admin.name} to General Manager? They will lose access to the Executive Roster and Command Center.`)) return;
         
-        setIsSaving(true);
-        try {
-            await updateUserRoleFunc({ targetUid: admin.id, newRole: 'manager' });
-            
-            // --- LOG ACTION ---
-            await logSystemAction(db, auth.currentUser, selectedBranchId, 'DEMOTE_EXECUTIVE', `Demoted executive ${admin.name} to General Manager.`);
+        setConfirmState({
+            isOpen: true,
+            title: "Demote Executive",
+            message: `Are you sure you want to demote ${admin.name} to General Manager? They will lose access to the Executive Roster and Command Center.`,
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null });
+                setIsSaving(true);
+                try {
+                    await updateUserRoleFunc({ targetUid: admin.id, newRole: 'manager' });
+                    await logSystemAction(db, auth.currentUser, selectedBranchId, 'DEMOTE_EXECUTIVE', `Demoted executive ${admin.name} to General Manager.`);
 
-            alert(`Success! ${admin.name} has been demoted to General Manager.`);
-            await fetchUsers();
-        } catch (error) { alert(`Error demoting: ${error.message}`); }
-        finally { setIsSaving(false); }
+                    setFeedbackModal({ type: 'success', title: 'Executive Demoted', message: `Success! ${admin.name} has been demoted to General Manager.` });
+                    await fetchUsers();
+                } catch (error) { 
+                    setFeedbackModal({ type: 'error', title: 'Error demoting', message: error.message }); 
+                } finally { setIsSaving(false); }
+            }
+        });
     };
 
     const handleGenerateStaffProfile = async (admin) => {
-        if (!window.confirm(`Generate a Staff Profile for ${admin.name}? This will allow them to use the "Switch to Staff" portal to request leave and clock in.`)) return;
-        setIsSaving(true);
-        try {
-            const fallbackBranch = (admin.branchIds && admin.branchIds.length > 0 && admin.branchIds[0] !== 'global') 
-                ? admin.branchIds[0] 
-                : (branches.length > 0 ? branches[0].id : 'global');
+        setConfirmState({
+            isOpen: true,
+            title: "Generate Staff Profile",
+            message: `Generate a Staff Profile for ${admin.name}? This will allow them to use the "Switch to Staff" portal to request leave and clock in.`,
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null });
+                setIsSaving(true);
+                try {
+                    const fallbackBranch = (admin.branchIds && admin.branchIds.length > 0 && admin.branchIds[0] !== 'global') 
+                        ? admin.branchIds[0] 
+                        : (branches.length > 0 ? branches[0].id : 'global');
 
-            await setDoc(doc(db, 'staff_profiles', admin.id), {
-                email: admin.email || '',
-                firstName: admin.name || 'Executive',
-                lastName: '',
-                nickname: 'Admin',
-                role: 'staff',
-                status: 'active',
-                branchId: fallbackBranch,
-                payType: 'Salary',
-                baseSalary: 0,
-                createdAt: new Date().toISOString()
-            });
-            
-            // --- LOG ACTION ---
-            await logSystemAction(db, auth.currentUser, selectedBranchId, 'GENERATE_STAFF_PROFILE', `Generated a clock-in staff profile for executive ${admin.name}.`);
+                    await setDoc(doc(db, 'staff_profiles', admin.id), {
+                        email: admin.email || '',
+                        firstName: admin.name || 'Executive',
+                        lastName: '',
+                        nickname: 'Admin',
+                        role: 'staff',
+                        status: 'active',
+                        branchId: fallbackBranch,
+                        payType: 'Salary',
+                        baseSalary: 0,
+                        createdAt: new Date().toISOString()
+                    });
+                    
+                    await logSystemAction(db, auth.currentUser, selectedBranchId, 'GENERATE_STAFF_PROFILE', `Generated a clock-in staff profile for executive ${admin.name}.`);
 
-            alert(`Staff profile created for ${admin.name}! They can now access the Staff Portal.`);
-            await fetchUsers();
-        } catch (error) { alert(`Error creating staff profile: ${error.message}`); }
-        finally { setIsSaving(false); }
+                    setFeedbackModal({ type: 'success', title: 'Profile Generated', message: `Staff profile created for ${admin.name}! They can now access the Staff Portal.` });
+                    await fetchUsers();
+                } catch (error) { 
+                    setFeedbackModal({ type: 'error', title: 'Error creating profile', message: error.message }); 
+                } finally { setIsSaving(false); }
+            }
+        });
     };
 
     const handleRoleChange = async (targetUid, newRole, userName) => {
-        if (!window.confirm(`Are you sure you want to change ${userName}'s security clearance to ${newRole.toUpperCase()}?`)) return;
-        setIsSaving(true);
-        try {
-            await updateUserRoleFunc({ targetUid, newRole });
-            
-            // --- LOG ACTION ---
-            await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_STAFF_CLEARANCE', `Changed security clearance of ${userName} to ${newRole.toUpperCase()}.`);
+        setConfirmState({
+            isOpen: true,
+            title: "Change Security Clearance",
+            message: `Are you sure you want to change ${userName}'s security clearance to ${newRole.toUpperCase()}?`,
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null });
+                setIsSaving(true);
+                try {
+                    await updateUserRoleFunc({ targetUid, newRole });
+                    await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_STAFF_CLEARANCE', `Changed security clearance of ${userName} to ${newRole.toUpperCase()}.`);
 
-            alert(`Success! ${userName} is now authorized as a ${newRole.toUpperCase()}.`);
-            await fetchUsers();
-        } catch (error) { alert(`Error updating role: ${error.message}`); }
-        finally { setIsSaving(false); }
+                    setFeedbackModal({ type: 'success', title: 'Clearance Updated', message: `Success! ${userName} is now authorized as a ${newRole.toUpperCase()}.` });
+                    await fetchUsers();
+                } catch (error) { 
+                    setFeedbackModal({ type: 'error', title: 'Error updating role', message: error.message }); 
+                } finally { setIsSaving(false); }
+            }
+        });
     };
 
     const handleSort = (key) => {
@@ -257,8 +292,25 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
 
     return (
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden relative" id="access-control">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={() => setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null })}
+                isDestructive={true}
+            />
+
             {isSaving && (
-                <div className="absolute inset-0 bg-gray-900/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
+                <div className="absolute inset-0 bg-gray-900/80 z-40 flex flex-col items-center justify-center backdrop-blur-sm">
                     <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
                     <p className="text-white font-bold tracking-widest uppercase">Updating Security Clearance...</p>
                 </div>

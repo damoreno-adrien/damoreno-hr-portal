@@ -101,7 +101,14 @@ exports.calculateAdvanceEligibilityHandler = onCall({ region: "asia-southeast1" 
         const baseSalary = latestJob.rate;
         const dailyRate = daysInMonth > 0 ? baseSalary / daysInMonth : 0; // daysInMonth from Luxon
 
-        const companyConfig = configSnap.exists ? configSnap.data() : {};
+        // --- FIX : Résolution intelligente de la succursale ---
+        const rawConfig = configSnap.exists ? configSnap.data() : {};
+        const branchId = staffData.branchId || 'global';
+        const branchOverrides = rawConfig.branchSettings?.[branchId] || {};
+        
+        // On fusionne les paramètres de la branche par-dessus la racine !
+        const companyConfig = { ...rawConfig, ...branchOverrides }; 
+
         const publicHolidays = companyConfig.publicHolidays ? companyConfig.publicHolidays.map(h => h.date) : [];
 
         const schedules = schedulesSnap.docs.map(doc => doc.data());

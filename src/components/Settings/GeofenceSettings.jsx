@@ -9,11 +9,17 @@ import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
 import { logSystemAction } from '../../utils/auditLogger';
 
+// --- IMPORT DE LA MODALE ---
+import FeedbackModal from '../common/FeedbackModal';
+
 export const GeofenceSettings = ({ db, config, selectedBranchId }) => {
     const [localGeofence, setLocalGeofence] = useState({});
     const [originalGeofence, setOriginalGeofence] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
+
+    // --- STATE POUR LA MODALE DE FEEDBACK ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
 
     // Initialisation de l'authentification pour le logger
     const auth = getAuth(app);
@@ -53,7 +59,7 @@ export const GeofenceSettings = ({ db, config, selectedBranchId }) => {
             };
             await updateDoc(configDocRef, dataToSave);
             
-            // --- NOUVEAU : LE JOURNAL D'AUDIT INTELLIGENT ---
+            // --- LE JOURNAL D'AUDIT INTELLIGENT ---
             // On détecte exactement quels champs (latitude, longitude, radius) ont été modifiés
             const changedKeys = Object.keys(localGeofence).filter(key => localGeofence[key] !== originalGeofence[key]);
             const changesDetails = changedKeys.map(key => `${key} (${originalGeofence[key]} -> ${localGeofence[key]})`).join(', ');
@@ -71,14 +77,24 @@ export const GeofenceSettings = ({ db, config, selectedBranchId }) => {
             setIsSaved(true);
             setTimeout(() => setIsSaved(false), 2000);
         } catch (error) {
-            alert('Failed to save settings: ' + error.message);
+            // --- MODIFIÉ: Remplacement du alert() ---
+            setFeedbackModal({ type: 'error', title: 'Save Failed', message: 'Failed to save settings: ' + error.message });
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <div id="geofence-config" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 border border-gray-700">
+        <div id="geofence-config" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 border border-gray-700 relative">
+            {/* INJECTION DU FEEDBACK MODAL */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+
             <h3 className="text-xl font-semibold text-white">Geofence Configuration</h3>
             <p className="text-gray-400 mt-2">Set the location and radius for clock-in/out verification for this location.</p>
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-900/50 p-4 rounded-lg">

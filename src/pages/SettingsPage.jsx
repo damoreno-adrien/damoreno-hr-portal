@@ -21,12 +21,18 @@ import { app } from '../../firebase';
 import { logSystemAction } from '../utils/auditLogger';
 import { SandboxSeeder } from '../components/Settings/SandboxSeeder';
 
+// --- IMPORT DE LA MODALE ---
+import ConfirmModal from '../components/common/ConfirmModal';
+
 // --- ADDED: activeBranch prop ---
 export default function SettingsPage({ db, companyConfig, userRole, activeBranch }) {
     const [activeTab, setActiveTab] = useState('');
     const { permissions, loadingPermissions } = usePermissions(db, userRole);
 
     const [localSelectedBranch, setLocalSelectedBranch] = useState('');
+
+    // --- STATES POUR LES MODALES ---
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     // --- THE SMART LINK: Use Sidebar branch, otherwise use local dropdown ---
     const effectiveBranch = (activeBranch && activeBranch !== 'global') ? activeBranch : localSelectedBranch;
@@ -66,13 +72,22 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     };
     
     const handleDeleteDepartment = async (dept) => { 
-        if (window.confirm(`Delete department "${dept}"?`)) { 
-            const field = effectiveBranch ? `branchSettings.${effectiveBranch}.departments` : 'departments';
-            await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayRemove(dept) }); 
-            
-            // LOG AUDIT
-            await logSystemAction(db, auth.currentUser, effectiveBranch, 'DELETE_DEPARTMENT', `Deleted department: ${dept}`);
-        } 
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Department",
+            message: `Are you sure you want to delete the department "${dept}"?`,
+            isDestructive: true,
+            confirmText: "Delete",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                const field = effectiveBranch ? `branchSettings.${effectiveBranch}.departments` : 'departments';
+                await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayRemove(dept) }); 
+                
+                // LOG AUDIT
+                await logSystemAction(db, auth.currentUser, effectiveBranch, 'DELETE_DEPARTMENT', `Deleted department: ${dept}`);
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
     
     const handleAddHoliday = async (holiday) => { 
@@ -84,13 +99,22 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     };
     
     const handleDeleteHoliday = async (holiday) => { 
-        if (window.confirm(`Delete holiday "${holiday.name}" (${holiday.date})?`)) { 
-            const field = effectiveBranch ? `branchSettings.${effectiveBranch}.publicHolidays` : 'publicHolidays';
-            await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayRemove(holiday) }); 
-            
-            // LOG AUDIT
-            await logSystemAction(db, auth.currentUser, effectiveBranch, 'DELETE_PUBLIC_HOLIDAY', `Removed holiday: ${holiday.name} (${holiday.date})`);
-        } 
+        setConfirmState({
+            isOpen: true,
+            title: "Delete Public Holiday",
+            message: `Are you sure you want to delete the holiday "${holiday.name}" (${holiday.date})?`,
+            isDestructive: true,
+            confirmText: "Delete",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                const field = effectiveBranch ? `branchSettings.${effectiveBranch}.publicHolidays` : 'publicHolidays';
+                await updateDoc(doc(db, 'settings', 'company_config'), { [field]: arrayRemove(holiday) }); 
+                
+                // LOG AUDIT
+                await logSystemAction(db, auth.currentUser, effectiveBranch, 'DELETE_PUBLIC_HOLIDAY', `Removed holiday: ${holiday.name} (${holiday.date})`);
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     const allTabs = [
@@ -124,7 +148,6 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
         switch (activeTab) {
             case 'permission-matrix': return <PermissionMatrix db={db} />;
             case 'manage-branches': return <BranchManager db={db} config={resolvedConfig} />;
-            // --- UPDATED Access Control props ---
             case 'access-control': return <AccessControlSettings db={db} userRole={userRole} selectedBranchId={effectiveBranch} branches={companyConfig?.branches || []} />;
             case 'company-info': return <CompanyInfoSettings db={db} config={resolvedConfig} selectedBranchId={effectiveBranch} />;
             case 'manage-departments': return <DepartmentManager departments={resolvedConfig?.departments || []} onAddDepartment={handleAddDepartment} onDeleteDepartment={handleDeleteDepartment} />;
@@ -145,7 +168,18 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     const lockedBranchName = companyConfig?.branches?.find(b => b.id === effectiveBranch)?.name || effectiveBranch;
 
     return (
-        <div className="flex flex-col h-[calc(100vh-2rem)] animate-fadeIn">
+        <div className="flex flex-col h-[calc(100vh-2rem)] animate-fadeIn relative">
+            {/* INJECTION DE LA MODALE */}
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
+
             <div className="mb-4 md:mb-6 flex-shrink-0 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">System Settings</h2>

@@ -1,8 +1,13 @@
+/* src/components/ManageStaff/OffboardingModal.jsx */
 import React, { useState, useMemo, useEffect } from 'react';
 import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { X, AlertTriangle, Calendar, Info, CheckCircle, Save, Loader2 } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
-import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator'; // <-- NEW: Import Master Calculator
+import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator'; 
+
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../common/FeedbackModal';
+import ConfirmModal from '../common/ConfirmModal';
 
 export default function OffboardingModal({ db, staff, companyConfig, onClose, onSuccess }) {
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
@@ -12,12 +17,13 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
     const [notes, setNotes] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    // State to hold the dynamically calculated leave balances
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, ph: 0, loading: true });
-
-    // --- NEW: Cache the staff's leave requests so we don't spam the database when changing dates ---
     const [staffRequests, setStaffRequests] = useState([]);
     const [requestsLoaded, setRequestsLoaded] = useState(false);
+
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
     // Calculate Seniority & Eligibility on the fly
     const { monthsOfService, isEligibleForAnnualPayout } = useMemo(() => {
@@ -46,7 +52,7 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
         }
     }, [isEligibleForAnnualPayout, terminationType]);
 
-    // --- NEW: Step 1: Fetch their leave requests exactly ONCE when the modal opens ---
+    // Step 1: Fetch their leave requests exactly ONCE when the modal opens
     useEffect(() => {
         const fetchRequests = async () => {
             try {
@@ -63,15 +69,13 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
         fetchRequests();
     }, [db, staff.id]);
 
-    // --- NEW: Step 2: Instantly recalculate balances if the Manager changes the End Date! ---
+    // Step 2: Instantly recalculate balances if the Manager changes the End Date!
     useEffect(() => {
         if (!requestsLoaded) return;
 
         setLeaveBalances(prev => ({ ...prev, loading: true }));
 
         const endObj = dateUtils.parseISODateString(endDate) || new Date();
-
-        // Pass the precise End Date to the calculator to project future earnings!
         const balances = calculateStaffLeaveBalances(staff, staffRequests, companyConfig, endObj);
 
         if (balances) {
@@ -86,7 +90,10 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
     }, [endDate, staffRequests, requestsLoaded, staff, companyConfig]);
 
     const handleOffboard = async () => {
-        if (!endDate) return alert("Please select a final working date.");
+        if (!endDate) {
+            setFeedbackModal({ type: 'error', title: 'Missing Data', message: "Please select a final working date." });
+            return;
+        }
 
         // 1. Determine if this is a future offboarding
         const endObj = dateUtils.parseISODateString(endDate) || new Date();
@@ -101,42 +108,70 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
             ? `Are you sure you want to schedule offboarding for ${staff.firstName || staff.nickname}? \n\nThey will REMAIN ACTIVE and keep their app access until their final day: ${dateUtils.formatDisplayDate(endDate)}.`
             : `Are you sure you want to offboard ${staff.firstName || staff.nickname} today? \n\nThis will IMMEDIATELY mark their profile as inactive and revoke access.`;
 
-        if (!window.confirm(confirmMessage)) return;
+        // --- MODIFIÉ : Utilisation de ConfirmModal ---
+        setConfirmState({
+            isOpen: true,
+            title: "Confirm Offboarding",
+            message: confirmMessage,
+            isDestructive: !isFutureOffboarding, // Rouge si immédiat, Bleu si futur
+            confirmText: "Yes, Proceed",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsSaving(true);
+                
+                try {
+                    const staffRef = doc(db, 'staff_profiles', staff.id);
+                    await updateDoc(staffRef, {
+                        status: newStatus, // Will stay 'active' if in the future!
+                        endDate: endDate,
+                        offboardingSettings: {
+                            terminationType,
+                            payoutAnnualLeave: payoutAnnual,
+                            payoutPublicHolidays: payoutPH,
+                            finalBalances: {
+                                annual: leaveBalances.annual,
+                                ph: leaveBalances.ph
+                            },
+                            notes,
+                            processedAt: serverTimestamp(),
+                            isPendingFutureOffboard: isFutureOffboarding // A helpful flag for your database
+                        }
+                    });
+                    
+                    onSuccess(!isFutureOffboarding);
 
-        setIsSaving(true);
-        try {
-            const staffRef = doc(db, 'staff_profiles', staff.id);
-            await updateDoc(staffRef, {
-                status: newStatus, // Will stay 'active' if in the future!
-                endDate: endDate,
-                offboardingSettings: {
-                    terminationType,
-                    payoutAnnualLeave: payoutAnnual,
-                    payoutPublicHolidays: payoutPH,
-                    finalBalances: {
-                        annual: leaveBalances.annual,
-                        ph: leaveBalances.ph
-                    },
-                    notes,
-                    processedAt: serverTimestamp(),
-                    isPendingFutureOffboard: isFutureOffboarding // A helpful flag for your database
+                } catch (error) {
+                    console.error("Error offboarding staff:", error);
+                    setFeedbackModal({ type: 'error', title: 'Offboarding Failed', message: "Failed to offboard staff member." });
+                } finally {
+                    setIsSaving(false);
                 }
-            });
-            // --- FIX: Tell the parent if it should lock the auth vault right now ---
-            onSuccess(!isFutureOffboarding);
-
-        } catch (error) {
-            console.error("Error offboarding staff:", error);
-            alert("Failed to offboard staff member.");
-        } finally {
-            setIsSaving(false);
-        }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg border border-gray-700 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* INJECTION DES MODALES */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText}
+            />
 
+            <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg border border-gray-700 overflow-hidden flex flex-col max-h-[90vh]">
                 {/* Header */}
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50">
                     <div>
@@ -149,7 +184,7 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
                 </div>
 
                 {/* Body */}
-                <div className="p-6 overflow-y-auto space-y-6">
+                <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
 
                     {/* Basic Info */}
                     <div className="grid grid-cols-2 gap-4">
@@ -161,7 +196,7 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
                                     type="date"
                                     value={endDate}
                                     onChange={(e) => setEndDate(e.target.value)}
-                                    className="w-full bg-gray-900 text-white pl-10 p-2.5 rounded-lg border border-gray-700 focus:border-amber-500 outline-none"
+                                    className="w-full bg-gray-900 text-white pl-10 p-2.5 rounded-lg border border-gray-700 focus:border-amber-500 outline-none [color-scheme:dark]"
                                 />
                             </div>
                         </div>
@@ -256,7 +291,7 @@ export default function OffboardingModal({ db, staff, companyConfig, onClose, on
                 </div>
 
                 {/* Footer */}
-                <div className="p-4 border-t border-gray-700 bg-gray-900/50 flex gap-3">
+                <div className="p-4 border-t border-gray-700 bg-gray-900/50 flex gap-3 mt-auto">
                     <button onClick={onClose} className="flex-1 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded-lg transition-colors border border-gray-700">
                         Cancel
                     </button>

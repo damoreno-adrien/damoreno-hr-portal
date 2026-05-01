@@ -11,7 +11,7 @@ exports.createUserHandler = onCall({ region: "asia-southeast1" }, async (request
     }
     const callerUid = request.auth.uid;
 
-    // --- FIX : Authorization check pour autoriser Admin et Super Admin ---
+    // --- Authorization check pour autoriser Admin et Super Admin ---
     try {
         const callerDoc = await db.collection("users").doc(callerUid).get();
         const allowedRoles = ['manager', 'admin', 'super_admin'];
@@ -24,11 +24,13 @@ exports.createUserHandler = onCall({ region: "asia-southeast1" }, async (request
         throw new HttpsError("internal", "Internal server error while verifying role.");
     }
 
-    // --- Input Validation ---
+    // --- Input Validation & Extraction ---
     const {
         email, password, firstName, lastName, nickname,
-        position, department, startDate, payType, rate, // Job info
-        phoneNumber, birthdate, bankAccount, address, // Optional profile info
+        position, department, startDate, payType, rate, 
+        baseSalary, hourlyRate, standardDayHours,       // <-- AJOUT DES INFOS DE PAIE DÉTAILLÉES
+        branchId, isSsoRegistered, holidayPolicy,       // <-- AJOUT DE LA SUCCURSALE ET COMPLIANCE
+        phoneNumber, birthdate, bankAccount, address, 
         emergencyContactName, emergencyContactPhone
      } = request.data;
 
@@ -36,7 +38,6 @@ exports.createUserHandler = onCall({ region: "asia-southeast1" }, async (request
     if (!email || !password || !firstName || !lastName || !nickname || !position || !department || !startDate || !payType || typeof rate !== 'number') {
         throw new HttpsError("invalid-argument", "Missing required core user data (email, password, name, job info including numeric rate).");
     }
-     // Optional: Add stricter validation
      if (password.length < 6) {
          throw new HttpsError("invalid-argument", "Password must be at least 6 characters long.");
      }
@@ -60,16 +61,19 @@ exports.createUserHandler = onCall({ region: "asia-southeast1" }, async (request
         // Set role in 'users' collection
         await db.collection("users").doc(newUserId).set({ role: "staff" });
 
-        // Create initial job history entry
+        // Create initial job history entry avec les NOUVELLES DONNÉES
         const initialJob = {
             position,
             department,
             startDate,
             payType,
-            rate: parseInt(rate, 10)
+            rate: parseInt(rate, 10),
+            baseSalary: baseSalary || null,
+            hourlyRate: hourlyRate || null,
+            standardDayHours: standardDayHours || 8
         };
 
-        // Create staff profile document
+        // Create staff profile document avec les NOUVELLES DONNÉES
         await db.collection("staff_profiles").doc(newUserId).set({
             firstName,
             lastName,
@@ -78,6 +82,9 @@ exports.createUserHandler = onCall({ region: "asia-southeast1" }, async (request
             startDate,
             uid: newUserId,
             jobHistory: [initialJob],
+            branchId: branchId || null,                                      // <-- INCLUSION DE LA SUCCURSALE
+            isSsoRegistered: isSsoRegistered !== undefined ? isSsoRegistered : true, // <-- INCLUSION SSO
+            holidayPolicy: holidayPolicy || 'in_lieu',                       // <-- INCLUSION POLICY
             createdAt: FieldValue.serverTimestamp(),
             bonusStreak: 0,
             status: 'active',

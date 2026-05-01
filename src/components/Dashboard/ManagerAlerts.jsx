@@ -7,6 +7,10 @@ import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, getDocs 
 import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, ShieldAlert, CheckSquare, Search, DollarSign } from 'lucide-react';
 import { formatDisplayTime, formatDisplayDate, formatISODate, addDays } from '../../utils/dateUtils';
 
+// --- IMPORTS DES MODALES ---
+import FeedbackModal from '../common/FeedbackModal';
+import ConfirmModal from '../common/ConfirmModal';
+
 const functions = getFunctions(app, "asia-southeast1");
 const autoFixShiftFunc = httpsCallable(functions, 'autoFixSingleShift');
 const runUnifiedHRScanFunc = httpsCallable(functions, 'runUnifiedHRScan');
@@ -142,6 +146,10 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
     const [scanStart, setScanStart] = useState('');
     const [scanEnd, setScanEnd] = useState('');
 
+    // --- STATES POUR LES MODALES ---
+    const [feedbackModal, setFeedbackModal] = useState(null);
+    const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
+
     useEffect(() => {
         const q = query(collection(db, "manager_alerts"), where("status", "==", "pending"), orderBy("createdAt", "desc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -199,27 +207,40 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
     }, [rawMissingCheckouts, activeBranch, userRole, adminBranchIds]);
 
     const handleFixAll = async () => {
-        if (!window.confirm(`Auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`)) return;
-        setIsFixingAll(true);
-        try {
-            const promises = missingCheckouts.map(async (alert) => {
-                const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
-                const schedSnap = await getDocs(schedQ);
-                const scheduledEndStr = !schedSnap.empty ? (schedSnap.docs[0].data().endTime || "23:00") : "23:00";
-                
-                return autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr });
-            });
-            await Promise.allSettled(promises);
-        } catch (err) {
-            console.error("Error running Fix All:", err);
-        } finally {
-            setIsFixingAll(false);
-        }
+        // --- MODIFIÉ : Remplacement du window.confirm() ---
+        setConfirmState({
+            isOpen: true,
+            title: "Auto-Fix Check-outs",
+            message: `Auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`,
+            isDestructive: false,
+            confirmText: "Fix All",
+            onConfirm: async () => {
+                setConfirmState({ isOpen: false });
+                setIsFixingAll(true);
+                try {
+                    const promises = missingCheckouts.map(async (alert) => {
+                        const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
+                        const schedSnap = await getDocs(schedQ);
+                        const scheduledEndStr = !schedSnap.empty ? (schedSnap.docs[0].data().endTime || "23:00") : "23:00";
+                        
+                        return autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr });
+                    });
+                    await Promise.allSettled(promises);
+                } catch (err) {
+                    console.error("Error running Fix All:", err);
+                    setFeedbackModal({ type: 'error', title: 'Action Failed', message: "Error running Fix All. Check console." });
+                } finally {
+                    setIsFixingAll(false);
+                }
+            },
+            onCancel: () => setConfirmState({ isOpen: false })
+        });
     };
 
     const handleRunHRScan = async () => {
         if (missingCheckouts.length > 0) {
-            alert("Please fix all missing check-outs before running the HR Scan to ensure accurate math.");
+            // --- MODIFIÉ : Remplacement du alert() bloquant ---
+            setFeedbackModal({ type: 'error', title: 'Action Required', message: "Please fix all missing check-outs before running the HR Scan to ensure accurate math." });
             return;
         }
         setIsScanning(true);
@@ -229,9 +250,14 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
             if (scanEnd) payload.endDate = scanEnd;
 
             const result = await runUnifiedHRScanFunc(payload); 
-            alert(`Scan complete. Scanned ${result.data.daysScanned} day(s). Found ${result.data.alertsCreated} new HR items.`);
+            // --- MODIFIÉ : Remplacement du alert() de succès ---
+            setFeedbackModal({ type: 'success', title: 'Scan Complete', message: `Scanned ${result.data.daysScanned} day(s). Found ${result.data.alertsCreated} new HR items.` });
         } 
-        catch (err) { console.error("HR Scan failed:", err); alert("Scan failed. Check console."); } 
+        catch (err) { 
+            console.error("HR Scan failed:", err); 
+            // --- MODIFIÉ : Remplacement du alert() d'erreur ---
+            setFeedbackModal({ type: 'error', title: 'Scan Failed', message: "Scan failed. Check console." }); 
+        } 
         finally { setIsScanning(false); }
     };
 
@@ -256,94 +282,116 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
         return acc;
     }, {});
 
-    if (loading) return <div className="bg-gray-800 p-4 rounded-lg flex items-center text-gray-300"><Loader2 className="h-4 w-4 animate-spin mr-2" />Loading pending actions...</div>;
-    
-    if (missingCheckouts.length === 0 && hrAlerts.length === 0) return (
-        <div className="bg-gray-800 p-6 rounded-lg text-center border border-gray-700 shadow-lg flex flex-col items-center">
-            <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
-            <h3 className="text-white font-medium">All clear!</h3>
-            <p className="text-sm text-gray-400 mb-6">No missing check-outs or pending HR approvals.</p>
-            
-            <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-2 rounded-lg border border-gray-700">
-                <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-2 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
-                <span className="text-gray-400 text-sm font-medium">to</span>
-                <input type="date" value={scanEnd} onChange={e => setScanEnd(e.target.value)} className="bg-gray-800 text-white rounded p-2 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
-                <button onClick={handleRunHRScan} disabled={isScanning} className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors inline-flex justify-center items-center whitespace-nowrap">
-                    {isScanning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                    {isScanning ? "Scanning..." : "Run Range Scan"}
-                </button>
-            </div>
-        </div>
-    );
-
     return (
-        <div className="space-y-6 animate-fadeIn">
-            {missingCheckouts.length > 0 && (
-                <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                            <AlertTriangle className="h-5 w-5 text-amber-500" />
-                            Missing Check-outs ({missingCheckouts.length})
-                        </h3>
-                        {missingCheckouts.length > 1 && (
-                            <button onClick={handleFixAll} disabled={isFixingAll} className="flex items-center justify-center gap-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
-                                {isFixingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
-                                {isFixingAll ? "Fixing All..." : `Auto-Fix All (${missingCheckouts.length})`}
-                            </button>
-                        )}
-                    </div>
-                    <ul className="space-y-2">
-                        {missingCheckouts.map(alert => {
-                            let displayName = alert.staffName;
-                            if (activeBranch === 'global' && alert.branchId) {
-                                const bName = branches.find(b => b.id === alert.branchId)?.name || alert.branchId;
-                                displayName += ` (${bName.replace('Da Moreno ', '')})`;
-                            }
-                            return <MissingCheckoutItem key={alert.id} alert={{...alert, staffName: displayName}} onManualFix={onManualFix} />
-                        })}
-                    </ul>
-                </div>
-            )}
+        <div className="relative">
+            {/* INJECTION DES MODALES AU NIVEAU SUPÉRIEUR */}
+            <FeedbackModal 
+                isOpen={!!feedbackModal} 
+                type={feedbackModal?.type} 
+                title={feedbackModal?.title} 
+                message={feedbackModal?.message} 
+                onClose={() => setFeedbackModal(null)} 
+            />
+            <ConfirmModal 
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={confirmState.onConfirm}
+                onCancel={confirmState.onCancel}
+                isDestructive={confirmState.isDestructive}
+                confirmText={confirmState.confirmText || "Confirm"}
+            />
 
-            <div className="space-y-3">
-                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-2 border-b border-gray-700 pb-4">
-                    <h3 className="text-lg font-bold text-white">HR & Disciplinary Actions</h3>
+            {loading ? (
+                <div className="bg-gray-800 p-4 rounded-lg flex items-center text-gray-300">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />Loading pending actions...
+                </div>
+            ) : missingCheckouts.length === 0 && hrAlerts.length === 0 ? (
+                <div className="bg-gray-800 p-6 rounded-lg text-center border border-gray-700 shadow-lg flex flex-col items-center">
+                    <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
+                    <h3 className="text-white font-medium">All clear!</h3>
+                    <p className="text-sm text-gray-400 mb-6">No missing check-outs or pending HR approvals.</p>
                     
-                    <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-1.5 rounded-lg border border-gray-700 w-full xl:w-auto">
-                        <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                    <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-2 rounded-lg border border-gray-700">
+                        <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-2 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
                         <span className="text-gray-400 text-sm font-medium">to</span>
-                        <input type="date" value={scanEnd} onChange={e => setScanEnd(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
-                        <button onClick={handleRunHRScan} disabled={isScanning || missingCheckouts.length > 0} className="w-full sm:w-auto flex items-center justify-center gap-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
-                            {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                            {isScanning ? "Scanning..." : "Run Scan"}
+                        <input type="date" value={scanEnd} onChange={e => setScanEnd(e.target.value)} className="bg-gray-800 text-white rounded p-2 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                        <button onClick={handleRunHRScan} disabled={isScanning} className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors inline-flex justify-center items-center whitespace-nowrap">
+                            {isScanning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                            {isScanning ? "Scanning..." : "Run Range Scan"}
                         </button>
                     </div>
                 </div>
-                
-                {hrAlerts.length > 0 ? (
-                    <div className="space-y-5 mt-4">
-                        {Object.keys(groupedAlerts).sort().map(staffName => (
-                            <div key={staffName} className="bg-gray-900/40 rounded-xl border border-gray-700 overflow-hidden shadow-sm">
-                                <div className="bg-gray-800 px-4 py-2.5 border-b border-gray-700 flex justify-between items-center">
-                                    <h4 className="font-bold text-gray-200">{staffName}</h4>
-                                    <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-md border border-indigo-500/30">
-                                        {groupedAlerts[staffName].length} Action{groupedAlerts[staffName].length > 1 ? 's' : ''}
-                                    </span>
-                                </div>
-                                <div className="p-3">
-                                    <ul className="space-y-2">
-                                        {groupedAlerts[staffName].map(alert => (
-                                            <HRAlertItem key={alert.id} alert={alert} />
-                                        ))}
-                                    </ul>
-                                </div>
+            ) : (
+                <div className="space-y-6 animate-fadeIn">
+                    {missingCheckouts.length > 0 && (
+                        <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+                                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                    <AlertTriangle className="h-5 w-5 text-amber-500" />
+                                    Missing Check-outs ({missingCheckouts.length})
+                                </h3>
+                                {missingCheckouts.length > 1 && (
+                                    <button onClick={handleFixAll} disabled={isFixingAll} className="flex items-center justify-center gap-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
+                                        {isFixingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckSquare className="h-4 w-4" />}
+                                        {isFixingAll ? "Fixing All..." : `Auto-Fix All (${missingCheckouts.length})`}
+                                    </button>
+                                )}
                             </div>
-                        ))}
+                            <ul className="space-y-2">
+                                {missingCheckouts.map(alert => {
+                                    let displayName = alert.staffName;
+                                    if (activeBranch === 'global' && alert.branchId) {
+                                        const bName = branches.find(b => b.id === alert.branchId)?.name || alert.branchId;
+                                        displayName += ` (${bName.replace('Da Moreno ', '')})`;
+                                    }
+                                    return <MissingCheckoutItem key={alert.id} alert={{...alert, staffName: displayName}} onManualFix={onManualFix} />
+                                })}
+                            </ul>
+                        </div>
+                    )}
+
+                    <div className="space-y-3">
+                        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-2 border-b border-gray-700 pb-4">
+                            <h3 className="text-lg font-bold text-white">HR & Disciplinary Actions</h3>
+                            
+                            <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-1.5 rounded-lg border border-gray-700 w-full xl:w-auto">
+                                <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                                <span className="text-gray-400 text-sm font-medium">to</span>
+                                <input type="date" value={scanEnd} onChange={e => setScanEnd(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
+                                <button onClick={handleRunHRScan} disabled={isScanning || missingCheckouts.length > 0} className="w-full sm:w-auto flex items-center justify-center gap-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                                    {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                                    {isScanning ? "Scanning..." : "Run Scan"}
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {hrAlerts.length > 0 ? (
+                            <div className="space-y-5 mt-4">
+                                {Object.keys(groupedAlerts).sort().map(staffName => (
+                                    <div key={staffName} className="bg-gray-900/40 rounded-xl border border-gray-700 overflow-hidden shadow-sm">
+                                        <div className="bg-gray-800 px-4 py-2.5 border-b border-gray-700 flex justify-between items-center">
+                                            <h4 className="font-bold text-gray-200">{staffName}</h4>
+                                            <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-md border border-indigo-500/30">
+                                                {groupedAlerts[staffName].length} Action{groupedAlerts[staffName].length > 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                        <div className="p-3">
+                                            <ul className="space-y-2">
+                                                {groupedAlerts[staffName].map(alert => (
+                                                    <HRAlertItem key={alert.id} alert={alert} />
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-sm text-gray-500 italic mt-4">No HR actions pending. Click the scan button to audit data.</p>
+                        )}
                     </div>
-                ) : (
-                    <p className="text-sm text-gray-500 italic mt-4">No HR actions pending. Click the scan button to audit data.</p>
-                )}
-            </div>
+                </div>
+            )}
         </div>
     );
 }
