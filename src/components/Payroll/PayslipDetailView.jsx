@@ -1,12 +1,11 @@
 /* src/components/Payroll/PayslipDetailView.jsx */
 
 import React, { useState } from 'react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { Info, FileText, Download, Printer, Banknote } from 'lucide-react';
+import { Info, Banknote } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 import { generateDocument } from '../../utils/documentGenerator'; 
-import FeedbackModal from '../common/FeedbackModal'; // <-- NOUVEL IMPORT
+import FeedbackModal from '../common/FeedbackModal';
+import { generatePayslipsPDF } from '../../utils/pdfExport'; // <-- IMPORT DU GÉNÉRATEUR
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -18,24 +17,20 @@ const formatHours = (hours) => {
     return `(${h}h ${m}m)`;
 };
 
-export default function PayslipDetailView({ details, companyConfig, payPeriod }) {
+// AJOUT DE staffList ET activeBranch DANS LES PROPS
+export default function PayslipDetailView({ details, companyConfig, payPeriod, staffList = [], activeBranch = 'global' }) {
     const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false);
     const [showLeaveTooltip, setShowLeaveTooltip] = useState(false);
-    
-    // --- NOUVEAU STATE POUR LA MODALE D'ERREUR ---
     const [feedbackModal, setFeedbackModal] = useState(null);
 
     if (!details) return null;
 
     const staffName = details.name || details.staffName || 'Unknown Staff';
-
     const hasAbsences = details.deductions?.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
     const hasLeavePayout = details.earnings?.leavePayout > 0 && details.earnings.leavePayoutDetails;
     const hasOvertime = details.earnings?.overtimePay > 0;
-
     const absenceSummary = formatHours(details.deductions?.totalAbsenceHours);
 
-    // --- FONCTION DE GÉNÉRATION DU REÇU .DOCX ---
     const handleGenerateDocxReceipt = async () => {
         const monthNum = details.payPeriodMonth || payPeriod?.month;
         const yearNum = details.payPeriodYear || payPeriod?.year;
@@ -59,95 +54,34 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod })
         };
 
         const result = await generateDocument('receipt', mockStaff, companyConfig, extraData);
-        // MODIFIÉ : Utilisation de FeedbackModal au lieu de alert()
         if (!result.success) {
             setFeedbackModal({ type: 'error', title: 'Generation Failed', message: "Erreur lors de la génération : " + result.error });
         }
     };
 
+    // --- LE NOUVEL EXPORT INDIVIDUEL ---
     const handleExportIndividualPDF = async () => {
-        const doc = new jsPDF();
         const monthNum = details.payPeriodMonth || payPeriod?.month;
         const yearNum = details.payPeriodYear || payPeriod?.year;
-        const payPeriodTitle = monthNum && yearNum ? `${months[monthNum - 1]} ${yearNum}` : 'Unknown Period';
+        const fileName = `payslip_${staffName.replace(/ /g, '_')}_${yearNum}_${monthNum}.pdf`;
 
-        if (companyConfig?.companyLogoUrl) {
-            try {
-                const response = await fetch(companyConfig.companyLogoUrl);
-                const blob = await response.blob();
-                const reader = new FileReader();
-                const base64Image = await new Promise((resolve, reject) => {
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
-                });
-
-                const img = new Image();
-                img.src = base64Image;
-                await new Promise(resolve => { img.onload = resolve; });
-
-                const pdfLogoWidth = 30;
-                const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width;
-
-                const pageWidth = doc.internal.pageSize.getWidth();
-                const rightMargin = 14;
-                doc.addImage(base64Image, 'PNG', pageWidth - pdfLogoWidth - rightMargin, 10, pdfLogoWidth, pdfLogoHeight);
-
-            } catch (error) {
-                console.error("Logo error:", error);
-            }
+        try {
+            await generatePayslipsPDF(
+                [details], // On envoie un tableau contenant uniquement cette fiche
+                companyConfig,
+                { month: monthNum, year: yearNum },
+                staffList,
+                activeBranch,
+                fileName
+            );
+        } catch (error) {
+            console.error("PDF Export Error:", error);
+            setFeedbackModal({ type: 'error', title: 'Export Failed', message: error.message });
         }
-
-        doc.setFontSize(18);
-        doc.text("Salary Statement", 105, 15, { align: 'center' });
-        doc.setFontSize(12);
-        doc.text(`Month: ${payPeriodTitle}`, 105, 22, { align: 'center' });
-
-        autoTable(doc, {
-            body: [
-                [{ content: 'Employee Name:', styles: { fontStyle: 'bold' } }, staffName],
-                [{ content: 'Company:', styles: { fontStyle: 'bold' } }, companyConfig?.companyName || ''],
-                [{ content: 'Address:', styles: { fontStyle: 'bold' } }, companyConfig?.companyAddress || ''],
-                [{ content: 'Tax ID:', styles: { fontStyle: 'bold' } }, companyConfig?.companyTaxId || ''],
-                [{ content: 'Position:', styles: { fontStyle: 'bold' } }, details.position || details.payType || 'Staff'],
-            ],
-            startY: 30,
-            theme: 'plain',
-            styles: { fontSize: 10 },
-        });
-
-        let earningsBody = [
-            ['Base Pay', formatCurrency(details.earnings?.basePay)],
-            ['Attendance Bonus', formatCurrency(details.earnings?.attendanceBonus)],
-            ['Social Security Allowance', formatCurrency(details.earnings?.ssoAllowance)],
-            ...(details.earnings?.others || []).map(e => [e.description, formatCurrency(e.amount)])
-        ];
-
-        if (hasOvertime) earningsBody.splice(1, 0, ['Approved Overtime', formatCurrency(details.earnings.overtimePay)]);
-        if (hasLeavePayout) earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
-
-        const deductionsBody = [
-            [`Absences ${absenceSummary}`, formatCurrency(details.deductions?.absences)],
-            ['Social Security', formatCurrency(details.deductions?.sso)],
-            ['Salary Advance', formatCurrency(details.deductions?.advance)],
-            ['Loan Repayment', formatCurrency(details.deductions?.loan)],
-            ...(details.deductions?.others || []).map(d => [d.description, formatCurrency(d.amount)])
-        ];
-
-        autoTable(doc, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: doc.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
-        autoTable(doc, { head: [['Deductions', 'Amount (THB)']], body: deductionsBody, foot: [['Total Deductions', formatCurrency(details.totalDeductions)]], startY: doc.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
-
-        doc.setFontSize(14);
-        doc.setFont('helvetica', 'bold');
-        doc.text("Net Pay:", 14, doc.lastAutoTable.finalY + 10);
-        doc.text(`${formatCurrency(details.netPay)} THB`, 196, doc.lastAutoTable.finalY + 10, { align: 'right' });
-
-        doc.save(`payslip_${staffName.replace(/ /g, '_')}_${yearNum}_${monthNum}.pdf`);
     };
 
     return (
         <div className="text-white relative">
-            {/* INJECTION DU FEEDBACK MODAL */}
             <FeedbackModal 
                 isOpen={!!feedbackModal} 
                 type={feedbackModal?.type} 

@@ -1,8 +1,17 @@
 // src/components/common/StatusBadge.jsx
 import React from 'react';
 
-export default function StatusBadge({ status }) {
+export default function StatusBadge({ status, type }) {
     const safeStatus = (status || '').toLowerCase();
+
+    // --- LE STYLE DU BADGE "BRANCH" (Celui que tu avais en dur) ---
+    if (type === 'branch') {
+        return (
+            <span className="ml-2 text-[9px] uppercase tracking-wider font-bold bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30 flex-shrink-0">
+                {status}
+            </span>
+        );
+    }
 
     // Dictionnaire universel des statuts (congés, avances, prêts, etc.)
     const statusMap = {

@@ -25,7 +25,11 @@ try {
         // --- 🛡️ LE BOUCLIER DE SÉCURITÉ VERCEL ---
         // import.meta.env.DEV est VRAI uniquement sur ton PC (localhost).
         // Sur Vercel, ce code sera purement et simplement ignoré.
-        if (import.meta.env.DEV) {
+        
+        // MODIFICATION ICI : On force à 'false' temporairement pour taper dans la prod
+        const useEmulator = false; // Remets à 'true' (ou import.meta.env.DEV) quand tu auras fini tes tests !
+
+        if (useEmulator) {
             console.info("🛠️ MODE DEV DÉTECTÉ : Connexion aux Émulateurs Locaux Firebase");
             
             // disableWarnings: true évite d'avoir un bandeau rouge géant sur l'écran de login local
