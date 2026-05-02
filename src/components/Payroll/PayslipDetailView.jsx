@@ -5,7 +5,7 @@ import { Info, Banknote } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 import { generateDocument } from '../../utils/documentGenerator'; 
 import FeedbackModal from '../common/FeedbackModal';
-import { generatePayslipsPDF } from '../../utils/pdfExport'; // <-- IMPORT DU GÉNÉRATEUR
+import { generatePayslipsPDF } from '../../utils/pdfExport'; 
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -17,7 +17,6 @@ const formatHours = (hours) => {
     return `(${h}h ${m}m)`;
 };
 
-// AJOUT DE staffList ET activeBranch DANS LES PROPS
 export default function PayslipDetailView({ details, companyConfig, payPeriod, staffList = [], activeBranch = 'global' }) {
     const [showAbsenceTooltip, setShowAbsenceTooltip] = useState(false);
     const [showLeaveTooltip, setShowLeaveTooltip] = useState(false);
@@ -25,7 +24,10 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
 
     if (!details) return null;
 
-    const staffName = details.name || details.staffName || 'Unknown Staff';
+    // Récupération du profil correspondant dans la liste fournie[cite: 10, 12]
+    const actualProfile = staffList.find(s => s.id === details.staffId || s.id === details.id);
+
+    const staffName = details.name || details.staffName || actualProfile?.nickname || 'Unknown Staff';
     const hasAbsences = details.deductions?.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
     const hasLeavePayout = details.earnings?.leavePayout > 0 && details.earnings.leavePayoutDetails;
     const hasOvertime = details.earnings?.overtimePay > 0;
@@ -37,13 +39,16 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
         const periodStr = monthNum && yearNum ? `${months[monthNum - 1]} ${yearNum}` : 'Unknown Period';
         const todayStr = dateUtils.formatCustom(new Date(), 'dd/MM/yyyy');
         
+        // Utilisation du profil réel pour le générateur de documents
         const mockStaff = { 
+            ...actualProfile, 
             fullName: staffName,
             paymentMethod: details.paymentMethod || 'cash',
             bankAccount: details.bankAccount || '-',
             idNumber: details.idNumber || '-',
             idType: details.idType || '-',
-            jobHistory: [{ position: details.position || details.payType || 'Staff', startDate: new Date().toISOString() }]
+            // On injecte le jobHistory réel s'il existe pour avoir le bon département[cite: 9]
+            jobHistory: actualProfile?.jobHistory || [{ position: details.position || 'Staff', department: 'General' }]
         }; 
         
         const extraData = {
@@ -59,15 +64,15 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
         }
     };
 
-    // --- LE NOUVEL EXPORT INDIVIDUEL ---
     const handleExportIndividualPDF = async () => {
         const monthNum = details.payPeriodMonth || payPeriod?.month;
         const yearNum = details.payPeriodYear || payPeriod?.year;
         const fileName = `payslip_${staffName.replace(/ /g, '_')}_${yearNum}_${monthNum}.pdf`;
 
         try {
+            // Appel à l'utilitaire centralisé avec la staffList pour résoudre le département[cite: 12]
             await generatePayslipsPDF(
-                [details], // On envoie un tableau contenant uniquement cette fiche
+                [details], 
                 companyConfig,
                 { month: monthNum, year: yearNum },
                 staffList,
@@ -90,7 +95,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
                 onClose={() => setFeedbackModal(null)} 
             />
 
-            <div className="grid grid-cols-2 gap-8 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
+                {/* SECTION EARNINGS */}
                 <div>
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Earnings</h4>
                     <div className="space-y-1 text-sm">
@@ -121,6 +127,8 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
                     </div>
                     <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-gray-500"><p>Total Earnings:</p> <p>{formatCurrency(details.totalEarnings)}</p></div>
                 </div>
+
+                {/* SECTION DEDUCTIONS */}
                 <div>
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Deductions</h4>
                     <div className="space-y-1 text-sm">
@@ -147,15 +155,24 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
                     <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-gray-500"><p>Total Deductions:</p> <p>{formatCurrency(details.totalDeductions)}</p></div>
                 </div>
             </div>
+
             <div className="flex justify-between items-center bg-gray-900 p-4 rounded-lg mt-6">
-                <h3 className="text-xl font-bold">NET PAY:</h3><p className="text-2xl font-bold text-amber-400">{formatCurrency(details.netPay)} THB</p>
+                <h3 className="text-xl font-bold">NET PAY:</h3>
+                <p className="text-2xl font-bold text-amber-400">{formatCurrency(details.netPay)} THB</p>
             </div>
-            <div className="flex justify-end mt-6">
-                <button onClick={handleExportIndividualPDF} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-semibold">Export Payslip to PDF</button>
+
+            {/* ACTIONS */}
+            <div className="flex flex-wrap justify-end gap-2 mt-6">
+                <button 
+                    onClick={handleExportIndividualPDF} 
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold transition-colors"
+                >
+                    Export Payslip to PDF
+                </button>
                 {details?.paymentMethod === 'cash' && (
                     <button
                         onClick={handleGenerateDocxReceipt}
-                        className="flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm shadow-lg ml-2"
+                        className="flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm shadow-lg transition-colors"
                     >
                         <Banknote className="w-4 h-4 mr-2" /> Receipt (Cash) .docx
                     </button>

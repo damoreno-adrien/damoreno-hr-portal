@@ -7,8 +7,8 @@ import * as dateUtils from '../utils/dateUtils';
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-export default function MyPayslipsPage({ db, user, companyConfig }) {
-    const [payslips, setPayslips] =useState([]);
+export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }) {
+    const [payslips, setPayslips] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedPayslip, setSelectedPayslip] = useState(null);
 
@@ -16,7 +16,7 @@ export default function MyPayslipsPage({ db, user, companyConfig }) {
         if (!db || !user) return;
 
         const q = query(
-            collection(db, 'payslips'), 
+            collection(db, 'payslips'),
             where('staffId', '==', user.uid),
             orderBy('generatedAt', 'desc')
         );
@@ -36,13 +36,22 @@ export default function MyPayslipsPage({ db, user, companyConfig }) {
     return (
         <div>
             {selectedPayslip && (
-                <Modal isOpen={true} onClose={() => setSelectedPayslip(null)} title={`Payslip for ${months[selectedPayslip.payPeriodMonth - 1]} ${selectedPayslip.payPeriodYear}`}>
-                    <PayslipDetailView details={selectedPayslip} companyConfig={companyConfig} payPeriod={{ month: selectedPayslip.payPeriodMonth, year: selectedPayslip.payPeriodYear }} />
+                <Modal
+                    isOpen={true}
+                    onClose={() => setSelectedPayslip(null)}
+                    title={`Payslip for ${months[selectedPayslip.payPeriodMonth - 1]} ${selectedPayslip.payPeriodYear}`}
+                >
+                    <PayslipDetailView
+                        details={selectedPayslip}
+                        companyConfig={companyConfig}
+                        payPeriod={{ month: selectedPayslip.payPeriodMonth, year: selectedPayslip.payPeriodYear }}
+                        staffList={[staffProfile]}
+                    />
                 </Modal>
             )}
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Payslips</h2>
-            
+
             <div className="bg-gray-800 rounded-lg shadow-lg">
                 <div className="divide-y divide-gray-700">
                     {isLoading ? (
