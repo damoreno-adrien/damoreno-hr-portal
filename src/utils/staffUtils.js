@@ -8,6 +8,22 @@ export const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
+export const checkIsBirthday = (birthdate) => {
+    if (!birthdate) return false;
+    const today = new Date();
+    const todayStr = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    let bStr = "";
+    if (birthdate.toDate) { 
+        const d = birthdate.toDate();
+        bStr = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    } else { 
+        const d = new Date(birthdate);
+        bStr = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    return bStr === todayStr;
+};
+
 export const parseHireDate = (startDate) => {
     let hireDate = new Date();
     if (!startDate) return hireDate;

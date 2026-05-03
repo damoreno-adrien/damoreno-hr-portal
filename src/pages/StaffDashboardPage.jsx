@@ -10,8 +10,7 @@ import { DailySummary } from '../components/Dashboard/DailySummary';
 import { formatCustom, formatISODate, addDays, fromFirestore, isStaffActiveOnDate } from '../utils/dateUtils';
 import { UpcomingShiftsCard } from '../components/Dashboard/UpcomingShiftsCard';
 import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
-
-// --- IMPORT DE LA MODALE ---
+import { checkIsBirthday, getDisplayName } from '../utils/staffUtils';
 import ConfirmModal from '../components/common/ConfirmModal';
 
 export default function StaffDashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
@@ -33,10 +32,12 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     const monthlyStats = rawStats.monthlyStats || { totalHoursWorked: "0h 0m", workedDays: 0, absences: 0, totalTimeLate: "0h 0m" };
     const bonusStatus = rawStats.bonusStatus || { notEligible: true };
 
-    const isMyBirthday = checkBirthday(staffList.find(s => s.id === user.uid)?.birthdate);
+    const isMyBirthday = checkIsBirthday(staffProfile?.birthdate);
+
     const colleaguesWithBirthday = staffList.filter(s =>
         s.id !== user.uid &&
-        checkBirthday(s.birthdate) &&
+        s.branchId === staffProfile?.branchId && // <-- FIX RBAC : Uniquement ma branche[cite: 12]
+        checkIsBirthday(s.birthdate) &&
         isStaffActiveOnDate(s, new Date())
     );
 
@@ -173,10 +174,10 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     const handleCheckIn = async () => {
         const localDateString = formatISODate(new Date());
-        
+
         // --- NEW: Find the user's home branch from the staff list ---
         const currentStaffProfile = staffList?.find(s => s.id === user.uid);
-        
+
         await setDoc(getDocRef(), {
             staffId: user.uid,
             staffName: user.displayName || user.email,
@@ -193,7 +194,7 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     const handleCheckOut = async () => {
         const now = new Date();
         let requiresConfirmation = false;
-        
+
         if (todaysSchedule && todaysSchedule.endTime) {
             try {
                 const [endHours, endMinutes] = todaysSchedule.endTime.split(':');
@@ -307,7 +308,7 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     return (
         <div className="relative">
             {/* INJECTION DE LA MODALE */}
-            <ConfirmModal 
+            <ConfirmModal
                 isOpen={confirmState.isOpen}
                 title={confirmState.title}
                 message={confirmState.message}

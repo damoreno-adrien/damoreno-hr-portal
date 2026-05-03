@@ -1,30 +1,24 @@
-/* src/pages/AttendancePage.jsx */
+// src/pages/AttendancePage.jsx
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; // <-- Securely grab UID directly
+import { getAuth } from 'firebase/auth'; 
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import ManagerAlerts from '../components/Dashboard/ManagerAlerts';
 import HRActionLog from '../components/Dashboard/HRActionLog';
-
-const getDisplayName = (staff) => {
-    if (staff && staff.nickname) return staff.nickname;
-    if (staff && staff.firstName) return `${staff.firstName} ${staff.lastName}`;
-    if (staff && staff.fullName) return staff.fullName;
-    return 'Unknown Staff';
-};
+import { getDisplayName } from '../utils/staffUtils'; // <-- IMPORT CENTRALISÉ
 
 const getStaffDepartment = (staff) => {
     if (!staff) return 'Unassigned';
-    if (staff.department) return staff.department; 
+    if (staff.department) return staff.department;
     if (staff.jobHistory && staff.jobHistory.length > 0) {
         const sortedJobs = [...staff.jobHistory].sort((a, b) => {
             const dateA = dateUtils.fromFirestore(a.startDate) || new Date(0);
             const dateB = dateUtils.fromFirestore(b.startDate) || new Date(0);
-            return dateB - dateA; 
+            return dateB - dateA;
         });
         if (sortedJobs[0].department) return sortedJobs[0].department;
     }
@@ -36,8 +30,10 @@ const UpcomingBirthdaysCard = ({ staffList, activeBranch, branches = [] }) => {
         if (!staff.birthdate) return null;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const birthDate = dateUtils.fromFirestore(staff.birthdate);
-        if (!birthDate) return null;
+        
+        // Gestion robuste du format de date (Firestore vs String ISO)
+        const birthDate = staff.birthdate.toDate ? staff.birthdate.toDate() : new Date(staff.birthdate);
+        if (!birthDate || isNaN(birthDate)) return null;
 
         let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
         if (nextBirthday < today) nextBirthday.setFullYear(today.getFullYear() + 1);
@@ -56,20 +52,24 @@ const UpcomingBirthdaysCard = ({ staffList, activeBranch, branches = [] }) => {
                 {upcomingBirthdays.length > 0 ? (
                     upcomingBirthdays.map(staff => {
                         let nameDisplay = getDisplayName(staff);
+                        
+                        // Affichage de la branche uniquement en vue globale
                         if (activeBranch === 'global' && staff.branchId) {
                             const bName = branches.find(b => b.id === staff.branchId)?.name || staff.branchId;
                             nameDisplay += ` (${bName.replace('Da Moreno ', '')})`;
                         }
-                        
+
                         return (
-                            <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md">
+                            <div key={staff.id} className="flex justify-between items-center bg-gray-700 p-2 rounded-md hover:bg-gray-600 transition-colors">
                                 <span className="text-white font-medium">{nameDisplay}</span>
-                                <span className="text-sm text-amber-400">{dateUtils.formatCustom(staff.nextBirthday, 'dd MMMM')} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})</span>
+                                <span className="text-sm text-amber-400">
+                                    {dateUtils.formatCustom(staff.nextBirthday, 'dd MMMM')} ({staff.daysUntil === 0 ? 'Today!' : `${staff.daysUntil} days`})
+                                </span>
                             </div>
                         );
                     })
                 ) : (
-                    <p className="text-sm text-gray-500">No upcoming birthdays in the next 30 days.</p>
+                    <p className="text-sm text-gray-500">No upcoming birthdays for this location.</p>
                 )}
             </div>
         </div>
@@ -84,15 +84,14 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
     const [showArchived, setShowArchived] = useState(false);
     const [alertToFix, setAlertToFix] = useState(null);
     const [companyConfig, setCompanyConfig] = useState(null);
-    
+
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [activeAlertTab, setActiveAlertTab] = useState('pending');
-    
-    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
+
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
     const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
-    
+
     const isFullManager = ['admin', 'super_admin', 'manager'].includes(userRole);
 
     const currentUserDept = useMemo(() => {
@@ -102,8 +101,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
 
     useEffect(() => {
         if (!db) return;
-        
-        // 1. Fetch Secure Branch List
+
         const uid = getAuth().currentUser?.uid;
         if (userRole === 'admin' && uid) {
             getDoc(doc(db, 'users', uid)).then(snap => {
@@ -111,7 +109,6 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
             }).catch(err => console.error(err));
         }
 
-        // 2. Fetch standard dashboard data
         const todayStr = dateUtils.formatISODate(new Date());
         const shiftsQuery = query(collection(db, "schedules"), where("date", "==", todayStr));
         const unsubscribeShifts = onSnapshot(shiftsQuery, (snapshot) => { setTodaysShifts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); });
@@ -133,7 +130,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
     }, [db, userRole]);
 
     const handleCardClick = (staff) => {
-        if (!isFullManager) return; 
+        if (!isFullManager) return;
 
         const todayStr = dateUtils.formatISODate(new Date());
         const attendanceRecord = checkIns[staff.id];
@@ -155,14 +152,14 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
 
     const handleCloseManualFix = () => setAlertToFix(null);
 
-    // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+    // --- FILTRAGE DE BASE (RBAC) ---
     const staffToDisplay = useMemo(() => {
         let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive');
-        
+
         if (userRole === 'dept_manager' && currentUserDept) {
             list = list.filter(staff => getStaffDepartment(staff) === currentUserDept);
         }
-        
+
         if (activeBranch === 'global') {
             if (userRole === 'admin') {
                 list = list.filter(staff => adminBranchIds.includes(staff.branchId));
@@ -170,7 +167,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
         } else if (activeBranch) {
             list = list.filter(staff => staff.branchId === activeBranch);
         }
-        
+
         return list;
     }, [staffList, showArchived, userRole, currentUserDept, activeBranch, adminBranchIds]);
 
@@ -208,7 +205,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
         }
 
         const isClickable = staff.reason !== 'Off Today' && isFullManager;
-        
+
         let nameDisplay = getDisplayName(staff);
         if (activeBranch === 'global' && staff.branchId) {
             const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId;
@@ -216,9 +213,12 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
         }
 
         const CardContent = () => (
-            <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'}`}>
+            <div className={`bg-gray-700 p-4 rounded-lg flex items-center space-x-4 ${isClickable ? 'hover:bg-gray-600' : 'cursor-default'} transition-colors`}>
                 <div className={`w-3 h-3 rounded-full ${statusColor} flex-shrink-0`}></div>
-                <div className="flex-1 overflow-hidden"><p className="font-bold text-white truncate">{nameDisplay}</p><p className="text-xs text-gray-400 truncate">{statusText}</p></div>
+                <div className="flex-1 overflow-hidden">
+                    <p className="font-bold text-white truncate">{nameDisplay}</p>
+                    <p className="text-xs text-gray-400 truncate">{statusText}</p>
+                </div>
             </div>
         );
         return isClickable ? <button onClick={onClick} className="w-full text-left">{CardContent()}</button> : <CardContent />;
@@ -227,8 +227,8 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
     const StatusColumn = ({ title, staff }) => {
         const [isOpen, setIsOpen] = useState(true);
         return (
-            <div className="bg-gray-800 rounded-lg">
-                <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center p-4">
+            <div className="bg-gray-800 rounded-lg overflow-hidden">
+                <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center p-4 hover:bg-gray-750 transition-colors">
                     <h3 className="text-xl font-semibold text-white">{title} ({staff.length})</h3>
                     {isOpen ? <ChevronUp className="h-6 w-6 text-gray-400" /> : <ChevronDown className="h-6 w-6 text-gray-400" />}
                 </button>
@@ -274,16 +274,22 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
                         <button onClick={() => setActiveAlertTab('history')} className={`flex-1 py-4 text-sm font-bold transition-colors ${activeAlertTab === 'history' ? 'bg-gray-700 text-indigo-400 border-b-2 border-indigo-500' : 'text-gray-400 hover:text-white hover:bg-gray-750'}`}>Action History Log</button>
                     </div>
                     <div className="p-4">
-                        {/* Pass userRole and adminBranchIds down so tabs can securely filter too! */}
-                        {activeAlertTab === 'pending' 
-                            ? <ManagerAlerts onManualFix={handleOpenManualFix} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} /> 
+                        {activeAlertTab === 'pending'
+                            ? <ManagerAlerts onManualFix={handleOpenManualFix} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} />
                             : <HRActionLog db={db} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} />
                         }
                     </div>
                 </div>
             )}
 
-            <div className="mb-6"><UpcomingBirthdaysCard staffList={staffToDisplay} activeBranch={activeBranch} branches={companyConfig?.branches || []} /></div>
+            <div className="mb-6">
+                {/* Injection de la liste déjà filtrée */}
+                <UpcomingBirthdaysCard
+                    staffList={staffToDisplay}
+                    activeBranch={activeBranch}
+                    branches={companyConfig?.branches || []}
+                />
+            </div>
             <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-3 md:gap-6">
                 <StatusColumn title="On Shift" staff={onShiftAndBreak} />
                 <StatusColumn title="Not Present" staff={notPresent} />

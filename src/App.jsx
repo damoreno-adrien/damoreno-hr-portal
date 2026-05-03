@@ -4,7 +4,7 @@ import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { app, auth, db } from '../firebase';
 import useAuth from './hooks/useAuth';
-import { WifiOff, ServerCrash, ShieldAlert, RefreshCw } from 'lucide-react'; // <-- NOUVEL IMPORT POUR LES ICÔNES D'ERREUR
+import { WifiOff, ServerCrash, ShieldAlert, RefreshCw } from 'lucide-react';
 
 import useCompanyConfig from './hooks/useCompanyConfig';
 import useStaffList from './hooks/useStaffList';
@@ -38,10 +38,7 @@ export default function App() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-    // --- Global Branch State ---
     const [activeBranch, setActiveBranch] = useState('global');
-
-    // --- Active View State ---
     const [activeRole, setActiveRole] = useState(null);
 
     const [leaveBalances, setLeaveBalances] = useState({ annual: 0, publicHoliday: 0, personal: 0 });
@@ -52,7 +49,6 @@ export default function App() {
     const [isFinancialsMenuOpen, setIsFinancialsMenuOpen] = useState(false);
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
-    // EXTRACTION DU authError POUR LA GESTION DES CRASHS
     const { user, userRole, hasStaffProfile, isLoading: isAuthLoading, authError } = useAuth(auth, db);
     const companyConfig = useCompanyConfig(db, user);
     const staffList = useStaffList(db, user);
@@ -79,19 +75,19 @@ export default function App() {
 
     const resolvedConfig = useMemo(() => {
         if (!companyConfig) return null;
-
+        
         let effectiveBranch = 'global';
-
+        
         if (activeRole === 'staff') {
             effectiveBranch = staffProfile?.branchId || 'global';
         } else {
             effectiveBranch = activeBranch;
         }
-
+        
         if (!effectiveBranch || effectiveBranch === 'global') return companyConfig;
 
         const branchOverrides = companyConfig.branchSettings?.[effectiveBranch] || {};
-
+        
         return {
             ...companyConfig,
             ...branchOverrides,
@@ -119,7 +115,7 @@ export default function App() {
             const unsubscribe = onSnapshot(q, (snap) => setUnreadLeaveUpdatesCount(snap.size));
             return () => unsubscribe();
         }
-    }, [userRole, db, user, activeBranch]);
+    }, [userRole, db, user, activeBranch]); 
 
     useEffect(() => {
         if (!db) return;
@@ -136,7 +132,7 @@ export default function App() {
             const unsubscribe = onSnapshot(q, (snap) => setUnreadAdvanceUpdatesCount(snap.size));
             return () => unsubscribe();
         }
-    }, [userRole, db, user, activeBranch]);
+    }, [userRole, db, user, activeBranch]); 
 
     useEffect(() => {
         if (hasStaffProfile && db && user && resolvedConfig && staffProfile) {
@@ -172,10 +168,6 @@ export default function App() {
         setActiveRole(null);
     };
 
-    // ==========================================
-    // ECRANS DE BLOCAGE (ERREURS & CHARGEMENT)
-    // ==========================================
-
     if (authError) {
         return (
             <div className="min-h-screen bg-[#111827] flex flex-col items-center justify-center p-4">
@@ -189,14 +181,14 @@ export default function App() {
                             <ServerCrash className="w-8 h-8 text-red-500" />
                         )}
                     </div>
-
+                    
                     <h1 className="text-xl font-bold text-white mb-2">Connection Failed</h1>
                     <p className="text-gray-400 text-sm mb-8 leading-relaxed">
                         {authError.message}
                     </p>
-
-                    <button
-                        onClick={() => window.location.reload()}
+                    
+                    <button 
+                        onClick={() => window.location.reload()} 
                         className="w-full flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg transition-colors"
                     >
                         <RefreshCw className="w-4 h-4 mr-2" />
@@ -212,7 +204,7 @@ export default function App() {
     }
 
     const isLoading = !auth || !db || isAuthLoading || (user && companyConfig === null) || (userRole && !activeRole);
-    if (isLoading) {
+    if (isLoading) { 
         return (
             <div className="min-h-screen bg-[#111827] flex items-center justify-center">
                 <div className="flex flex-col items-center">
@@ -220,14 +212,10 @@ export default function App() {
                     <p className="text-gray-400 font-medium tracking-wide animate-pulse">Loading Da Moreno HR Portal...</p>
                 </div>
             </div>
-        );
+        ); 
     }
-
+    
     if (!user) { return <LoginPage handleLogin={handleLogin} loginError={loginError} />; }
-
-    // ==========================================
-    // ROUTAGE PRINCIPAL
-    // ==========================================
 
     const renderPageContent = () => {
         if (currentPage === 'dashboard') {
@@ -235,7 +223,15 @@ export default function App() {
                 return <AttendancePage db={db} staffList={staffList} userRole={userRole} staffProfile={staffProfile} activeBranch={activeBranch} />;
             }
             if (activeRole === 'staff') {
-                return <StaffDashboardPage db={db} user={user} companyConfig={resolvedConfig} leaveBalances={leaveBalances} staffList={staffList} setCurrentPage={setCurrentPage} />;
+                return <StaffDashboardPage 
+                    db={db} 
+                    user={user} 
+                    companyConfig={resolvedConfig} 
+                    leaveBalances={leaveBalances} 
+                    staffList={staffList} 
+                    staffProfile={staffProfile} // <-- FIX: Prop added here
+                    setCurrentPage={setCurrentPage} 
+                />;
             }
         }
 
@@ -270,20 +266,13 @@ export default function App() {
             case 'team-schedule': return <TeamSchedulePage db={db} user={user} companyConfig={resolvedConfig} />;
             case 'salary-advance': return <SalaryAdvancePage db={db} user={user} companyConfig={resolvedConfig} />;
             case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={resolvedConfig} />;
-            case 'my-payslips':
-                return (
-                    <MyPayslipsPage
-                        db={db}
-                        user={user}
-                        staffProfile={staffProfile}
-                        companyConfig={resolvedConfig}
-                    />
-                );
+            case 'my-payslips': return <MyPayslipsPage db={db} user={user} staffProfile={staffProfile} companyConfig={resolvedConfig} />;
+
             case 'staff': return requireFullManager(<StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={resolvedConfig} activeBranch={activeBranch} staffProfile={staffProfile} />);
             case 'reports': return requireFullManager(<AttendanceReportsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
             case 'financials': return requireFullManager(<FinancialsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
             case 'payroll': return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={resolvedConfig} activeBranch={activeBranch} />);
-
+            
             case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} activeBranch={activeBranch} />);
 
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
@@ -315,7 +304,7 @@ export default function App() {
                 setIsFinancialsMenuOpen={setIsFinancialsMenuOpen}
                 isSettingsMenuOpen={isSettingsMenuOpen}
                 setIsSettingsMenuOpen={setIsSettingsMenuOpen}
-
+                
                 activeBranch={activeBranch}
                 setActiveBranch={setActiveBranch}
                 companyConfig={companyConfig}
