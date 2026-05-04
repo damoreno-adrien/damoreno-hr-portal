@@ -13,7 +13,7 @@ import { QuickActionsCard } from '../components/Dashboard/QuickActionsCard';
 import { checkIsBirthday, getDisplayName } from '../utils/staffUtils';
 import ConfirmModal from '../components/common/ConfirmModal';
 
-export default function StaffDashboardPage({ db, user, companyConfig, leaveBalances, staffList, setCurrentPage }) {
+export default function StaffDashboardPage({ db, user, companyConfig, leaveBalances, staffList, staffProfile, setCurrentPage }) {
     const [currentTime, setCurrentTime] = useState(new Date());
     const [status, setStatus] = useState('loading');
     const [locationError, setLocationError] = useState('');
