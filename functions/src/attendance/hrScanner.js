@@ -1,3 +1,5 @@
+/* functions/src/attendance/hrScanner.js */
+
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const admin = require("firebase-admin");
@@ -13,47 +15,44 @@ try {
 const db = getFirestore();
 const timeZone = "Asia/Bangkok";
 
+// Fonction pour générer 1st, 2nd, 3rd, 4th, etc.
+function getOrdinal(n) {
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Auth required");
     
-    // RÈGLE 3 : RBAC hiérarchique corrigé (Lecture dans la collection 'users')
+    // RBAC
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
     if (!callerDoc.exists) throw new HttpsError("unauthenticated", "User access record not found");
     
     const callerRole = callerDoc.data().role || 'staff';
     const allowedRoles = ['manager', 'admin', 'super_admin'];
     if (!allowedRoles.includes(callerRole)) {
-        throw new HttpsError("permission-denied", `Access denied. Required role: ${allowedRoles.join(', ')}`);
+        throw new HttpsError("permission-denied", "Access denied.");
     }
 
-    // Récupération du profil staff uniquement pour obtenir le branchId (RÈGLE 2)
     const callerStaffDoc = await db.collection("staff_profiles").doc(request.auth.uid).get();
     const branchId = callerStaffDoc.exists ? (callerStaffDoc.data().branchId || 'global') : 'global';
 
-    console.log(`Running Unified HR Scan (Date Range Upgrade) - Caller: ${request.auth.uid}, Role: ${callerRole}`);
+    console.log(`Running Smart HR Scan - Caller: ${request.auth.uid}`);
 
     try {
         const now = DateTime.now().setZone(timeZone);
+        const todayStr = now.toISODate();
         
-        const startDateStr = request.data.startDate || now.minus({ days: 1 }).toISODate();
-        const endDateStr = request.data.endDate || startDateStr; 
-        
-        const targetDates = [];
-        let currDate = DateTime.fromISO(startDateStr, { zone: timeZone });
-        const endDate = DateTime.fromISO(endDateStr, { zone: timeZone });
-        
-        while (currDate <= endDate) {
-            targetDates.push(currDate.toISODate());
-            currDate = currDate.plus({ days: 1 });
-        }
-
-        const startTargetObj = DateTime.fromISO(startDateStr, { zone: timeZone });
-        const globalThreeMonthsAgoStr = startTargetObj.minus({ months: 3 }).toISODate();
+        // On définit la fenêtre d'analyse : Les 90 derniers jours jusqu'à la date de fin demandée
+        const endDateStr = request.data.endDate || todayStr; 
+        const endTargetObj = DateTime.fromISO(endDateStr, { zone: timeZone });
+        const ninetyDaysAgoStr = endTargetObj.minus({ days: 90 }).toISODate();
+        const thirtyDaysAgoStr = endTargetObj.minus({ days: 30 }).toISODate();
+        const startOfMonthStr = endTargetObj.startOf('month').toISODate();
 
         const configSnap = await db.collection("settings").doc("company_config").get();
         const rawConfig = configSnap.data() || {};
-        
-        // RÈGLE 2 : Merge branchSettings avec fallback global
         const branchOverrides = rawConfig.branchSettings?.[branchId] || {};
         const config = { ...rawConfig, ...branchOverrides };
         
@@ -75,9 +74,23 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
         let alertsCreated = 0;
         let staleAlertsDeleted = 0;
 
+        // 1. AUTO-NETTOYAGE : On supprime toutes les alertes Pending de cette branche
+        const staleAlertsSnap = await db.collection("manager_alerts")
+            .where("status", "==", "pending")
+            .get();
+
+        staleAlertsSnap.docs.forEach(docSnap => {
+            const alertData = docSnap.data();
+            if (branchId === 'global' || alertData.branchId === branchId) {
+                batch.delete(docSnap.ref);
+                staleAlertsDeleted++;
+            }
+        });
+
+        // 2. RECUPERATION DES DONNEES (Fenêtre de 90 jours)
         const [schedulesSnap, attendanceSnap, leaveSnap, staffSnap] = await Promise.all([
-            db.collection("schedules").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
-            db.collection("attendance").where("date", ">=", globalThreeMonthsAgoStr).where("date", "<=", endDateStr).get(),
+            db.collection("schedules").where("date", ">=", ninetyDaysAgoStr).where("date", "<=", endDateStr).get(),
+            db.collection("attendance").where("date", ">=", ninetyDaysAgoStr).where("date", "<=", endDateStr).get(),
             db.collection("leave_requests").where("status", "==", "approved").get(),
             db.collection("staff_profiles").get()
         ]);
@@ -91,203 +104,167 @@ exports.runUnifiedHRScan = onCall({ region: "asia-southeast1" }, async (request)
         const staffProfilesMap = new Map();
         staffSnap.docs.forEach(doc => {
             const data = doc.data();
-            let dept = '';
-            let pos = '';
+            let dept = ''; let pos = '';
             if (data.jobHistory && data.jobHistory.length > 0) {
                 const currentJob = [...data.jobHistory].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0))[0];
                 dept = currentJob.department || '';
                 pos = currentJob.position || currentJob.title || '';
             }
-            staffProfilesMap.set(doc.id, { department: dept, position: pos, branchId: data.branchId || null });
+            // On sauvegarde aussi lastDisciplinaryAction pour savoir ce qui est déjà puni
+            staffProfilesMap.set(doc.id, { 
+                department: dept, position: pos, branchId: data.branchId || null, 
+                lastActionDate: data.lastDisciplinaryAction || "1970-01-01" 
+            });
         });
 
-        for (const targetDateStr of targetDates) {
-            
-            const staleAlertsSnap = await db.collection("manager_alerts")
-                .where("date", "==", targetDateStr)
-                .where("status", "==", "pending")
-                .get();
+        const staffStats = {};
 
-            staleAlertsSnap.docs.forEach(docSnap => {
-                batch.delete(docSnap.ref);
-                staleAlertsDeleted++;
+        // 3. ANALYSE ET AGRÉGATION
+        for (const schedDoc of schedulesSnap.docs) {
+            const shift = schedDoc.data();
+            const staffId = shift.staffId;
+            const shiftDate = shift.date;
+            
+            if (!staffStats[staffId]) {
+                staffStats[staffId] = { 
+                    name: shift.staffName, 
+                    profile: staffProfilesMap.get(staffId) || {},
+                    incidents: [], 
+                    otRequests: [],
+                    bonusMinsThisMonth: 0, 
+                    bonusIncidentsThisMonth: 0
+                };
+            }
+
+            const stats = staffStats[staffId];
+            const isPunished = shiftDate <= stats.profile.lastActionDate; // Vrai si déjà sanctionné dans le passé
+            const attendance = attendanceMap.get(`${staffId}_${shiftDate}`);
+            
+            const hasLeave = leaveSnap.docs.some(lDoc => {
+                const l = lDoc.data();
+                return l.staffId === staffId && l.startDate <= shiftDate && l.endDate >= shiftDate;
             });
 
-            const targetDateObj = DateTime.fromISO(targetDateStr, { zone: timeZone });
-            const startOfMonthStr = targetDateObj.startOf('month').toISODate();
-            const threeMonthsAgoStr = targetDateObj.minus({ months: 3 }).toISODate();
-            const oneMonthAgoStr = targetDateObj.minus({ months: 1 }).toISODate();
+            // A. Détection Absence (Uniquement pour les dates passées ou aujourd'hui)
+            if (!attendance && !hasLeave && shiftDate <= todayStr) {
+                stats.incidents.push({ date: shiftDate, type: "Absence", minutesLate: 0, isPunished: isPunished });
+            }
 
-            const staffStats = {};
-
-            for (const schedDoc of schedulesSnap.docs) {
-                const shift = schedDoc.data();
-                const staffId = shift.staffId;
-                const shiftDate = shift.date;
+            // B. Détection Retard
+            if (attendance && attendance.checkInTime && shift.startTime) {
+                const scheduledStart = DateTime.fromISO(`${shiftDate}T${shift.startTime}`, { zone: timeZone });
+                const actualStart = DateTime.fromJSDate(attendance.checkInTime.toDate()).setZone(timeZone);
+                const lateDiffMins = actualStart.diff(scheduledStart, 'minutes').minutes;
                 
-                if (shiftDate > targetDateStr) continue;
-                if (shiftDate < threeMonthsAgoStr) continue;
+                if (lateDiffMins > hrRules.gracePeriodMins) {
+                    stats.incidents.push({ date: shiftDate, type: "Late", minutesLate: Math.round(lateDiffMins), isPunished: isPunished, attendanceId: attendance.id });
+                }
                 
-                if (!staffStats[staffId]) {
-                    staffStats[staffId] = { 
-                        name: shift.staffName, 
-                        bonusIncidentsThisMonth: 0, bonusMinsThisMonth: 0,
-                        strikesLast1Month: 0, strikesLast3Months: 0,
-                        strikeToday: false, anyLateToday: false, lateMinsToday: 0, todayAttendanceId: null
-                    };
+                if (lateDiffMins > 0 && shiftDate >= startOfMonthStr) {
+                    stats.bonusMinsThisMonth += lateDiffMins;
+                    stats.bonusIncidentsThisMonth += 1;
                 }
+            }
 
-                const attendance = attendanceMap.get(`${staffId}_${shiftDate}`);
+            // C. Détection Overtime
+            if (attendance && attendance.checkOutTime && attendance.checkInTime && shift.endTime && attendance.otStatus !== "approved") {
+                const safeStartTime = shift.startTime.padStart(5, '0');
+                const safeEndTime = shift.endTime.padStart(5, '0');
+                const scheduledStart = DateTime.fromISO(`${shiftDate}T${safeStartTime}`, { zone: timeZone });
+                let scheduledEnd = DateTime.fromISO(`${shiftDate}T${safeEndTime}`, { zone: timeZone });
                 
-                if (shiftDate === targetDateStr) {
-                    const hasLeave = leaveSnap.docs.some(lDoc => {
-                        const l = lDoc.data();
-                        return l.staffId === staffId && l.startDate <= targetDateStr && l.endDate >= targetDateStr;
-                    });
+                if (scheduledEnd < scheduledStart) scheduledEnd = scheduledEnd.plus({ days: 1 });
 
-                    if (!attendance && !hasLeave) {
-                        const profile = staffProfilesMap.get(staffId) || {};
-                        const alertRef = db.collection("manager_alerts").doc();
-                        batch.set(alertRef, { 
-                            type: "risk_absence", 
-                            status: "pending", 
-                            staffId: staffId, 
-                            staffName: shift.staffName, 
-                            department: profile.department || null,
-                            position: profile.position || null,
-                            branchId: profile.branchId || null,
-                            date: targetDateStr, 
-                            createdAt: Timestamp.now(), message: "Unexcused Absence (Bonus Forfeited)" 
-                        });
-                        alertsCreated++;
-                    }
-                }
-
-                if (attendance && attendance.checkInTime && shift.startTime) {
-                    const checkInDate = attendance.checkInTime.toDate();
-                    const scheduledStart = DateTime.fromISO(`${shiftDate}T${shift.startTime}`, { zone: timeZone });
-                    const actualStart = DateTime.fromJSDate(checkInDate).setZone(timeZone);
-                    
-                    const lateDiffMins = actualStart.diff(scheduledStart, 'minutes').minutes;
-                    
-                    if (lateDiffMins > 0) {
-                        if (shiftDate >= startOfMonthStr) {
-                            staffStats[staffId].bonusMinsThisMonth += lateDiffMins;
-                            staffStats[staffId].bonusIncidentsThisMonth += 1;
-                        }
-
-                        if (lateDiffMins > hrRules.gracePeriodMins) {
-                            if (shiftDate >= threeMonthsAgoStr) staffStats[staffId].strikesLast3Months += 1;
-                            if (shiftDate >= oneMonthAgoStr) staffStats[staffId].strikesLast1Month += 1;
-                            
-                            if (shiftDate === targetDateStr) staffStats[staffId].strikeToday = true;
-                        }
-
-                        if (shiftDate === targetDateStr) {
-                            staffStats[staffId].anyLateToday = true;
-                            staffStats[staffId].lateMinsToday = lateDiffMins;
-                            staffStats[staffId].todayAttendanceId = attendance.id;
-                        }
-                    }
-                }
-
-                if (shiftDate === targetDateStr && attendance && attendance.checkOutTime && attendance.checkInTime && shift.endTime && shift.startTime) {
-                    if (attendance.otStatus !== "approved") {
-                        const safeStartTime = shift.startTime.padStart(5, '0');
-                        const safeEndTime = shift.endTime.padStart(5, '0');
-
-                        const scheduledStart = DateTime.fromISO(`${shiftDate}T${safeStartTime}`, { zone: timeZone });
-                        let scheduledEnd = DateTime.fromISO(`${targetDateStr}T${safeEndTime}`, { zone: timeZone });
-                        
-                        if (scheduledEnd < scheduledStart) {
-                            scheduledEnd = scheduledEnd.plus({ days: 1 });
-                        }
-
-                        const actualStart = DateTime.fromJSDate(attendance.checkInTime.toDate()).setZone(timeZone);
-                        const actualEnd = DateTime.fromJSDate(attendance.checkOutTime.toDate()).setZone(timeZone);
-                        
-                        if (actualEnd.isValid && scheduledEnd.isValid && actualStart.isValid) {
-                            let totalExtraMins = 0;
-
-                            if (actualEnd > scheduledEnd) {
-                                totalExtraMins += actualEnd.diff(scheduledEnd, 'minutes').minutes;
-                            }
-                            
-                            const otThreshold = Number(hrRules.minOTMins) || 30;
-                            
-                            if (totalExtraMins >= otThreshold) {
-                                const profile = staffProfilesMap.get(staffId) || {};
-                                const alertRef = db.collection("manager_alerts").doc();
-                                batch.set(alertRef, { 
-                                    type: "overtime_request", 
-                                    status: "pending", 
-                                    staffId: staffId, 
-                                    staffName: shift.staffName, 
-                                    department: profile.department || null,
-                                    position: profile.position || null,
-                                    branchId: profile.branchId || null,
-                                    date: targetDateStr, 
-                                    extraMinutes: Math.round(totalExtraMins), 
-                                    multiplier: hrRules.otMultiplier, 
-                                    attendanceDocId: attendance.id, 
-                                    createdAt: Timestamp.now(), 
-                                    message: `Pending OT Approval (${Math.round(totalExtraMins)} mins)` 
-                                });
-                                alertsCreated++;
-                            }
-                        }
-                    }
-                }
-            } // End of SchedDoc loop
-
-            for (const [staffId, stats] of Object.entries(staffStats)) {
-                if (stats.anyLateToday) {
-                    const lostBonus = (stats.bonusIncidentsThisMonth > hrRules.maxLateIncidents || stats.bonusMinsThisMonth > hrRules.maxLateMins);
-                    
-                    if (stats.strikeToday || lostBonus) {
-                        let severityTitle = "Late Check-in";
-                        let recommendedAction = "Warning";
-                        
-                        if (stats.strikesLast3Months >= tier3.strikes) {
-                            severityTitle = `${stats.strikesLast3Months}rd Lateness (Last 90 Days)`;
-                            recommendedAction = `Recommend: ${tier3.name}`;
-                        } else if (stats.strikesLast1Month >= tier2.strikes) {
-                            severityTitle = `${stats.strikesLast1Month}nd Lateness (Last 30 Days)`;
-                            recommendedAction = `Recommend: ${tier2.name}`;
-                        } else if (stats.strikesLast1Month >= tier1.strikes) {
-                            severityTitle = `${stats.strikesLast1Month}st Lateness`;
-                            recommendedAction = `Recommend: ${tier1.name}`;
-                        } else if (lostBonus && !stats.strikeToday) {
-                            severityTitle = `Micro-Lateness Accumulation`;
-                            recommendedAction = `Under Grace Period, but Bonus Bank Reached`;
-                        }
-
-                        if (lostBonus) recommendedAction += " & Revoke Bonus";
-
-                        const profile = staffProfilesMap.get(staffId) || {}; 
-                        const alertRef = db.collection("manager_alerts").doc();
-                        batch.set(alertRef, { 
-                            type: "risk_late", 
-                            status: "pending", 
-                            staffId: staffId, 
-                            staffName: stats.name,
-                            department: profile.department || null,
-                            position: profile.position || null, 
-                            branchId: profile.branchId || null,
-                            date: targetDateStr, 
-                            minutesLate: Math.round(stats.lateMinsToday), 
-                            attendanceDocId: stats.todayAttendanceId, 
-                            createdAt: Timestamp.now(), 
-                            message: `${severityTitle} - ${recommendedAction}` 
-                        });
-                        alertsCreated++;
+                const actualEnd = DateTime.fromJSDate(attendance.checkOutTime.toDate()).setZone(timeZone);
+                
+                if (actualEnd.isValid && scheduledEnd.isValid && actualEnd > scheduledEnd) {
+                    const totalExtraMins = actualEnd.diff(scheduledEnd, 'minutes').minutes;
+                    if (totalExtraMins >= hrRules.minOTMins) {
+                        stats.otRequests.push({ date: shiftDate, minutes: Math.round(totalExtraMins), attendanceId: attendance.id });
                     }
                 }
             }
-        } // END OF RANGE LOOP
+        }
+
+        // 4. GENERATION DES ALERTES
+        for (const [staffId, stats] of Object.entries(staffStats)) {
+            const profile = stats.profile;
+            const unpunishedIncidents = stats.incidents.filter(i => !i.isPunished);
+            
+            // Le bonus est-il cassé ce mois-ci, et n'a-t-il pas encore été puni ce mois-ci ?
+            const bonusAlreadyRevoked = profile.lastActionDate >= startOfMonthStr;
+            const lostBonus = (stats.bonusIncidentsThisMonth > hrRules.maxLateIncidents || stats.bonusMinsThisMonth > hrRules.maxLateMins);
+
+            // Création de l'Alerte Disciplinaire (Dossier Unique)
+            if (unpunishedIncidents.length > 0 || (lostBonus && !bonusAlreadyRevoked)) {
+                
+                const strikes90 = stats.incidents.length;
+                const strikes30 = stats.incidents.filter(i => i.date >= thirtyDaysAgoStr).length;
+
+                let severityTitle = "Attendance Violation";
+                let recommendedAction = "Warning";
+
+                if (strikes90 >= tier3.strikes) {
+                    severityTitle = `${getOrdinal(strikes90)} Infraction (Last 90 Days)`;
+                    recommendedAction = `Recommend: ${tier3.name}`;
+                } else if (strikes30 >= tier2.strikes) {
+                    severityTitle = `${getOrdinal(strikes30)} Infraction (Last 30 Days)`;
+                    recommendedAction = `Recommend: ${tier2.name}`;
+                } else if (strikes90 >= tier1.strikes) {
+                    severityTitle = `${getOrdinal(strikes90)} Infraction`;
+                    recommendedAction = `Recommend: ${tier1.name}`;
+                } else if (lostBonus) {
+                    severityTitle = `Micro-Lateness Accumulation`;
+                    recommendedAction = `Bonus Bank Reached`;
+                }
+
+                if (lostBonus) recommendedAction += " & Revoke Bonus";
+
+                // Tri chronologique des incidents pour le dossier
+                stats.incidents.sort((a, b) => a.date.localeCompare(b.date));
+
+                const alertRef = db.collection("manager_alerts").doc();
+                batch.set(alertRef, { 
+                    type: "risk_disciplinary", 
+                    status: "pending", 
+                    staffId: staffId, 
+                    staffName: stats.name,
+                    department: profile.department || null,
+                    position: profile.position || null, 
+                    branchId: profile.branchId || null,
+                    date: endDateStr, 
+                    createdAt: Timestamp.now(), 
+                    message: `${severityTitle} - ${recommendedAction}`,
+                    incidentHistory: stats.incidents, // Le fameux Dossier Complet !
+                    unpunishedCount: unpunishedIncidents.length
+                });
+                alertsCreated++;
+            }
+
+            // Création des requêtes Overtime
+            for (const ot of stats.otRequests) {
+                const alertRef = db.collection("manager_alerts").doc();
+                batch.set(alertRef, { 
+                    type: "overtime_request", 
+                    status: "pending", 
+                    staffId: staffId, 
+                    staffName: stats.name, 
+                    department: profile.department || null,
+                    position: profile.position || null,
+                    branchId: profile.branchId || null,
+                    date: ot.date, 
+                    extraMinutes: ot.minutes, 
+                    multiplier: hrRules.otMultiplier, 
+                    attendanceDocId: ot.attendanceId, 
+                    createdAt: Timestamp.now(), 
+                    message: `Pending OT Approval (${ot.minutes} mins)` 
+                });
+                alertsCreated++;
+            }
+        }
 
         if (alertsCreated > 0 || staleAlertsDeleted > 0) await batch.commit();
-        return { success: true, alertsCreated: alertsCreated, daysScanned: targetDates.length };
+        return { success: true, alertsCreated: alertsCreated, alertsDeleted: staleAlertsDeleted };
 
     } catch (error) { 
         console.error("hrScanner error:", error);

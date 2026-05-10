@@ -1,3 +1,4 @@
+/* functions/src/attendance/alertTriggers.js */
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const db = getFirestore();
@@ -9,51 +10,41 @@ exports.onManagerAlertUpdated = onDocumentUpdated({
     const newValue = event.data.after.data();
     const previousValue = event.data.before.data();
 
-    // 1. HR PENALTY: Zero the Streak & Save Memory State
+    // 1. HR PENALTY: Zero the Streak, Save Memory State & Apply Progressive Discipline
     if (previousValue.status === 'pending' && newValue.status === 'enforced') {
         console.log(`Executing HR Penalty for Staff: ${newValue.staffName}`);
         try {
-            // Check your exact collection name: 'staff_profiles' or 'staff'
             const staffRef = db.collection('staff_profiles').doc(newValue.staffId); 
             const staffSnap = await staffRef.get();
 
             if (staffSnap.exists) {
-                const currentStreak = staffSnap.data().bonusStreak || 0; // Grab the current streak
+                const staffData = staffSnap.data();
+                const currentStreak = staffData.bonusStreak || 0; 
+                
+                // --- LOGIQUE DE DISCIPLINE PROGRESSIVE ---
+                const currentTier = staffData.currentWarningTier || 0;
+                const newTier = currentTier >= 3 ? 3 : currentTier + 1; // Plafond au Tier 3
 
                 // Save the old streak into the ALERT document so we remember it for 'Undo'
                 const alertRef = db.collection('manager_alerts').doc(event.params.alertId);
                 await alertRef.update({ previousStreak: currentStreak });
 
-                // Reset the staff's streak to 0 (DO NOT touch isEligibleForAttendanceBonus)
+                // Reset streak AND update disciplinary tier
                 await staffRef.update({
-                    bonusStreak: 0,
-                    lastDisciplinaryAction: newValue.date,
+                    bonusStreak: 0, 
+                    currentWarningTier: newTier,
+                    lastDisciplinaryAction: newValue.date, // Mémorise la date de la faute punie
                     updatedAt: FieldValue.serverTimestamp()
                 });
+                
+                console.log(`Penalty enforced. Tier ${currentTier} -> Tier ${newTier}. Streak reset to 0.`);
             }
         } catch (error) {
-            console.error("Failed to apply HR penalty:", error);
+            console.error("Failed to execute penalty:", error);
         }
     }
 
-    // 2. OVERTIME APPROVAL: Feed the Payroll Generator
-    if (previousValue.status === 'pending' && newValue.status === 'approved' && newValue.type === 'overtime_request') {
-        console.log(`Approving ${newValue.extraMinutes} mins of OT for: ${newValue.staffName}`);
-        try {
-            if (newValue.attendanceDocId) {
-                const attendanceRef = db.collection('attendance').doc(newValue.attendanceDocId);
-                await attendanceRef.update({
-                    otApprovedMinutes: newValue.extraMinutes,
-                    otStatus: "approved",
-                    updatedAt: FieldValue.serverTimestamp()
-                });
-            }
-        } catch (error) {
-            console.error("Failed to approve Overtime:", error);
-        }
-    }
-
-    // 3. THE UNDO BUTTON: Revoke/Delete an action using Memory State
+    // 2. UNDO / REVOKE: Restore previous state
     if (previousValue.status !== 'revoked' && newValue.status === 'revoked') {
         console.log(`Revoking HR Action for: ${newValue.staffName}`);
         try {
@@ -67,18 +58,28 @@ exports.onManagerAlertUpdated = onDocumentUpdated({
                 });
             }
             
-            // Undo Penalty (Restore the exact previous streak)
-            if (newValue.type === 'risk_late' || newValue.type === 'risk_absence') {
+            // Undo Penalty (Restore the exact previous streak & decrement Tier)
+            if (newValue.type === 'risk_late' || newValue.type === 'risk_absence' || newValue.type === 'risk_disciplinary') {
                 const staffRef = db.collection('staff_profiles').doc(newValue.staffId); 
+                const staffSnap = await staffRef.get();
                 
-                // Pull the memory state we saved during enforcement (default to 0 if missing)
                 const streakToRestore = newValue.previousStreak || 0;
-
-                await staffRef.update({
+                
+                let updateData = {
                     bonusStreak: streakToRestore, 
                     updatedAt: FieldValue.serverTimestamp()
-                });
-                console.log(`Penalty revoked. Bonus streak successfully restored to ${streakToRestore}.`);
+                };
+
+                // Optionnel mais recommandé : Faire reculer le Tier si on annule la sanction
+                if (staffSnap.exists) {
+                    const currentTier = staffSnap.data().currentWarningTier || 0;
+                    if (currentTier > 0) {
+                        updateData.currentWarningTier = currentTier - 1;
+                    }
+                }
+
+                await staffRef.update(updateData);
+                console.log(`Penalty revoked. Bonus streak restored to ${streakToRestore}. Tier adjusted.`);
             }
         } catch (error) {
             console.error("Failed to revoke action:", error);
