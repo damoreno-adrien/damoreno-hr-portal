@@ -1,16 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '../../../firebase';
 
 const functions = getFunctions(app, 'asia-southeast1');
 const createUser = httpsCallable(functions, 'createUser');
 
-export default function AddStaffForm({ auth, onClose, departments, userRole, activeBranch, branches = [], managerProfile }) {
+// AJOUT DE companyConfig DANS LES PROPS
+export default function AddStaffForm({ auth, onClose, userRole, activeBranch, branches = [], managerProfile, companyConfig }) {
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [nickname, setNickname] = useState('');
     const [position, setPosition] = useState('');
-    const [department, setDepartment] = useState(departments[0] || '');
+    
+    // --- GESTION DYNAMIQUE DES DÉPARTEMENTS ---
+    const [availableDepartments, setAvailableDepartments] = useState([]);
+    const [department, setDepartment] = useState('');
+
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -21,15 +26,13 @@ export default function AddStaffForm({ auth, onClose, departments, userRole, act
     const [hourlyRate, setHourlyRate] = useState('');
     const [standardDayHours, setStandardDayHours] = useState('8');
     const [isSsoRegistered, setIsSsoRegistered] = useState(true);
-
-    // --- NEW: Holiday Policy State ---
     const [holidayPolicy, setHolidayPolicy] = useState('in_lieu');
 
     // --- SECURE BRANCH LOGIC ---
     const determineDefaultBranch = () => {
-        if (userRole === 'manager' || userRole === 'dept_manager') return managerProfile?.branchId || '';
+        if (['manager', 'dept_manager'].includes(userRole)) return managerProfile?.branchId || '';
         if (activeBranch && activeBranch !== 'global') return activeBranch;
-        return branches.length > 0 ? branches[0].id : '';
+        return ''; // Force l'admin à choisir si en vue globale
     };
     const [branchId, setBranchId] = useState(determineDefaultBranch());
 
@@ -37,43 +40,61 @@ export default function AddStaffForm({ auth, onClose, departments, userRole, act
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
+    // --- MISE À JOUR AUTOMATIQUE DES DÉPARTEMENTS SELON LA BRANCHE ---
+    useEffect(() => {
+        let deps = [];
+        if (branchId && companyConfig?.branchSettings?.[branchId]?.departments) {
+            deps = companyConfig.branchSettings[branchId].departments;
+        } else if (companyConfig?.departments) {
+            deps = companyConfig.departments;
+        }
+
+        setAvailableDepartments(deps);
+        if (deps.length > 0) {
+            setDepartment(deps[0]);
+        } else {
+            setDepartment('');
+        }
+    }, [branchId, companyConfig]);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password || !branchId) {
-            setError('Please fill out all required fields, including Branch.');
+            setError('Please fill out all required fields, including the branch location and department.');
             return;
         }
         if (payType === 'Salary' && !baseSalary) { setError('Base Salary is required.'); return; }
         if (payType === 'Hourly' && !hourlyRate) { setError('Hourly Rate is required.'); return; }
-
-        if (password.length < 6) {
-            setError('Password must be at least 6 characters long.');
-            return;
-        }
+        if (password.length < 6) { setError('Password must be at least 6 characters long.'); return; }
 
         setIsSaving(true);
         setError('');
         setSuccess('');
 
         try {
-            // Vers la ligne 61 dans AddStaffForm.jsx
+            // 1. On unifie la valeur du salaire pour satisfaire la condition "numeric rate" du backend
+            const numericRate = payType === 'Salary' ? parseInt(baseSalary, 10) : parseInt(hourlyRate, 10);
+
+            // 2. On construit le payload exactement comme le backend l'exige
             const userData = {
                 email,
                 password,
+                name: `${firstName} ${lastName}`.trim(), // <--- C'est ce qui manquait au backend
+                fullName: `${firstName} ${lastName}`.trim(),
                 firstName,
                 lastName,
                 nickname,
                 branchId,
                 isSsoRegistered,
                 holidayPolicy,
-                // On s'assure que le job initial contient bien le département
                 initialJob: {
                     position,
-                    department, // <--- C'est ici qu'il doit être
+                    department,
                     startDate,
                     payType,
-                    baseSalary: payType === 'Salary' ? parseInt(baseSalary, 10) : null,
-                    hourlyRate: payType === 'Hourly' ? parseInt(hourlyRate, 10) : null,
+                    rate: numericRate,
+                    baseSalary: payType === 'Salary' ? numericRate : null,
+                    hourlyRate: payType === 'Hourly' ? numericRate : null,
                     standardDayHours: parseInt(standardDayHours, 10)
                 }
             };
@@ -93,17 +114,17 @@ export default function AddStaffForm({ auth, onClose, departments, userRole, act
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
-            {/* --- NEW: Branch Selector for Admins --- */}
+            {/* SÉLECTEUR DE BRANCHE : Obligatoire en Global View pour les Admins */}
             {['admin', 'super_admin'].includes(userRole) && (
                 <div className="bg-indigo-900/30 p-4 rounded-lg border border-indigo-700 mb-6">
-                    <label className="block text-sm font-bold text-indigo-400 mb-1">Assign to Branch Location</label>
+                    <label className="block text-sm font-bold text-indigo-400 mb-1">Target Branch Location</label>
                     <select
                         value={branchId}
                         onChange={(e) => setBranchId(e.target.value)}
                         className="w-full px-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white outline-none focus:border-indigo-500"
                         required
                     >
-                        <option value="" disabled>Select a branch...</option>
+                        <option value="" disabled>-- Select a branch for this staff --</option>
                         {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                 </div>
@@ -129,11 +150,22 @@ export default function AddStaffForm({ auth, onClose, departments, userRole, act
                     <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" required />
                 </div>
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Department</label>
-                    <select value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" required>
-                        {departments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                    <select 
+                        value={department} 
+                        onChange={(e) => setDepartment(e.target.value)} 
+                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white outline-none focus:border-amber-500" 
+                        required
+                    >
+                        <option value="" disabled>-- Select Department --</option>
+                        {availableDepartments.length > 0 ? (
+                            availableDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)
+                        ) : (
+                            <option value="" disabled>{branchId ? 'No departments configured' : 'Select a branch first'}</option>
+                        )}
                     </select>
                 </div>
                 <div>
@@ -179,7 +211,6 @@ export default function AddStaffForm({ auth, onClose, departments, userRole, act
                 )}
             </div>
 
-            {/* --- Compliance & Payroll Settings Block --- */}
             <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-4">
                 <label className="flex items-center space-x-3 cursor-pointer">
                     <input
@@ -218,8 +249,10 @@ export default function AddStaffForm({ auth, onClose, departments, userRole, act
                     </div>
                 </div>
             </div>
+            
             {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
             {success && <p className="text-green-400 text-sm text-center mt-2">{success}</p>}
+            
             <div className="flex justify-end pt-4 space-x-4">
                 <button type="button" onClick={onClose} className="px-6 py-2 rounded-lg text-gray-300 bg-gray-600 hover:bg-gray-500">Cancel</button>
                 <button type="submit" disabled={isSaving} className="px-6 py-2 rounded-lg text-white bg-amber-600 hover:bg-amber-700 disabled:bg-amber-800">

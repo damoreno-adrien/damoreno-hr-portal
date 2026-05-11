@@ -20,10 +20,8 @@ import { app } from "../../firebase.js";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- IMPORT DE LA MODALE ---
 import FeedbackModal from '../components/common/FeedbackModal';
 
-// --- Helper: Currency Formatter ---
 const formatCurrency = (num) => {
     if (typeof num !== 'number') {
         num = 0;
@@ -34,7 +32,6 @@ const formatCurrency = (num) => {
     }).format(num);
 };
 
-// --- Helper: Seniority Calculator ---
 const getSeniority = (startDateInput) => {
     const startDate = fromFirestore(startDateInput);
     if (!startDate) return 'Invalid date';
@@ -54,7 +51,6 @@ const getSeniority = (startDateInput) => {
     return parts.length > 0 ? parts.join(', ') : 'Less than a month';
 };
 
-// --- Helper: Status Badge ---
 const StatusBadge = ({ staff }) => {
     const status = getDynamicStaffStatus(staff);
     return (
@@ -71,10 +67,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const [isExporting, setIsExporting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
-    // --- STATE POUR LA MODALE DE FEEDBACK ---
     const [feedbackModal, setFeedbackModal] = useState(null);
-
-    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
     useEffect(() => {
@@ -116,7 +109,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             const isHistoricallyArchived = !isStaffActiveOnDate(staff, new Date());
             if (!showArchived && isHistoricallyArchived) return false;
 
-            // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
             if (activeBranch === 'global') {
                 if (userRole === 'admin' && !adminBranchIds.includes(staff.branchId)) return false;
             } else if (activeBranch && staff.branchId !== activeBranch) {
@@ -199,7 +191,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             const exportStaffData = httpsCallable(functions, 'exportStaffData');
             const result = await exportStaffData();
             if (!result.data.csvData) {
-                // --- MODIFIÉ : Remplacement de alert() ---
                 setFeedbackModal({ type: 'warning', title: 'No Data', message: "No staff data to export." });
                 return;
             }
@@ -213,7 +204,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
         } catch (error) {
-            // --- MODIFIÉ : Remplacement de alert() ---
             setFeedbackModal({ type: 'error', title: 'Export Failed', message: `Failed to export staff data: ${error.message}` });
         } finally {
             setIsExporting(false);
@@ -222,7 +212,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
     return (
         <div className="relative">
-            {/* INJECTION DU FEEDBACK MODAL */}
             <FeedbackModal 
                 isOpen={!!feedbackModal} 
                 type={feedbackModal?.type} 
@@ -235,11 +224,11 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 <AddStaffForm
                     auth={auth}
                     onClose={() => setIsAddModalOpen(false)}
-                    departments={departments}
                     userRole={userRole}
                     activeBranch={activeBranch}
                     branches={companyConfig?.branches || []}
                     managerProfile={staffProfile}
+                    companyConfig={companyConfig}
                 />
             </Modal>
 

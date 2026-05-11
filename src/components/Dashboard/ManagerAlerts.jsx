@@ -4,10 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../../../firebase"; 
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, getDocs } from "firebase/firestore";
-import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, ShieldAlert, CheckSquare, Search, DollarSign } from 'lucide-react';
+import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, CheckSquare, Search, DollarSign } from 'lucide-react';
 import { formatDisplayTime, formatDisplayDate, formatISODate, addDays } from '../../utils/dateUtils';
+import { generateDocument } from '../../utils/documentGenerator'; // <-- IMPORT DU GÉNÉRATEUR DE DOCUMENTS
 
-// --- IMPORTS DES MODALES ---
 import FeedbackModal from '../common/FeedbackModal';
 import ConfirmModal from '../common/ConfirmModal';
 
@@ -16,6 +16,7 @@ const autoFixShiftFunc = httpsCallable(functions, 'autoFixSingleShift');
 const runUnifiedHRScanFunc = httpsCallable(functions, 'runUnifiedHRScan');
 
 const MissingCheckoutItem = ({ alert, onManualFix }) => {
+    // ... (Garder la fonction MissingCheckoutItem identique à ta version)
     const [isFixing, setIsFixing] = useState(false);
     const [error, setError] = useState(null);
     const [scheduledEndStr, setScheduledEndStr] = useState("23:00");
@@ -30,31 +31,17 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
             try {
                 const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
                 const schedSnap = await getDocs(schedQ);
-                if (!schedSnap.empty) {
-                    setScheduledEndStr(schedSnap.docs[0].data().endTime || "23:00");
-                }
-            } catch (err) {
-                console.error("Failed to fetch schedule for alert", err);
-            } finally {
-                setIsLoadingTime(false);
-            }
+                if (!schedSnap.empty) setScheduledEndStr(schedSnap.docs[0].data().endTime || "23:00");
+            } catch (err) { console.error("Failed to fetch schedule for alert", err); } 
+            finally { setIsLoadingTime(false); }
         };
         fetchScheduleTime();
     }, [alert.staffId, alert.date]);
 
     const handleAutoFix = async () => {
-        setIsFixing(true); 
-        setError(null);
-        try {
-            await autoFixShiftFunc({ 
-                attendanceDocId: alert.attendanceDocId, 
-                alertId: "local_dummy_id",
-                scheduledEndTime: scheduledEndStr
-            });
-        } catch (err) {
-            setError(err.message || "Failed to fix.");
-            setIsFixing(false);
-        }
+        setIsFixing(true); setError(null);
+        try { await autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr }); } 
+        catch (err) { setError(err.message || "Failed to fix."); setIsFixing(false); }
     };
 
     return (
@@ -77,23 +64,25 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
     );
 };
 
-const HRAlertItem = ({ alert }) => {
+// --- MODIFIÉ : Injection de companyConfig et setFeedbackModal ---
+const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
     const [isProcessing, setIsProcessing] = useState(false);
 
     let icon, borderColor, bgColor, title, actionText, actionColor;
     
-    if (alert.type === 'risk_absence') {
+    // Prise en charge du nouveau type 'risk_disciplinary' et des anciens types pour rétrocompatibilité
+    if (alert.type === 'risk_disciplinary' || alert.type === 'risk_absence' || alert.type === 'risk_late') {
         icon = <AlertOctagon className="h-5 w-5 text-red-400" />;
         borderColor = "border-red-500"; bgColor = "bg-red-900/10";
-        title = alert.message || "Unexcused Absence"; actionText = "Enforce Penalty"; actionColor = "bg-red-600 hover:bg-red-500";
-    } else if (alert.type === 'risk_late') {
-        icon = <ShieldAlert className="h-5 w-5 text-yellow-400" />;
-        borderColor = "border-yellow-500"; bgColor = "bg-yellow-900/10";
-        title = alert.message || `Late Check-in (${alert.minutesLate}m)`; actionText = "Enforce Penalty"; actionColor = "bg-red-600 hover:bg-red-500";
+        title = alert.message || "Disciplinary Action Required"; 
+        actionText = "Enforce & Generate Doc"; // <-- NOUVEAU TEXTE
+        actionColor = "bg-red-600 hover:bg-red-500";
     } else if (alert.type === 'overtime_request') {
         icon = <DollarSign className="h-5 w-5 text-green-400" />;
         borderColor = "border-green-500"; bgColor = "bg-green-900/10";
-        title = alert.message || `Overtime Pending (${alert.extraMinutes}m)`; actionText = "Approve OT"; actionColor = "bg-green-600 hover:bg-green-500";
+        title = alert.message || `Overtime Pending (${alert.extraMinutes}m)`; 
+        actionText = "Approve OT"; 
+        actionColor = "bg-green-600 hover:bg-green-500";
     }
 
     const handleDismiss = async () => {
@@ -102,15 +91,76 @@ const HRAlertItem = ({ alert }) => {
         catch (err) { setIsProcessing(false); }
     };
 
+    // --- LE CŒUR DE L'OPTION B : Le Workflow Automatisé ---
     const handleEnforce = async () => {
         setIsProcessing(true);
         try {
             if (alert.type === 'overtime_request') {
                 await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'approved' });
+                setFeedbackModal({ type: 'success', title: 'OT Approved', message: 'Overtime has been added to payroll.' });
             } else {
+                
+                // 1. Découpage du Message (ex: "3rd Lateness - Recommend: 1-Day Suspension")
+                let warningLevel = "Disciplinary Warning";
+                let consequence = "Verbal Warning";
+                
+                if (alert.message && alert.message.includes(' - Recommend: ')) {
+                    const parts = alert.message.split(' - Recommend: ');
+                    warningLevel = parts[0];
+                    consequence = parts[1];
+                } else {
+                    warningLevel = alert.message;
+                }
+
+                // 2. Formatage du Dossier Historique pour le champ {{REASON}}
+                let incidentDetails = "Attendance violation.";
+                let lastIncidentDate = formatDisplayDate(alert.date);
+
+                if (alert.incidentHistory && alert.incidentHistory.length > 0) {
+                    incidentDetails = alert.incidentHistory.map(inc => {
+                        const dateStr = formatDisplayDate(inc.date);
+                        if (inc.type === 'Late') return `- ${dateStr} : Late check-in (${inc.minutesLate} mins)`;
+                        if (inc.type === 'Absence') return `- ${dateStr} : Unexcused Absence`;
+                        return `- ${dateStr} : ${inc.type}`;
+                    }).join('\n'); // Le saut de ligne sera interprété par docxtemplater
+                    
+                    const lastInc = alert.incidentHistory[alert.incidentHistory.length - 1];
+                    if (lastInc) lastIncidentDate = formatDisplayDate(lastInc.date);
+                }
+
+                // 3. Préparation des données pour le Word
+                const mockStaff = {
+                    fullName: alert.staffName,
+                    branchId: alert.branchId,
+                    jobHistory: [{ position: alert.position || 'Staff', department: alert.department || 'General' }]
+                };
+
+                const extraData = {
+                    WARNING_LEVEL: warningLevel,
+                    CONSEQUENCE: consequence,
+                    INCIDENT_DATE: lastIncidentDate,
+                    REASON: incidentDetails
+                };
+
+                // 4. GÉNÉRATION DU DOCUMENT
+                const docResult = await generateDocument('warning', mockStaff, companyConfig, extraData);
+                
+                if (!docResult.success) {
+                    setFeedbackModal({ type: 'error', title: 'Generation Failed', message: `Could not generate Warning Notice: ${docResult.error}` });
+                    setIsProcessing(false);
+                    return; // ON STOPPE SI LE DOC ÉCHOUE (Sécurité)
+                }
+
+                // 5. ENFORCEMENT FIREBASE (Seulement si le document a été créé)
                 await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'enforced' });
+                setFeedbackModal({ type: 'success', title: 'Penalty Enforced', message: 'Warning notice generated successfully and penalty applied.' });
             }
-        } catch (err) { setIsProcessing(false); }
+        } catch (err) { 
+            console.error("Enforce error:", err);
+            setFeedbackModal({ type: 'error', title: 'Error', message: 'Failed to enforce penalty.' });
+        } finally { 
+            setIsProcessing(false); 
+        }
     };
 
     return (
@@ -127,7 +177,8 @@ const HRAlertItem = ({ alert }) => {
                     <button onClick={handleDismiss} disabled={isProcessing} className="px-3 py-1.5 text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-md transition-colors">
                         Dismiss
                     </button>
-                    <button onClick={handleEnforce} disabled={isProcessing} className={`px-3 py-1.5 text-xs font-medium text-white rounded-md transition-colors ${actionColor}`}>
+                    <button onClick={handleEnforce} disabled={isProcessing} className={`flex items-center px-3 py-1.5 text-xs font-medium text-white rounded-md transition-colors ${actionColor}`}>
+                        {isProcessing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
                         {isProcessing ? "Processing..." : actionText}
                     </button>
                 </div>
@@ -136,8 +187,8 @@ const HRAlertItem = ({ alert }) => {
     );
 };
 
-// --- ADDED: userRole and adminBranchIds ---
-export default function ManagerAlerts({ onManualFix, activeBranch, branches = [], userRole, adminBranchIds = [] }) {
+// --- MODIFIÉ : Ajout de la prop companyConfig ---
+export default function ManagerAlerts({ onManualFix, activeBranch, branches = [], userRole, adminBranchIds = [], companyConfig }) {
     const [rawHrAlerts, setRawHrAlerts] = useState([]);
     const [rawMissingCheckouts, setRawMissingCheckouts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -146,7 +197,6 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
     const [scanStart, setScanStart] = useState('');
     const [scanEnd, setScanEnd] = useState('');
 
-    // --- STATES POUR LES MODALES ---
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
@@ -172,14 +222,8 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                 const data = docSnap.data();
                 if (data.checkInTime && !data.checkOutTime) {
                     missing.push({
-                        id: `local_missing_${docSnap.id}`, 
-                        type: 'missing_checkout',
-                        staffId: data.staffId,
-                        staffName: data.staffName,
-                        date: data.date,
-                        attendanceDocId: docSnap.id,
-                        checkInTime: data.checkInTime,
-                        branchId: data.branchId || null 
+                        id: `local_missing_${docSnap.id}`, type: 'missing_checkout', staffId: data.staffId, staffName: data.staffName,
+                        date: data.date, attendanceDocId: docSnap.id, checkInTime: data.checkInTime, branchId: data.branchId || null 
                     });
                 }
             });
@@ -189,31 +233,45 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
         return () => unsubscribe();
     }, []);
 
-    // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
+    // --- THE FILTER LAYER: Strict RBAC Enforcement ---
     const hrAlerts = useMemo(() => {
-        if (activeBranch === 'global') {
-            if (userRole === 'admin') return rawHrAlerts.filter(a => adminBranchIds.includes(a.branchId));
-            return rawHrAlerts; // Super admin
+        if (userRole === 'super_admin') {
+            return activeBranch === 'global' ? rawHrAlerts : rawHrAlerts.filter(a => a.branchId === activeBranch);
         }
-        return rawHrAlerts.filter(a => a.branchId === activeBranch);
+        
+        // POUR ADMIN ET MANAGER
+        if (activeBranch === 'global') {
+            return rawHrAlerts.filter(a => adminBranchIds.includes(a.branchId));
+        }
+        
+        if (adminBranchIds.includes(activeBranch)) {
+            return rawHrAlerts.filter(a => a.branchId === activeBranch);
+        }
+        
+        return []; // ACCÈS REFUSÉ
     }, [rawHrAlerts, activeBranch, userRole, adminBranchIds]);
 
     const missingCheckouts = useMemo(() => {
-        if (activeBranch === 'global') {
-            if (userRole === 'admin') return rawMissingCheckouts.filter(a => adminBranchIds.includes(a.branchId));
-            return rawMissingCheckouts; // Super admin
+        if (userRole === 'super_admin') {
+            return activeBranch === 'global' ? rawMissingCheckouts : rawMissingCheckouts.filter(a => a.branchId === activeBranch);
         }
-        return rawMissingCheckouts.filter(a => a.branchId === activeBranch);
+        
+        if (activeBranch === 'global') {
+            return rawMissingCheckouts.filter(a => adminBranchIds.includes(a.branchId));
+        }
+        
+        if (adminBranchIds.includes(activeBranch)) {
+            return rawMissingCheckouts.filter(a => a.branchId === activeBranch);
+        }
+        
+        return []; // ACCÈS REFUSÉ
     }, [rawMissingCheckouts, activeBranch, userRole, adminBranchIds]);
 
     const handleFixAll = async () => {
-        // --- MODIFIÉ : Remplacement du window.confirm() ---
         setConfirmState({
-            isOpen: true,
-            title: "Auto-Fix Check-outs",
+            isOpen: true, title: "Auto-Fix Check-outs",
             message: `Auto-fix ${missingCheckouts.length} missing check-outs to their scheduled end times?`,
-            isDestructive: false,
-            confirmText: "Fix All",
+            isDestructive: false, confirmText: "Fix All",
             onConfirm: async () => {
                 setConfirmState({ isOpen: false });
                 setIsFixingAll(true);
@@ -222,16 +280,11 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                         const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
                         const schedSnap = await getDocs(schedQ);
                         const scheduledEndStr = !schedSnap.empty ? (schedSnap.docs[0].data().endTime || "23:00") : "23:00";
-                        
                         return autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr });
                     });
                     await Promise.allSettled(promises);
-                } catch (err) {
-                    console.error("Error running Fix All:", err);
-                    setFeedbackModal({ type: 'error', title: 'Action Failed', message: "Error running Fix All. Check console." });
-                } finally {
-                    setIsFixingAll(false);
-                }
+                } catch (err) { setFeedbackModal({ type: 'error', title: 'Action Failed', message: "Error running Fix All." }); } 
+                finally { setIsFixingAll(false); }
             },
             onCancel: () => setConfirmState({ isOpen: false })
         });
@@ -239,7 +292,6 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
 
     const handleRunHRScan = async () => {
         if (missingCheckouts.length > 0) {
-            // --- MODIFIÉ : Remplacement du alert() bloquant ---
             setFeedbackModal({ type: 'error', title: 'Action Required', message: "Please fix all missing check-outs before running the HR Scan to ensure accurate math." });
             return;
         }
@@ -250,32 +302,21 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
             if (scanEnd) payload.endDate = scanEnd;
 
             const result = await runUnifiedHRScanFunc(payload); 
-            // --- MODIFIÉ : Remplacement du alert() de succès ---
             setFeedbackModal({ type: 'success', title: 'Scan Complete', message: `Scanned ${result.data.daysScanned} day(s). Found ${result.data.alertsCreated} new HR items.` });
-        } 
-        catch (err) { 
-            console.error("HR Scan failed:", err); 
-            // --- MODIFIÉ : Remplacement du alert() d'erreur ---
-            setFeedbackModal({ type: 'error', title: 'Scan Failed', message: "Scan failed. Check console." }); 
-        } 
+        } catch (err) { setFeedbackModal({ type: 'error', title: 'Scan Failed', message: "Scan failed. Check console." }); } 
         finally { setIsScanning(false); }
     };
 
     const groupedAlerts = hrAlerts.reduce((acc, alert) => {
         let nameDisplay = alert.staffName || 'Unknown Staff';
-        
         const parts = [];
         if (alert.department && alert.department !== 'N/A') parts.push(alert.department);
         if (alert.position && alert.position !== 'N/A') parts.push(alert.position);
-        
         if (activeBranch === 'global' && alert.branchId) {
             const bName = branches.find(b => b.id === alert.branchId)?.name || alert.branchId;
             parts.push(bName.replace('Da Moreno ', ''));
         }
-
-        if (parts.length > 0) {
-            nameDisplay += ` (${parts.join(' - ')})`;
-        }
+        if (parts.length > 0) nameDisplay += ` (${parts.join(' - ')})`;
 
         if (!acc[nameDisplay]) acc[nameDisplay] = [];
         acc[nameDisplay].push(alert);
@@ -284,23 +325,8 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
 
     return (
         <div className="relative">
-            {/* INJECTION DES MODALES AU NIVEAU SUPÉRIEUR */}
-            <FeedbackModal 
-                isOpen={!!feedbackModal} 
-                type={feedbackModal?.type} 
-                title={feedbackModal?.title} 
-                message={feedbackModal?.message} 
-                onClose={() => setFeedbackModal(null)} 
-            />
-            <ConfirmModal 
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                onConfirm={confirmState.onConfirm}
-                onCancel={confirmState.onCancel}
-                isDestructive={confirmState.isDestructive}
-                confirmText={confirmState.confirmText || "Confirm"}
-            />
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} isDestructive={confirmState.isDestructive} confirmText={confirmState.confirmText || "Confirm"} />
 
             {loading ? (
                 <div className="bg-gray-800 p-4 rounded-lg flex items-center text-gray-300">
@@ -326,6 +352,7 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                 <div className="space-y-6 animate-fadeIn">
                     {missingCheckouts.length > 0 && (
                         <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+                            {/* ... (Rendu des missing checkouts identique) ... */}
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
                                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                                     <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -354,7 +381,6 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                     <div className="space-y-3">
                         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-2 border-b border-gray-700 pb-4">
                             <h3 className="text-lg font-bold text-white">HR & Disciplinary Actions</h3>
-                            
                             <div className="flex flex-col sm:flex-row items-center gap-2 bg-gray-900/50 p-1.5 rounded-lg border border-gray-700 w-full xl:w-auto">
                                 <input type="date" value={scanStart} onChange={e => setScanStart(e.target.value)} className="bg-gray-800 text-white rounded p-1.5 text-sm border border-gray-600 focus:border-indigo-500 outline-none w-full sm:w-auto [color-scheme:dark]" />
                                 <span className="text-gray-400 text-sm font-medium">to</span>
@@ -379,7 +405,8 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                                         <div className="p-3">
                                             <ul className="space-y-2">
                                                 {groupedAlerts[staffName].map(alert => (
-                                                    <HRAlertItem key={alert.id} alert={alert} />
+                                                    // MODIFIÉ : On passe la config et le setter de modal à chaque élément
+                                                    <HRAlertItem key={alert.id} alert={alert} companyConfig={companyConfig} setFeedbackModal={setFeedbackModal} />
                                                 ))}
                                             </ul>
                                         </div>

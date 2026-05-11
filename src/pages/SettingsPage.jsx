@@ -24,8 +24,8 @@ import { SandboxSeeder } from '../components/Settings/SandboxSeeder';
 // --- IMPORT DE LA MODALE ---
 import ConfirmModal from '../components/common/ConfirmModal';
 
-// --- ADDED: activeBranch prop ---
-export default function SettingsPage({ db, companyConfig, userRole, activeBranch }) {
+// --- ADDED: adminBranchIds prop pour sécuriser le scope des données ---
+export default function SettingsPage({ db, companyConfig, userRole, activeBranch, adminBranchIds = [] }) {
     const [activeTab, setActiveTab] = useState('');
     const { permissions, loadingPermissions } = usePermissions(db, userRole);
 
@@ -34,14 +34,20 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     // --- STATES POUR LES MODALES ---
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
+    // --- SÉCURITÉ : Liste des branches que l'utilisateur a le droit de configurer ---
+    const allowedBranches = useMemo(() => {
+        if (userRole === 'super_admin') return companyConfig?.branches || [];
+        return (companyConfig?.branches || []).filter(b => adminBranchIds.includes(b.id));
+    }, [companyConfig, userRole, adminBranchIds]);
+
     // --- THE SMART LINK: Use Sidebar branch, otherwise use local dropdown ---
     const effectiveBranch = (activeBranch && activeBranch !== 'global') ? activeBranch : localSelectedBranch;
 
     useEffect(() => {
-        if (companyConfig?.branches?.length > 0 && !localSelectedBranch) {
-            setLocalSelectedBranch(companyConfig.branches[0].id);
+        if (allowedBranches.length > 0 && !localSelectedBranch) {
+            setLocalSelectedBranch(allowedBranches[0].id);
         }
-    }, [companyConfig, localSelectedBranch]);
+    }, [allowedBranches, localSelectedBranch]);
 
     const resolvedConfig = useMemo(() => {
         if (!companyConfig) return null;
@@ -120,10 +126,10 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     const allTabs = [
         { id: 'permission-matrix', label: 'Permission Matrix', icon: Key, description: 'Super Admin access control.', superAdminOnly: true },
         { id: 'access-control', label: 'Access Control', icon: Shield, description: 'Manage users and security clearances.', permissionKey: 'canManageUsers' },
+        { id: 'manage-branches', label: 'Branches', icon: Building2, description: 'Manage locations and establishments.', superAdminOnly: true },
         { id: 'financial-rules', label: 'Financial Rules', icon: DollarSign, description: 'Tax, OT multipliers, and payroll configs.', permissionKey: 'canViewFinancialRules' },
         { id: 'geofence-config', label: 'Geofence Config', icon: MapPin, description: 'Set GPS boundaries for clock-ins.', permissionKey: 'canEditGeofence' },
         { id: 'company-info', label: 'Company Info', icon: Building2, description: 'Basic details and contact info.' },
-        { id: 'manage-branches', label: 'Branches', icon: Building2, description: 'Manage locations and establishments.', superAdminOnly: true },
         { id: 'manage-departments', label: 'Departments', icon: Network, description: 'Create and edit operational departments.' },
         { id: 'role-descriptions', label: 'Role Descriptions', icon: BookOpen, description: 'Define job responsibilities.' },
         { id: 'attendance-bonus', label: 'Attendance Bonus', icon: Gift, description: 'Rules for perfect attendance payouts.' },
@@ -186,8 +192,8 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
                     <p className="text-sm text-gray-400 mt-1">Manage company configurations, HR rules, and security.</p>
                 </div>
                 
-                {/* --- SMART DROPDOWN LOGIC --- */}
-                {companyConfig?.branches?.length > 0 && (
+                {/* --- SMART DROPDOWN LOGIC SECURISED --- */}
+                {allowedBranches.length > 0 && (
                     <div className="flex items-center gap-3 bg-gray-800 p-2 rounded-lg border border-gray-700 shadow-md">
                         <span className="text-sm font-bold text-gray-400 pl-2">Configuring:</span>
                         
@@ -197,7 +203,8 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
                                 onChange={(e) => setLocalSelectedBranch(e.target.value)}
                                 className="bg-gray-900 border border-indigo-500 text-white text-sm font-bold rounded p-2 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                             >
-                                {companyConfig.branches.map(b => (
+                                {/* On map sur allowedBranches au lieu de toutes les branches */}
+                                {allowedBranches.map(b => (
                                     <option key={b.id} value={b.id}>{b.name}</option>
                                 ))}
                             </select>

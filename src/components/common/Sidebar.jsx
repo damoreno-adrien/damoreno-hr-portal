@@ -31,7 +31,8 @@ export default function Sidebar({
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
     useEffect(() => {
-        if (userRole === 'admin' && user?.uid) {
+        // We now fetch branch IDs for both 'admin' and 'manager' roles
+        if (['admin', 'manager'].includes(userRole) && user?.uid) {
             getDoc(doc(db, 'users', user.uid)).then(docSnap => {
                 if (docSnap.exists()) {
                     const assignedBranches = docSnap.data().branchIds || [];
@@ -73,14 +74,20 @@ export default function Sidebar({
 
     const isSuperAdmin = userRole === 'super_admin';
     const isAdmin = userRole === 'admin';
+    const isManager = userRole === 'manager'; // Added check for general managers
     
+    // Determine which branches the user is allowed to see
     const visibleBranches = companyConfig?.branches?.filter(b => {
         if (isSuperAdmin) return true;
-        if (isAdmin) return adminBranchIds.includes(b.id);
+        if (isAdmin || isManager) return adminBranchIds.includes(b.id);
         return false;
     }) || [];
 
-    const showDropdown = (isSuperAdmin || (isAdmin && visibleBranches.length > 0)) && activeRole === 'manager';
+    // Only show the dropdown if the user has more than one branch to choose from, or is a super_admin
+    const showDropdown = (isSuperAdmin || visibleBranches.length > 1) && activeRole === 'manager';
+    
+    // Show static branch name for managers with only one branch
+    const showStaticBranch = !showDropdown && visibleBranches.length === 1 && activeRole === 'manager';
 
     return (
         <aside className={`fixed inset-y-0 left-0 bg-gray-800 flex flex-col transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-all duration-300 ease-in-out z-30 ${isSidebarCollapsed ? 'w-24' : 'w-64'}`}>
@@ -101,7 +108,7 @@ export default function Sidebar({
                             onChange={(e) => setActiveBranch(e.target.value)}
                             className="w-full bg-gray-900 border border-gray-700 text-white text-sm font-bold rounded-lg pl-9 pr-3 py-2 outline-none focus:border-indigo-500 appearance-none cursor-pointer shadow-inner"
                         >
-                            {/* --- THE FIX: Intelligent Global Dropdowns --- */}
+                            {/* --- RBAC Secured Dropdowns --- */}
                             {isSuperAdmin && <option value="global">🌍 Global View</option>}
                             
                             {isAdmin && adminBranchIds.length > 1 && (
@@ -116,8 +123,18 @@ export default function Sidebar({
                     </div>
                 </div>
             )}
+
+            {/* Static branch display for managers restricted to a single branch */}
+            {showStaticBranch && (
+                 <div className={`px-4 mb-4 ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
+                    <div className="bg-gray-900 border border-gray-700 text-white text-sm font-bold rounded-lg px-4 py-2 shadow-inner flex items-center">
+                        <Globe className="w-4 h-4 text-indigo-400 mr-2" />
+                        📍 {visibleBranches[0].name}
+                    </div>
+                 </div>
+            )}
             
-            <nav className="flex-1 space-y-2 px-4 overflow-y-auto mt-2">
+            <nav className="flex-1 space-y-2 px-4 overflow-y-auto mt-2 custom-scrollbar">
                 {activeRole === 'manager' && (
                     <>
                         <NavLink page="dashboard" label="Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
@@ -167,7 +184,7 @@ export default function Sidebar({
                         </span>
                     </button>
                 )}
-                <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}><p className="text-sm text-gray-400 truncate">{user.email}</p></div>
+                <div className={`py-4 border-t border-gray-700 text-center ${isSidebarCollapsed ? 'hidden' : 'block'}`}><p className="text-sm text-gray-400 truncate">{user?.email}</p></div>
                 <button onClick={handleLogout} className={`flex items-center justify-center w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700`}>
                     <LogOut className="h-5 w-5" />
                     <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>Logout</span>

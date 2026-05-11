@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; 
+import { getAuth } from 'firebase/auth';
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal';
 import * as dateUtils from '../utils/dateUtils';
@@ -30,7 +30,7 @@ const UpcomingBirthdaysCard = ({ staffList, activeBranch, branches = [] }) => {
         if (!staff.birthdate) return null;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         // Gestion robuste du format de date (Firestore vs String ISO)
         const birthDate = staff.birthdate.toDate ? staff.birthdate.toDate() : new Date(staff.birthdate);
         if (!birthDate || isNaN(birthDate)) return null;
@@ -52,7 +52,7 @@ const UpcomingBirthdaysCard = ({ staffList, activeBranch, branches = [] }) => {
                 {upcomingBirthdays.length > 0 ? (
                     upcomingBirthdays.map(staff => {
                         let nameDisplay = getDisplayName(staff);
-                        
+
                         // Affichage de la branche uniquement en vue globale
                         if (activeBranch === 'global' && staff.branchId) {
                             const bName = branches.find(b => b.id === staff.branchId)?.name || staff.branchId;
@@ -103,7 +103,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
         if (!db) return;
 
         const uid = getAuth().currentUser?.uid;
-        if (userRole === 'admin' && uid) {
+        if (['admin', 'manager'].includes(userRole) && uid) {
             getDoc(doc(db, 'users', uid)).then(snap => {
                 if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
             }).catch(err => console.error(err));
@@ -153,6 +153,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
     const handleCloseManualFix = () => setAlertToFix(null);
 
     // --- FILTRAGE DE BASE (RBAC) ---
+    // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
     const staffToDisplay = useMemo(() => {
         let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive');
 
@@ -160,12 +161,23 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
             list = list.filter(staff => getStaffDepartment(staff) === currentUserDept);
         }
 
-        if (activeBranch === 'global') {
-            if (userRole === 'admin') {
+        if (userRole !== 'super_admin') {
+            // VERROUILLAGE STRICT POUR MANAGER ET ADMIN
+            if (activeBranch === 'global') {
                 list = list.filter(staff => adminBranchIds.includes(staff.branchId));
+            } else {
+                // Si une branche spécifique est sélectionnée, on vérifie l'autorisation
+                if (adminBranchIds.includes(activeBranch)) {
+                    list = list.filter(staff => staff.branchId === activeBranch);
+                } else {
+                    list = []; // ACCÈS REFUSÉ (Anti-hacking)
+                }
             }
-        } else if (activeBranch) {
-            list = list.filter(staff => staff.branchId === activeBranch);
+        } else {
+            // SUPER ADMIN : Accès total
+            if (activeBranch !== 'global') {
+                list = list.filter(staff => staff.branchId === activeBranch);
+            }
         }
 
         return list;
@@ -275,7 +287,14 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
                     </div>
                     <div className="p-4">
                         {activeAlertTab === 'pending'
-                            ? <ManagerAlerts onManualFix={handleOpenManualFix} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} />
+                            ? <ManagerAlerts
+                                onManualFix={handleOpenManualFix}
+                                activeBranch={activeBranch}
+                                branches={companyConfig?.branches || []}
+                                userRole={userRole}
+                                adminBranchIds={adminBranchIds}
+                                companyConfig={companyConfig}
+                            />
                             : <HRActionLog db={db} activeBranch={activeBranch} branches={companyConfig?.branches || []} userRole={userRole} adminBranchIds={adminBranchIds} />
                         }
                     </div>

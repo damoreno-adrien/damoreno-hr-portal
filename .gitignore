@@ -73,3 +73,9 @@ functions/damorenohr-firebase-adminsdk-fbsvc-ceaf320f57.json
 functions/seedLocalDb.js
 functions/generateSchema.js
 functions/firestore_schema_profond.md
+functions/extractFullDB.js
+functions/extractConfig.js
+company_config_extract.json
+company_config_extract.md
+functions/service-account.json
+full_database_extract.json
