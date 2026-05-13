@@ -20,8 +20,10 @@ import { app } from "../../firebase.js";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// --- IMPORT DE LA MODALE ---
 import FeedbackModal from '../components/common/FeedbackModal';
 
+// --- Helper: Currency Formatter ---
 const formatCurrency = (num) => {
     if (typeof num !== 'number') {
         num = 0;
@@ -32,6 +34,7 @@ const formatCurrency = (num) => {
     }).format(num);
 };
 
+// --- Helper: Seniority Calculator ---
 const getSeniority = (startDateInput) => {
     const startDate = fromFirestore(startDateInput);
     if (!startDate) return 'Invalid date';
@@ -51,6 +54,7 @@ const getSeniority = (startDateInput) => {
     return parts.length > 0 ? parts.join(', ') : 'Less than a month';
 };
 
+// --- Helper: Status Badge Component ---
 const StatusBadge = ({ staff }) => {
     const status = getDynamicStaffStatus(staff);
     return (
@@ -70,9 +74,10 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
+    // Fetch allowed branches for admins and managers
     useEffect(() => {
         const uid = auth?.currentUser?.uid || getAuth().currentUser?.uid;
-        if (userRole === 'admin' && uid && db) {
+        if (['admin', 'manager'].includes(userRole) && uid && db) {
             getDoc(doc(db, 'users', uid)).then(snap => {
                 if (snap.exists()) setAdminBranchIds(snap.data().branchIds || []);
             }).catch(err => console.error("Failed to fetch admin branches:", err));
@@ -101,6 +106,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         let rate = latestJob.payType === 'Hourly' ? (latestJob.hourlyRate || latestJob.rate || 0) : (latestJob.baseSalary || latestJob.rate || 0);
         return { ...latestJob, displayRate: rate };
     };
+
+    // --- NOUVEAU: Filtrage strict des branches passées au formulaire ---
+    const availableBranches = useMemo(() => {
+        if (userRole === 'super_admin') return companyConfig?.branches || [];
+        return (companyConfig?.branches || []).filter(b => adminBranchIds.includes(b.id));
+    }, [companyConfig, userRole, adminBranchIds]);
 
     const groupedStaff = useMemo(() => {
         const normalizedQuery = searchQuery.toLowerCase().trim();
@@ -147,20 +158,24 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         }
     }, [staffList, selectedStaff]);
 
+    // --- PDF EXPORT FUNCTION ---
     const handleExportPDF = () => {
         const doc = new jsPDF();
         const today = new Date().toLocaleDateString('en-GB');
+
         doc.setFontSize(18);
         doc.text("Staff List", 14, 20);
         doc.setFontSize(10);
         doc.text(`Generated on: ${today}`, 14, 26);
 
         const tableBody = [];
+
         sortedDepartments.forEach(dept => {
             groupedStaff[dept].forEach(staff => {
                 const currentJob = getCurrentJob(staff);
                 const startDate = fromFirestore(staff.startDate);
                 const salaryDisplay = `${formatCurrency(currentJob.displayRate)} ${currentJob.payType === 'Hourly' ? '/hr' : '/mo'}`;
+
                 tableBody.push([
                     getDisplayName(staff),
                     dept,
@@ -181,6 +196,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             alternateRowStyles: { fillColor: [245, 245, 245] },
             styles: { fontSize: 9 },
         });
+
         doc.save(`staff_list_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
@@ -190,10 +206,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             const functions = getFunctions(app);
             const exportStaffData = httpsCallable(functions, 'exportStaffData');
             const result = await exportStaffData();
+
             if (!result.data.csvData) {
                 setFeedbackModal({ type: 'warning', title: 'No Data', message: "No staff data to export." });
                 return;
             }
+
             const blob = new Blob([`\uFEFF${result.data.csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
@@ -212,6 +230,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
     return (
         <div className="relative">
+            {/* Feedback Modal */}
             <FeedbackModal 
                 isOpen={!!feedbackModal} 
                 type={feedbackModal?.type} 
@@ -220,18 +239,21 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 onClose={() => setFeedbackModal(null)} 
             />
 
+            {/* Modal for Adding Staff */}
             <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
                 <AddStaffForm
                     auth={auth}
                     onClose={() => setIsAddModalOpen(false)}
+                    departments={departments} // Fallback global
                     userRole={userRole}
                     activeBranch={activeBranch}
-                    branches={companyConfig?.branches || []}
+                    branches={availableBranches} // ON PASSE LES BRANCHES FILTRÉES
                     managerProfile={staffProfile}
-                    companyConfig={companyConfig}
+                    companyConfig={companyConfig} // Nécessaire pour charger les départements dynamiques
                 />
             </Modal>
 
+            {/* Modal for Viewing/Editing Staff Profile */}
             {selectedStaff && (
                 <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
                     <StaffProfileModal
@@ -241,6 +263,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         onClose={closeProfileModal}
                         departments={departments}
                         userRole={userRole}
+                        branches={availableBranches}
                     />
                 </Modal>
             )}
@@ -257,6 +280,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                             className="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-amber-500 focus:border-amber-500"
                         />
                     </div>
+
                     <div className="flex items-center">
                         <input
                             id="showArchived"
@@ -267,16 +291,21 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
+
                     <div className="flex space-x-2">
                         <button onClick={handleExport} disabled={isExporting} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                            <Download className="h-5 w-5 mr-2" />{isExporting ? 'Exporting...' : 'CSV'}
+                            <Download className="h-5 w-5 mr-2" />
+                            {isExporting ? 'Exporting...' : 'CSV'}
                         </button>
                         <button onClick={handleExportPDF} disabled={isExporting} className="flex items-center bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                            <FileText className="h-5 w-5 mr-2" />PDF
+                            <FileText className="h-5 w-5 mr-2" />
+                            PDF
                         </button>
                     </div>
+                    
                     <button onClick={() => setIsAddModalOpen(true)} disabled={isExporting} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <Plus className="h-5 w-5 mr-2" />Invite Staff
+                        <Plus className="h-5 w-5 mr-2" />
+                        Invite Staff
                     </button>
                 </div>
             </div>
@@ -311,6 +340,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                 {groupedStaff[department].map(staff => {
                                     const currentJob = getCurrentJob(staff);
                                     const startDate = fromFirestore(staff.startDate);
+                                    
                                     const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unknown';
 
                                     return (

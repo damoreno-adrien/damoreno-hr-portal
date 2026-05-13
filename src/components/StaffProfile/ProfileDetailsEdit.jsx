@@ -1,10 +1,11 @@
+/* src/components/StaffProfile/ProfileDetailsEdit.jsx */
 import React from 'react';
 
 export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [], userRole }) => (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
 
         {/* --- NEW: Branch Selector for Super Admins Editing Profiles --- */}
-        {['admin', 'super_admin'].includes(userRole) && (
+        {['admin', 'super_admin'].includes(userRole) && branches.length > 1 && (
             <div className="md:col-span-2 bg-indigo-900/20 p-4 rounded-lg border border-indigo-700/50 mb-2">
                 <label className="text-sm font-bold text-indigo-400">Branch Location</label>
                 <select
@@ -17,6 +18,13 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                     {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Changing this will move the staff member to a new dashboard view.</p>
+            </div>
+        )}
+        {/* --- MODIFICATION : Rappel textuel si une seule branche (cas de Pupae) --- */}
+        {['admin', 'super_admin'].includes(userRole) && branches.length === 1 && (
+            <div className="md:col-span-2 px-4 py-2 bg-gray-800/50 rounded border border-gray-700 mb-2 flex justify-between items-center">
+                <span className="text-xs text-gray-400 font-bold uppercase tracking-widest">Current Branch:</span>
+                <span className="text-sm text-indigo-400 font-bold">{branches[0].name}</span>
             </div>
         )}
 

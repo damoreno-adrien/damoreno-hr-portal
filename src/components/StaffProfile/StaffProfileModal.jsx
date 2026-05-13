@@ -207,7 +207,7 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
 // ============================================================================
 
 
-export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole }) {
+export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole, branches }) {
     const [activeTab, setActiveTab] = useState('details');
     const [formData, setFormData] = useState(getInitialFormData(staff));
     const [isEditing, setIsEditing] = useState(false);
@@ -836,10 +836,20 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {activeTab === 'details' && (
                 <div className="space-y-6">
-                    {isEditing ?
-                        <ProfileDetailsEdit formData={formData} handleInputChange={handleInputChange} branches={companyConfig?.branches} userRole={userRole} /> :
-                        <ProfileDetailsView staff={staff} currentJob={currentJob} branches={companyConfig?.branches} />
-                    }
+                    {isEditing ? (
+                        <ProfileDetailsEdit
+                            formData={formData} 
+                            handleInputChange={handleInputChange} 
+                            branches={branches || []} 
+                            userRole={userRole}
+                        />
+                    ) : (
+                        <ProfileDetailsView
+                            staff={staff}
+                            currentJob={currentJob}
+                            branches={companyConfig?.branches || []}
+                        />
+                    )}
                 </div>
             )}
 
@@ -940,4 +950,4 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             />
         </div>
     );
-};
+}

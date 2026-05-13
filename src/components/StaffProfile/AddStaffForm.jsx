@@ -1,3 +1,5 @@
+/* src/components/StaffProfile/AddStaffForm.jsx */
+
 import React, { useState, useEffect } from 'react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '../../../firebase';
@@ -5,8 +7,7 @@ import { app } from '../../../firebase';
 const functions = getFunctions(app, 'asia-southeast1');
 const createUser = httpsCallable(functions, 'createUser');
 
-// AJOUT DE companyConfig DANS LES PROPS
-export default function AddStaffForm({ auth, onClose, userRole, activeBranch, branches = [], managerProfile, companyConfig }) {
+export default function AddStaffForm({ auth, onClose, departments, userRole, activeBranch, branches = [], managerProfile, companyConfig }) {
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [nickname, setNickname] = useState('');
@@ -32,13 +33,20 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
     const determineDefaultBranch = () => {
         if (['manager', 'dept_manager'].includes(userRole)) return managerProfile?.branchId || '';
         if (activeBranch && activeBranch !== 'global') return activeBranch;
-        return ''; // Force l'admin à choisir si en vue globale
+        if (branches.length === 1) return branches[0].id;
+        return '';
     };
-    const [branchId, setBranchId] = useState(determineDefaultBranch());
 
+    const [branchId, setBranchId] = useState(determineDefaultBranch());
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+
+    useEffect(() => {
+        if (!branchId && branches.length === 1) {
+            setBranchId(branches[0].id);
+        }
+    }, [branches, branchId]);
 
     // --- MISE À JOUR AUTOMATIQUE DES DÉPARTEMENTS SELON LA BRANCHE ---
     useEffect(() => {
@@ -47,6 +55,8 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
             deps = companyConfig.branchSettings[branchId].departments;
         } else if (companyConfig?.departments) {
             deps = companyConfig.departments;
+        } else if (departments && departments.length > 0) {
+            deps = departments;
         }
 
         setAvailableDepartments(deps);
@@ -55,10 +65,11 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
         } else {
             setDepartment('');
         }
-    }, [branchId, companyConfig]);
+    }, [branchId, companyConfig, departments]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        
         if (!firstName || !lastName || !nickname || !position || !department || !startDate || !email || !password || !branchId) {
             setError('Please fill out all required fields, including the branch location and department.');
             return;
@@ -72,31 +83,29 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
         setSuccess('');
 
         try {
-            // 1. On unifie la valeur du salaire pour satisfaire la condition "numeric rate" du backend
-            const numericRate = payType === 'Salary' ? parseInt(baseSalary, 10) : parseInt(hourlyRate, 10);
+            const numericRate = payType === 'Salary' ? Number(baseSalary) : Number(hourlyRate);
 
-            // 2. On construit le payload exactement comme le backend l'exige
+            // PAYLOAD TOTALEMENT À PLAT COMME ATTENDU PAR CREATEUSER.JS
             const userData = {
+                // Core infos
                 email,
                 password,
-                name: `${firstName} ${lastName}`.trim(), // <--- C'est ce qui manquait au backend
-                fullName: `${firstName} ${lastName}`.trim(),
                 firstName,
                 lastName,
                 nickname,
                 branchId,
                 isSsoRegistered,
                 holidayPolicy,
-                initialJob: {
-                    position,
-                    department,
-                    startDate,
-                    payType,
-                    rate: numericRate,
-                    baseSalary: payType === 'Salary' ? numericRate : null,
-                    hourlyRate: payType === 'Hourly' ? numericRate : null,
-                    standardDayHours: parseInt(standardDayHours, 10)
-                }
+                
+                // Job infos (Directement à la racine !)
+                position,
+                department,
+                startDate,
+                payType,
+                rate: numericRate, 
+                baseSalary: payType === 'Salary' ? numericRate : null,
+                hourlyRate: payType === 'Hourly' ? numericRate : null,
+                standardDayHours: Number(standardDayHours) || 8
             };
 
             const result = await createUser(userData);
@@ -114,8 +123,7 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
-            {/* SÉLECTEUR DE BRANCHE : Obligatoire en Global View pour les Admins */}
-            {['admin', 'super_admin'].includes(userRole) && (
+            {['admin', 'super_admin'].includes(userRole) && branches.length > 1 && (
                 <div className="bg-indigo-900/30 p-4 rounded-lg border border-indigo-700 mb-6">
                     <label className="block text-sm font-bold text-indigo-400 mb-1">Target Branch Location</label>
                     <select
@@ -130,6 +138,13 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
                 </div>
             )}
 
+            {['admin', 'super_admin'].includes(userRole) && branches.length === 1 && (
+                <div className="px-4 py-2 bg-gray-800/50 rounded border border-gray-700 mb-4 flex justify-between items-center">
+                    <span className="text-xs text-gray-400 font-bold uppercase tracking-widest">Assigning to:</span>
+                    <span className="text-sm text-indigo-400 font-bold">{branches[0].name}</span>
+                </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">First Name</label>
@@ -140,6 +155,7 @@ export default function AddStaffForm({ auth, onClose, userRole, activeBranch, br
                     <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" required />
                 </div>
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1">Nickname</label>
