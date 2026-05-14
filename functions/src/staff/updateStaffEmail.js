@@ -7,18 +7,28 @@ const { getFirestore } = require('firebase-admin/firestore');
 
 const db = getFirestore();
 
+// CORRECTION 1 : Alignement de la région sur l'Asie (comme le frontend)
 exports.updateStaffEmailHandler = functions.https.onCall({
-    region: "us-central1"
+    region: "asia-southeast1"
 }, async (request) => {
     // 1. Security: Must be logged in
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in.");
     }
 
-    // 2. Security: Must be a Manager
+    // 2. Security: Must be Manager, Admin, or Super-Admin
     const callerDoc = await db.collection("users").doc(request.auth.uid).get();
-    if (!callerDoc.exists || callerDoc.data().role !== "manager") {
-        throw new HttpsError("permission-denied", "Only managers can update login emails.");
+    
+    if (!callerDoc.exists) {
+        throw new HttpsError("permission-denied", "User profile not found.");
+    }
+
+    const callerRole = callerDoc.data().role;
+    const allowedRoles = ["manager", "admin", "super_admin"];
+    
+    // CORRECTION 2 : Vérification via un tableau de rôles autorisés
+    if (!allowedRoles.includes(callerRole)) {
+        throw new HttpsError("permission-denied", "Only managers or admins can update login emails.");
     }
 
     const { targetUid, newEmail } = request.data;
