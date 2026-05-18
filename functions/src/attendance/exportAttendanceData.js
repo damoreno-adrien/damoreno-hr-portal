@@ -1,3 +1,4 @@
+/* functions/src/attendance/exportAttendanceData.js */
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore } = require('firebase-admin/firestore');
@@ -10,7 +11,6 @@ if (admin.apps.length === 0) {
 const db = getFirestore();
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
-// Escape CSV fields to handle commas/newlines
 const escapeCsv = (value) => {
     if (value === null || value === undefined) return '';
     const str = String(value);
@@ -20,7 +20,6 @@ const escapeCsv = (value) => {
     return str;
 };
 
-// Format time as "HH:mm" (e.g., "14:30")
 const formatTime = (timestamp) => {
     if (!timestamp) return '';
     try {
@@ -31,14 +30,15 @@ const formatTime = (timestamp) => {
 };
 
 exports.exportAttendanceDataHandler = onCall({ region: "asia-southeast1" }, async (request) => {
-    // Règle 3 - RBAC hiérarchique
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "You must be logged in to perform this action.");
     }
 
     const callerUid = request.auth.uid;
     const callerDoc = await db.collection("users").doc(callerUid).get();
-    const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+    const callerData = callerDoc.exists ? callerDoc.data() : {};
+    const callerRole = callerData.role || null;
+    const adminBranchIds = callerData.branchIds || [];
 
     if (!['manager', 'admin', 'super_admin'].includes(callerRole)) {
         throw new HttpsError("permission-denied", "Only managers, admins, and super admins can export attendance data.");
@@ -49,19 +49,25 @@ exports.exportAttendanceDataHandler = onCall({ region: "asia-southeast1" }, asyn
         throw new HttpsError("invalid-argument", "Start date and end date are required.");
     }
 
-    console.log(`Exporting matrix from ${startDate} to ${endDate} by ${callerRole}`);
-
     try {
-        // 1. Fetch Staff
+        // 1. Fetch Staff avec filtre de sécurité par succursale
         let staffList = [];
         if (staffIds && staffIds.length > 0) {
             const refs = staffIds.map(id => db.collection('staff_profiles').doc(id));
             const snaps = await db.getAll(...refs);
             staffList = snaps.map(s => ({ id: s.id, ...s.data() }));
         } else {
-            // Default: Active staff only
             const snap = await db.collection('staff_profiles').where('status', '!=', 'inactive').get();
             staffList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        // BARRIÈRE SÉCURITÉ DE BRANCHE : Filtrage selon les droits du manager connecté
+        if (callerRole !== 'super_admin') {
+            staffList = staffList.filter(staff => adminBranchIds.includes(staff.branchId));
+        }
+
+        if (staffList.length === 0) {
+            return { csvData: "", filename: `attendance_${startDate}_${endDate}.csv` };
         }
 
         // 2. Fetch All Data for the Range
@@ -101,7 +107,6 @@ exports.exportAttendanceDataHandler = onCall({ region: "asia-southeast1" }, asyn
         const startDt = DateTime.fromISO(startDate);
         const endDt = DateTime.fromISO(endDate);
 
-        // Sort staff by name for nicer output
         staffList.sort((a, b) => (a.nickname || a.firstName).localeCompare(b.nickname || b.firstName));
 
         for (const staff of staffList) {
@@ -115,7 +120,6 @@ exports.exportAttendanceDataHandler = onCall({ region: "asia-southeast1" }, asyn
                 const leave = leaveMap.get(key);
                 const displayName = staff.nickname || staff.firstName || "Unknown";
 
-                // Determine Status Label (for reference only)
                 let status = 'Off';
                 if (att) {
                     status = 'Present';
@@ -130,17 +134,16 @@ exports.exportAttendanceDataHandler = onCall({ region: "asia-southeast1" }, asyn
                     }
                 }
 
-                // We export a row for EVERY day, so you can fill in blanks if needed
                 rows.push([
-                    escapeCsv(att ? att.id : ''), // [A] Attendance Doc ID (Crucial!)
-                    escapeCsv(staff.id),          // [B] Staff ID
-                    escapeCsv(dateStr),           // [C] Date
-                    escapeCsv(displayName),       // [D] Name
-                    escapeCsv(att ? formatTime(att.checkInTime) : ''),   // [E] Check-In
-                    escapeCsv(att ? formatTime(att.checkOutTime) : ''),  // [F] Check-Out
-                    escapeCsv(att ? formatTime(att.breakStart) : ''),    // [G] Break Start
-                    escapeCsv(att ? formatTime(att.breakEnd) : ''),      // [H] Break End
-                    escapeCsv(status)             // [I] Status Label
+                    escapeCsv(att ? att.id : ''), 
+                    escapeCsv(staff.id),          
+                    escapeCsv(dateStr),           
+                    escapeCsv(displayName),       
+                    escapeCsv(att ? formatTime(att.checkInTime) : ''),   
+                    escapeCsv(att ? formatTime(att.checkOutTime) : ''),  
+                    escapeCsv(att ? formatTime(att.breakStart) : ''),    
+                    escapeCsv(att ? formatTime(att.breakEnd) : ''),      
+                    escapeCsv(status)             
                 ].join(","));
 
                 currentDt = currentDt.plus({ days: 1 });

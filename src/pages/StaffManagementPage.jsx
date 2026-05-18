@@ -1,80 +1,56 @@
 /* src/pages/StaffManagementPage.jsx */
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
-import { Plus, Download, FileText } from 'lucide-react';
+import { Plus, Download } from 'lucide-react';
 import {
     fromFirestore,
     differenceInCalendarMonths,
-    formatISODate,
     formatDisplayDate,
     isStaffActiveOnDate,
     getDynamicStaffStatus
 } from '../utils/dateUtils';
-import { app } from "../../firebase.js";
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-// --- IMPORT DE LA MODALE ---
+import StaffExportOptionsModal from '../components/StaffProfile/StaffExportOptionsModal';
 import FeedbackModal from '../components/common/FeedbackModal';
+import { generateCustomStaffExport } from '../utils/staffExport'; // <-- NOUVEL IMPORT
 
-// --- Helper: Currency Formatter ---
+// --- Helpers ---
 const formatCurrency = (num) => {
-    if (typeof num !== 'number') {
-        num = 0;
-    }
-    return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    }).format(num);
+    if (typeof num !== 'number') num = 0;
+    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
 };
 
-// --- Helper: Seniority Calculator ---
 const getSeniority = (startDateInput) => {
     const startDate = fromFirestore(startDateInput);
     if (!startDate) return 'Invalid date';
-
-    const today = new Date();
-    const totalMonths = differenceInCalendarMonths(today, startDate);
-
+    const totalMonths = differenceInCalendarMonths(new Date(), startDate);
     if (totalMonths < 0) return 'Starts in future';
     if (totalMonths === 0) return 'New this month';
-
     const years = Math.floor(totalMonths / 12);
     const months = totalMonths % 12;
-
     let parts = [];
     if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`);
     if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`);
     return parts.length > 0 ? parts.join(', ') : 'Less than a month';
 };
 
-// --- Helper: Status Badge Component ---
 const StatusBadge = ({ staff }) => {
     const status = getDynamicStaffStatus(staff);
-    return (
-        <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${status.color}`}>
-            {status.label}
-        </span>
-    );
+    return <span className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${status.color}`}>{status.label}</span>;
 };
 
 export default function StaffManagementPage({ auth, db, staffList, departments, userRole, companyConfig, activeBranch, staffProfile }) {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedStaff, setSelectedStaff] = useState(null);
     const [showArchived, setShowArchived] = useState(false);
-    const [isExporting, setIsExporting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
-    // Fetch allowed branches for admins and managers
     useEffect(() => {
         const uid = auth?.currentUser?.uid || getAuth().currentUser?.uid;
         if (['admin', 'manager'].includes(userRole) && uid && db) {
@@ -83,7 +59,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
             }).catch(err => console.error("Failed to fetch admin branches:", err));
         }
     }, [db, userRole, auth]);
-
+    
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
 
@@ -107,7 +83,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return { ...latestJob, displayRate: rate };
     };
 
-    // --- NOUVEAU: Filtrage strict des branches passées au formulaire ---
     const availableBranches = useMemo(() => {
         if (userRole === 'super_admin') return companyConfig?.branches || [];
         return (companyConfig?.branches || []).filter(b => adminBranchIds.includes(b.id));
@@ -115,16 +90,12 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
 
     const groupedStaff = useMemo(() => {
         const normalizedQuery = searchQuery.toLowerCase().trim();
-
         const filteredList = staffList.filter(staff => {
             const isHistoricallyArchived = !isStaffActiveOnDate(staff, new Date());
             if (!showArchived && isHistoricallyArchived) return false;
-
             if (activeBranch === 'global') {
                 if (userRole === 'admin' && !adminBranchIds.includes(staff.branchId)) return false;
-            } else if (activeBranch && staff.branchId !== activeBranch) {
-                return false;
-            }
+            } else if (activeBranch && staff.branchId !== activeBranch) return false;
 
             if (normalizedQuery) {
                 const name = getDisplayName(staff).toLowerCase();
@@ -158,113 +129,46 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         }
     }, [staffList, selectedStaff]);
 
-    // --- PDF EXPORT FUNCTION ---
-    const handleExportPDF = () => {
-        const doc = new jsPDF();
-        const today = new Date().toLocaleDateString('en-GB');
-
-        doc.setFontSize(18);
-        doc.text("Staff List", 14, 20);
-        doc.setFontSize(10);
-        doc.text(`Generated on: ${today}`, 14, 26);
-
-        const tableBody = [];
-
-        sortedDepartments.forEach(dept => {
-            groupedStaff[dept].forEach(staff => {
-                const currentJob = getCurrentJob(staff);
-                const startDate = fromFirestore(staff.startDate);
-                const salaryDisplay = `${formatCurrency(currentJob.displayRate)} ${currentJob.payType === 'Hourly' ? '/hr' : '/mo'}`;
-
-                tableBody.push([
-                    getDisplayName(staff),
-                    dept,
-                    currentJob.position,
-                    salaryDisplay,
-                    staff.bonusStreak || 0,
-                    formatDisplayDate(startDate),
-                    staff.status || 'Active'
-                ]);
+    // --- NOUVELLE LOGIQUE D'EXPORT BASÉE SUR LE RÔLE ---
+    const handleExportClick = () => {
+        if (userRole === 'super_admin') {
+            setIsExportModalOpen(true);
+        } else {
+            const defaultFields = [
+                { id: 'name', label: 'Full Name' },
+                { id: 'department', label: 'Department' },
+                { id: 'position', label: 'Position' },
+                { id: 'email', label: 'Email' },
+                { id: 'phone', label: 'Phone' },
+                { id: 'startDate', label: 'Start Date' },
+                { id: 'status', label: 'Status' }
+            ];
+            
+            generateCustomStaffExport({
+                staffList,
+                filters: { department: 'All', status: 'Active' },
+                sortConfig: { key: 'department', dir: 'asc' },
+                selectedFields: defaultFields,
+                format: 'pdf',
+                branchName: activeBranch === 'global' ? 'All My Branches' : `Branch: ${activeBranch}`,
+                activeBranch, // <-- AJOUTÉ
+                userRole,     // <-- AJOUTÉ
+                adminBranchIds // <-- AJOUTÉ
             });
-        });
-
-        autoTable(doc, {
-            startY: 35,
-            head: [['Name', 'Department', 'Position', 'Salary', 'Streak', 'Start Date', 'Status']],
-            body: tableBody,
-            headStyles: { fillColor: [41, 128, 185], textColor: 255 },
-            alternateRowStyles: { fillColor: [245, 245, 245] },
-            styles: { fontSize: 9 },
-        });
-
-        doc.save(`staff_list_${new Date().toISOString().split('T')[0]}.pdf`);
-    };
-
-    const handleExport = async () => {
-        setIsExporting(true);
-        try {
-            const functions = getFunctions(app);
-            const exportStaffData = httpsCallable(functions, 'exportStaffData');
-            const result = await exportStaffData();
-
-            if (!result.data.csvData) {
-                setFeedbackModal({ type: 'warning', title: 'No Data', message: "No staff data to export." });
-                return;
-            }
-
-            const blob = new Blob([`\uFEFF${result.data.csvData}`], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
-            link.setAttribute("download", result.data.filename || `staff_export_${formatISODate(new Date())}_fallback.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        } catch (error) {
-            setFeedbackModal({ type: 'error', title: 'Export Failed', message: `Failed to export staff data: ${error.message}` });
-        } finally {
-            setIsExporting(false);
+            
+            setFeedbackModal({ type: 'success', title: 'Export Generated', message: "Your standard PDF report has been downloaded." });
         }
     };
 
     return (
         <div className="relative">
-            {/* Feedback Modal */}
-            <FeedbackModal 
-                isOpen={!!feedbackModal} 
-                type={feedbackModal?.type} 
-                title={feedbackModal?.title} 
-                message={feedbackModal?.message} 
-                onClose={() => setFeedbackModal(null)} 
-            />
-
-            {/* Modal for Adding Staff */}
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
             <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Invite New Staff Member">
-                <AddStaffForm
-                    auth={auth}
-                    onClose={() => setIsAddModalOpen(false)}
-                    departments={departments} // Fallback global
-                    userRole={userRole}
-                    activeBranch={activeBranch}
-                    branches={availableBranches} // ON PASSE LES BRANCHES FILTRÉES
-                    managerProfile={staffProfile}
-                    companyConfig={companyConfig} // Nécessaire pour charger les départements dynamiques
-                />
+                <AddStaffForm auth={auth} onClose={() => setIsAddModalOpen(false)} departments={departments} userRole={userRole} activeBranch={activeBranch} branches={availableBranches} managerProfile={staffProfile} companyConfig={companyConfig} />
             </Modal>
-
-            {/* Modal for Viewing/Editing Staff Profile */}
             {selectedStaff && (
-                <Modal isOpen={true} onClose={closeProfileModal} title={`${getDisplayName(selectedStaff)}'s Profile`}>
-                    <StaffProfileModal
-                        staff={selectedStaff}
-                        db={db}
-                        companyConfig={companyConfig}
-                        onClose={closeProfileModal}
-                        departments={departments}
-                        userRole={userRole}
-                        branches={availableBranches}
-                    />
+                <Modal isOpen={true} onClose={() => setSelectedStaff(null)} title={`${getDisplayName(selectedStaff)}'s Profile`}>
+                    <StaffProfileModal staff={selectedStaff} db={db} companyConfig={companyConfig} onClose={() => setSelectedStaff(null)} departments={departments} userRole={userRole} branches={availableBranches} />
                 </Modal>
             )}
 
@@ -272,40 +176,21 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                 <h2 className="text-2xl md:text-3xl font-bold text-white">Staff Management</h2>
                 <div className="flex flex-wrap items-center gap-4 justify-start md:justify-end">
                     <div className="flex-grow w-full md:w-auto md:flex-grow-0">
-                        <input
-                            type="text"
-                            placeholder="Search by name, nickname, or position..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-amber-500 focus:border-amber-500"
-                        />
+                        <input type="text" placeholder="Search by name, nickname, or position..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-amber-500 focus:border-amber-500" />
                     </div>
 
                     <div className="flex items-center">
-                        <input
-                            id="showArchived"
-                            type="checkbox"
-                            checked={showArchived}
-                            onChange={(e) => setShowArchived(e.target.checked)}
-                            className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500"
-                        />
+                        <input id="showArchived" type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
                         <label htmlFor="showArchived" className="ml-2 text-sm text-gray-300">Show Archived</label>
                     </div>
 
-                    <div className="flex space-x-2">
-                        <button onClick={handleExport} disabled={isExporting} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                            <Download className="h-5 w-5 mr-2" />
-                            {isExporting ? 'Exporting...' : 'CSV'}
-                        </button>
-                        <button onClick={handleExportPDF} disabled={isExporting} className="flex items-center bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                            <FileText className="h-5 w-5 mr-2" />
-                            PDF
-                        </button>
-                    </div>
-                    
-                    <button onClick={() => setIsAddModalOpen(true)} disabled={isExporting} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0 disabled:bg-gray-500">
-                        <Plus className="h-5 w-5 mr-2" />
-                        Invite Staff
+                    {/* BOUTON D'EXPORT UNIQUE */}
+                    <button onClick={handleExportClick} className="flex items-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold text-sm shadow transition-colors">
+                        <Download className="w-4 h-4 mr-2" /> Export Data
+                    </button>
+
+                    <button onClick={() => setIsAddModalOpen(true)} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg flex-shrink-0">
+                        <Plus className="h-5 w-5 mr-2" /> Invite Staff
                     </button>
                 </div>
             </div>
@@ -323,26 +208,16 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                         </tr>
                     </thead>
                     {sortedDepartments.length === 0 && (
-                        <tbody>
-                            <tr>
-                                <td colSpan="6" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td>
-                            </tr>
-                        </tbody>
+                        <tbody><tr><td colSpan="6" className="text-center py-10 text-gray-500">No staff members found matching the current filter.</td></tr></tbody>
                     )}
                     {sortedDepartments.map(department => (
                         <React.Fragment key={department}>
                             <tbody className="divide-y divide-gray-700">
-                                <tr className="bg-gray-900 sticky top-0 z-10">
-                                    <th colSpan="6" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">
-                                        {department} ({groupedStaff[department].length})
-                                    </th>
-                                </tr>
+                                <tr className="bg-gray-900 sticky top-0 z-10"><th colSpan="6" className="px-6 py-2 text-left text-sm font-semibold text-amber-400">{department} ({groupedStaff[department].length})</th></tr>
                                 {groupedStaff[department].map(staff => {
                                     const currentJob = getCurrentJob(staff);
                                     const startDate = fromFirestore(staff.startDate);
-                                    
                                     const bName = companyConfig?.branches?.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unknown';
-
                                     return (
                                         <tr key={staff.id} onClick={() => handleViewStaff(staff)} className="hover:bg-gray-700 cursor-pointer">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
@@ -353,33 +228,13 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                                                             {bName.replace('Da Moreno ', '')}
                                                         </span>
                                                     )}
-                                                    {staff.offboardingSettings?.isPendingFutureOffboard && staff.status === 'active' && (
-                                                        <span className="ml-2 bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex whitespace-nowrap">
-                                                            Leaving: {formatDisplayDate(staff.endDate)}
-                                                        </span>
-                                                    )}
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                                                {currentJob.position}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">
-                                                {formatCurrency(currentJob.displayRate)}
-                                                <span className="text-xs text-gray-500 ml-1">
-                                                    {currentJob.payType === 'Hourly' ? '/hr' : '/mo'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">
-                                                {staff.bonusStreak || 0}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                                                <span className="cursor-help" title={getSeniority(startDate)}>
-                                                    {formatDisplayDate(startDate)}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                <StatusBadge staff={staff} />
-                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{currentJob.position}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 text-right">{formatCurrency(currentJob.displayRate)} <span className="text-xs text-gray-500 ml-1">{currentJob.payType === 'Hourly' ? '/hr' : '/mo'}</span></td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-amber-400">{staff.bonusStreak || 0}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300"><span className="cursor-help" title={getSeniority(startDate)}>{formatDisplayDate(startDate)}</span></td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge staff={staff} /></td>
                                         </tr>
                                     );
                                 })}
@@ -388,6 +243,16 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
                     ))}
                 </table>
             </div>
+            
+            {/* MODALE EXPORT: Seul le Super Admin pourra y accéder */}
+            <StaffExportOptionsModal 
+                isOpen={isExportModalOpen} 
+                onClose={() => setIsExportModalOpen(false)} 
+                staffList={staffList} 
+                activeBranch={activeBranch} 
+                userRole={userRole}
+                adminBranchIds={adminBranchIds}
+            />
         </div>
     );
 }

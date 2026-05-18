@@ -3,7 +3,9 @@ import React, { useState } from 'react';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { X, Zap, DollarSign, ArrowDownRight, ArrowUpRight, Landmark, Calculator, AlertTriangle } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
-import FeedbackModal from '../common/FeedbackModal'; // <-- NOUVEL IMPORT
+import FeedbackModal from '../common/FeedbackModal';
+import StaffSearchAutocomplete from '../common/StaffSearchAutocomplete';
+
 
 export default function QuickTransactionModal({ isOpen, onClose, db, staffList, onSuccess }) {
     const [selectedStaffId, setSelectedStaffId] = useState('');
@@ -152,12 +154,12 @@ export default function QuickTransactionModal({ isOpen, onClose, db, staffList, 
                 <form onSubmit={handleSubmit} className="p-6">
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-300 mb-2">1. Select Staff Member</label>
-                        <select required value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} className="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg text-white outline-none focus:border-indigo-500">
-                            <option value="">-- Choose an employee --</option>
-                            {staffList.filter(s => s.status !== 'inactive').map(s => (
-                                <option key={s.id} value={s.id}>{s.nickname || s.firstName} {s.lastName}</option>
-                            ))}
-                        </select>
+                        <StaffSearchAutocomplete
+                            staffList={staffList}
+                            value={selectedStaffId}
+                            onChange={setSelectedStaffId}
+                            placeholder="Search and select staff..."
+                        />
                     </div>
 
                     <div className="mb-6">

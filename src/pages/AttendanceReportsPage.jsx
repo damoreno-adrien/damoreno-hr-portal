@@ -1,5 +1,4 @@
 /* src/pages/AttendanceReportsPage.jsx */
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
@@ -10,7 +9,9 @@ import ImportConfirmationModal from '../components/common/ImportConfirmationModa
 import * as dateUtils from '../utils/dateUtils';
 import { calculateAttendanceStatus } from '../utils/statusUtils';
 import { app } from "../../firebase.js";
-import { ArrowUp, ArrowDown, Download, Upload, Trash2, Check, ChevronDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, Download, Upload, Trash2, Check, ChevronDown, Users, Clock, AlertTriangle, Calendar } from 'lucide-react';
+import FinancialSummaryCard from '../components/Financials/FinancialSummaryCard'; 
+import { exportAttendancePDF } from '../utils/attendanceExport';
 
 // --- IMPORTS DES MODALES ---
 import FeedbackModal from '../components/common/FeedbackModal';
@@ -24,25 +25,23 @@ const cleanupBadAttendanceIds = httpsCallable(functions, 'cleanupBadAttendanceId
 const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName && staff.lastName) return `${staff.firstName} ${staff.lastName}`;
-    if (staff && staff.firstName) return staff.firstName;
-    if (staff && staff.fullName) return staff.fullName;
-    return 'Unknown Staff';
+    return staff?.firstName || staff?.fullName || 'Unknown Staff';
 };
 
 export default function AttendanceReportsPage({ db, staffList, activeBranch, userRole }) {
-    const [reportData, setReportData] = useState([]);
     const [unsortedReportData, setUnsortedReportData] = useState([]);
+    const [reportData, setReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
+    const [statusFilter, setStatusFilter] = useState('All'); // <-- NOUVEAU FILTRE DE STATUT
 
-    // Multi-Select State
     const [selectedStaffIds, setSelectedStaffIds] = useState([]);
     const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
     const dropdownRef = useRef(null);
 
     const [editingRecord, setEditingRecord] = useState(null);
-    const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'ascending' });
+    const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'descending' });
     const [companyConfig, setCompanyConfig] = useState({});
 
     const [isExporting, setIsExporting] = useState(false);
@@ -56,12 +55,11 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
     const [cleanupLoading, setCleanupLoading] = useState(false);
     const [cleanupResult, setCleanupResult] = useState(null);
 
-    // --- STATES POUR LES MODALES ---
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
-
-    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
     const [adminBranchIds, setAdminBranchIds] = useState([]);
+
+    const isSuperAdmin = userRole === 'super_admin';
 
     useEffect(() => {
         const uid = getAuth().currentUser?.uid;
@@ -72,90 +70,54 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         }
     }, [db, userRole]);
 
-    // 1. Fetch Config on Mount
     useEffect(() => {
         if (!db) return;
-        const configRef = doc(db, 'settings', 'company_config');
-        const unsub = onSnapshot(configRef, (snap) => {
+        const unsub = onSnapshot(doc(db, 'settings', 'company_config'), (snap) => {
             if (snap.exists()) setCompanyConfig(snap.data());
         });
         return () => unsub();
     }, [db]);
 
-    // Close dropdown when clicking outside
     useEffect(() => {
         const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setIsStaffDropdownOpen(false);
-            }
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) setIsStaffDropdownOpen(false);
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // --- Time-Aware & Branch-Secure Staff Filter for Reports ---
     const relevantStaffList = useMemo(() => {
         if (!staffList || !startDate || !endDate) return [];
-
-        const reportStart = new Date(startDate);
-        reportStart.setHours(0, 0, 0, 0);
-
-        const reportEnd = new Date(endDate);
-        reportEnd.setHours(23, 59, 59, 999);
+        const reportStart = new Date(startDate); reportStart.setHours(0, 0, 0, 0);
+        const reportEnd = new Date(endDate); reportEnd.setHours(23, 59, 59, 999);
 
         return staffList.filter(staff => {
-            let sStart = new Date(0);
-            if (staff.startDate) {
-                sStart = staff.startDate.toDate ? staff.startDate.toDate() : new Date(staff.startDate);
-            }
+            let sStart = staff.startDate?.toDate ? staff.startDate.toDate() : new Date(staff.startDate || 0);
+            let sEnd = staff.endDate?.toDate ? staff.endDate.toDate() : (staff.endDate ? new Date(staff.endDate) : null);
+            sStart.setHours(0, 0, 0, 0); if (sEnd) sEnd.setHours(23, 59, 59, 999);
 
-            let sEnd = null;
-            if (staff.endDate) {
-                sEnd = staff.endDate.toDate ? staff.endDate.toDate() : new Date(staff.endDate);
-            }
-
-            sStart.setHours(0, 0, 0, 0);
-            if (sEnd) sEnd.setHours(23, 59, 59, 999);
-
-            // They started after the report window ended
             if (sStart > reportEnd) return false;
-
-            // They left before the report window started
             if (sEnd && sEnd < reportStart) return false;
 
-            // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
             if (activeBranch === 'global') {
                 if (userRole === 'admin' && !adminBranchIds.includes(staff.branchId)) return false;
             } else if (activeBranch && staff.branchId !== activeBranch) {
                 return false;
             }
-
             return true;
         });
     }, [staffList, startDate, endDate, activeBranch, userRole, adminBranchIds]);
 
     const handleToggleStaff = (staffId) => {
-        setSelectedStaffIds(prev => {
-            if (prev.includes(staffId)) return prev.filter(id => id !== staffId);
-            return [...prev, staffId];
-        });
+        setSelectedStaffIds(prev => prev.includes(staffId) ? prev.filter(id => id !== staffId) : [...prev, staffId]);
     };
 
     const handleSelectAllStaff = () => {
-        const relevantIds = relevantStaffList.map(s => s.id);
-        if (selectedStaffIds.length === relevantIds.length) {
-            setSelectedStaffIds([]);
-        } else {
-            setSelectedStaffIds(relevantIds);
-        }
+        setSelectedStaffIds(selectedStaffIds.length === relevantStaffList.length ? [] : relevantStaffList.map(s => s.id));
     };
 
     const handleGenerateReport = async () => {
-        setIsLoading(true);
-        setUnsortedReportData([]);
-        setImportResult(null);
-        setCleanupResult(null);
-
+        setIsLoading(true); setUnsortedReportData([]); setImportResult(null); setCleanupResult(null);
         try {
             const [schedulesSnapshot, attendanceSnapshot, leaveSnapshot] = await Promise.all([
                 getDocs(query(collection(db, "schedules"), where("date", ">=", startDate), where("date", "<=", endDate))),
@@ -164,100 +126,60 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
             ]);
 
             const schedulesMap = new Map();
-            schedulesSnapshot.docs.forEach(doc => {
-                const data = doc.data();
-                schedulesMap.set(`${data.staffId}_${data.date}`, data);
-            });
+            schedulesSnapshot.docs.forEach(d => schedulesMap.set(`${d.data().staffId}_${d.data().date}`, d.data()));
 
             const attendanceMap = new Map();
-            attendanceSnapshot.docs.forEach(doc => {
-                const data = doc.data();
-                attendanceMap.set(`${data.staffId}_${data.date}`, { id: doc.id, ...data });
-            });
+            attendanceSnapshot.docs.forEach(d => attendanceMap.set(`${d.data().staffId}_${d.data().date}`, { id: d.id, ...d.data() }));
 
             const leaveMap = new Map();
             leaveSnapshot.docs.forEach(doc => {
                 const data = doc.data();
                 if (data.endDate >= startDate) {
-                    const allLeaveDays = dateUtils.eachDayOfInterval(data.startDate, data.endDate);
-                    allLeaveDays.forEach(day => {
+                    dateUtils.eachDayOfInterval(data.startDate, data.endDate).forEach(day => {
                         const dateStr = dateUtils.formatISODate(day);
-                        if (dateStr >= startDate && dateStr <= endDate) {
-                            leaveMap.set(`${data.staffId}_${dateStr}`, data);
-                        }
+                        if (dateStr >= startDate && dateStr <= endDate) leaveMap.set(`${data.staffId}_${dateStr}`, data);
                     });
                 }
             });
 
-            const staffToReport = selectedStaffIds.length === 0
-                ? relevantStaffList
-                : relevantStaffList.filter(s => selectedStaffIds.includes(s.id));
-
+            const staffToReport = selectedStaffIds.length === 0 ? relevantStaffList : relevantStaffList.filter(s => selectedStaffIds.includes(s.id));
             const generatedData = [];
             const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
+            const todayForReport = new Date(); todayForReport.setHours(23, 59, 59, 999);
 
             for (const staff of staffToReport) {
-                let sStart = new Date(0);
-                if (staff.startDate) sStart = staff.startDate.toDate ? staff.startDate.toDate() : new Date(staff.startDate);
-                let sEnd = null;
-                if (staff.endDate) sEnd = staff.endDate.toDate ? staff.endDate.toDate() : new Date(staff.endDate);
-
+                let sStart = staff.startDate?.toDate ? staff.startDate.toDate() : new Date(staff.startDate || 0);
+                let sEnd = staff.endDate?.toDate ? staff.endDate.toDate() : (staff.endDate ? new Date(staff.endDate) : null);
                 sStart.setHours(0, 0, 0, 0);
-                if (sEnd) sEnd.setHours(23, 59, 59, 999);
-
-                // Ne pas générer au-delà d'aujourd'hui pour la logique des absences/OFF
-                const todayForReport = new Date();
-                todayForReport.setHours(23, 59, 59, 999);
 
                 for (const day of dateInterval) {
-                    // Contrainte 1 : Ne rien afficher avant la date d'embauche ou après la fin de contrat
                     if (day < sStart || (sEnd && day > sEnd)) continue;
-
-                    // Contrainte 2 : Ne pas générer de "Jours OFF" ou "Absents" dans le futur
                     if (day > todayForReport) continue;
 
                     const dateStr = dateUtils.formatISODate(day);
                     const key = `${staff.id}_${dateStr}`;
-
                     const schedule = schedulesMap.get(key);
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key);
 
-                    // Calcul de base
                     let { status, isLate, lateMinutes, otMinutes, checkInTime, checkOutTime } = calculateAttendanceStatus(
-                        schedule,
-                        attendance,
-                        approvedLeave,
-                        day,
-                        companyConfig
+                        schedule, attendance, approvedLeave, day, companyConfig
                     );
 
                     let displayStatus = status;
-
-                    // NOTRE NOUVELLE LOGIQUE D'ÉTAT :
                     const hasSchedule = schedule && schedule.type !== 'off';
                     const hasAttendance = attendance && attendance.checkInTime;
 
-                    if (approvedLeave) {
-                        displayStatus = 'Leave';
-                    } else if (hasAttendance) {
-                         if (isLate) {
-                            displayStatus = `Late (${lateMinutes}m)`;
-                         } else if (status === 'Overtime' && otMinutes > 0) {
-                            const h = Math.floor(otMinutes / 60);
-                            const m = otMinutes % 60;
+                    if (approvedLeave) displayStatus = 'Leave';
+                    else if (hasAttendance) {
+                         if (isLate) displayStatus = `Late (${lateMinutes}m)`;
+                         else if (status === 'Overtime' && otMinutes > 0) {
+                            const h = Math.floor(otMinutes / 60); const m = otMinutes % 60;
                             displayStatus = `Overtime (+${h}h ${m}m)`;
-                         } else if (!hasSchedule) {
-                            displayStatus = 'Extra Shift'; // Venu travailler alors qu'il n'y avait pas de schedule
-                         } else {
-                            displayStatus = 'Completed';
-                         }
-                    } else if (hasSchedule) {
-                        displayStatus = 'Absent'; // No Show (Prévu mais pas venu)
-                    } else {
-                        displayStatus = 'Off'; // Pas prévu, pas venu = Jour de Repos normal
-                    }
-
+                         } else if (!hasSchedule) displayStatus = 'Extra Shift';
+                         else displayStatus = 'Completed';
+                    } else if (hasSchedule) displayStatus = 'Absent';
+                    else displayStatus = 'Off';
 
                     let workHours = 0;
                     if (checkInTime && checkOutTime) {
@@ -270,7 +192,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                         workHours = Math.max(0, duration) / 3600000;
                     }
 
-                    // On pousse TOUS les jours dans le tableau, plus de condition "if !== Empty"
                     generatedData.push({
                         id: attendance ? attendance.id : `no_attendance_${staff.id}_${dateStr}`,
                         staffId: staff.id,
@@ -278,294 +199,265 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                         date: dateStr,
                         checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
                         checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
-                        workHours: (displayStatus === 'Leave' || displayStatus === 'Off' || displayStatus === 'Absent') ? -1 : (workHours > 0 ? parseFloat(workHours.toFixed(2)) : 0),
+                        workHours: ['Leave', 'Off', 'Absent'].includes(displayStatus) ? -1 : (workHours > 0 ? parseFloat(workHours.toFixed(2)) : 0),
                         status: displayStatus,
+                        rawLateMinutes: isLate ? lateMinutes : 0,
+                        rawOtMinutes: status === 'Overtime' ? otMinutes : 0,
                         fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
                     });
                 }
             }
             setUnsortedReportData(generatedData);
-
         } catch (error) {
-            console.error("Error generating report: ", error);
-            setImportResult({ message: "Error generating report.", errors: [error.message] });
+            console.error(error); setImportResult({ message: "Error generating report.", errors: [error.message] });
         } finally { setIsLoading(false); }
     };
 
+    // --- ENCART ANALYTICS (CALCULÉ DYNAMIQUEMENT SUR LES DONNÉES GÉNÉRÉES) ---
+    const metricsSummary = useMemo(() => {
+        const totalItems = unsortedReportData.length;
+        if (totalItems === 0) return { complianceRate: 0, completedShifts: 0, plannedShifts: 0, totalLateMinutes: 0, lateCount: 0, totalOtHours: 0, absentCount: 0, leaveCount: 0 };
+
+        let plannedShifts = 0, completedShifts = 0, totalLateMinutes = 0, lateCount = 0, totalOtMinutes = 0, absentCount = 0, leaveCount = 0;
+
+        unsortedReportData.forEach(r => {
+            if (r.status === 'Absent') { plannedShifts++; absentCount++; }
+            else if (r.status === 'Leave') { leaveCount++; }
+            else if (r.status === 'Extra Shift') { completedShifts++; totalOtMinutes += (r.workHours * 60); }
+            else if (r.status === 'Completed') { plannedShifts++; completedShifts++; }
+            else if (r.status.startsWith('Late')) { plannedShifts++; completedShifts++; lateCount++; totalLateMinutes += r.rawLateMinutes; }
+            else if (r.status.startsWith('Overtime')) { plannedShifts++; completedShifts++; totalOtMinutes += r.rawOtMinutes; }
+        });
+
+        const complianceRate = plannedShifts > 0 ? Math.round((completedShifts / plannedShifts) * 100) : 100;
+        const totalOtHours = (totalOtMinutes / 60).toFixed(1);
+
+        return { complianceRate, completedShifts, plannedShifts, totalLateMinutes, lateCount, totalOtHours, absentCount, leaveCount };
+    }, [unsortedReportData]);
+
+    // --- APPLICATION FILTRE STATUT + TRI ---
+    const processedReportData = useMemo(() => {
+        let data = [...unsortedReportData];
+        
+        if (statusFilter !== 'All') {
+            if (statusFilter === 'Late') data = data.filter(r => r.status.startsWith('Late'));
+            else if (statusFilter === 'Overtime') data = data.filter(r => r.status.startsWith('Overtime'));
+            else data = data.filter(r => r.status === statusFilter);
+        }
+
+        data.sort((a, b) => {
+            let aVal = a[sortConfig.key], bVal = b[sortConfig.key];
+            if (sortConfig.key === 'workHours') { aVal = aVal < 0 ? -1 : aVal; bVal = bVal < 0 ? -1 : bVal; }
+            if (aVal < bVal) return sortConfig.direction === 'ascending' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'ascending' ? 1 : -1;
+            return 0;
+        });
+
+        return data;
+    }, [unsortedReportData, statusFilter, sortConfig]);
+
     const requestSort = (key) => {
-        let direction = 'ascending';
-        if (sortConfig.key === key && sortConfig.direction === 'ascending') direction = 'descending';
-        setSortConfig({ key, direction });
+        setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending' }));
     };
 
-    useEffect(() => {
-        let sortableData = [...unsortedReportData];
-        if (sortConfig.key !== null) {
-            sortableData.sort((a, b) => {
-                let aValue = a[sortConfig.key];
-                let bValue = b[sortConfig.key];
-                if (sortConfig.key === 'workHours') {
-                    aValue = aValue < 0 ? -1 : aValue;
-                    bValue = bValue < 0 ? -1 : bValue;
-                }
-                if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
-                if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
-                return 0;
-            });
-        }
-        setReportData(sortableData);
-    }, [unsortedReportData, sortConfig]);
+    const handleExportLocalPDF = () => {
+        const branchName = activeBranch === 'global' ? 'All Branches' : `Branch ID: ${activeBranch}`;
+        exportAttendancePDF({ reportData: processedReportData, startDate, endDate, summary: metricsSummary, activeBranch, branchName });
+    };
 
-    const handleRowClick = (record) => setEditingRecord(record);
-
-    const handleExport = async () => {
-        if (!startDate || !endDate) { 
-            setFeedbackModal({ type: 'warning', title: 'Missing Dates', message: "Please select both a start and end date." }); 
-            return; 
-        }
+    const handleExportCSV = async () => {
         setIsExporting(true); setImportResult(null); setCleanupResult(null);
         try {
-            const staffIdsToSend = selectedStaffIds.length > 0 ? selectedStaffIds : null;
-            const result = await exportAttendanceData({ startDate, endDate, staffIds: staffIdsToSend });
-            const csvData = result.data.csvData;
-            const filename = result.data.filename || `attendance_export.csv`;
-            if (!csvData) { 
-                setFeedbackModal({ type: 'warning', title: 'Empty Export', message: "No data to export." }); 
-                setIsExporting(false); 
-                return; 
-            }
-            const blob = new Blob([`\uFEFF${csvData}`], { type: 'text/csv;charset=utf-8;' });
+            const result = await exportAttendanceData({ startDate, endDate, staffIds: selectedStaffIds.length > 0 ? selectedStaffIds : null });
+            if (!result.data.csvData) { setFeedbackModal({ type: 'warning', title: 'Empty Export', message: "No data found." }); return; }
+            const blob = new Blob([`\uFEFF${result.data.csvData}`], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
-            link.setAttribute("download", filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
+            link.href = URL.createObjectURL(blob);
+            link.download = result.data.filename || `attendance_export.csv`;
             link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        } catch (error) { 
-            console.error(error); 
-            setFeedbackModal({ type: 'error', title: 'Export Failed', message: `Export failed: ${error.message}` }); 
-        }
+        } catch (error) { setFeedbackModal({ type: 'error', title: 'Export Failed', message: error.message }); }
         finally { setIsExporting(false); }
     };
 
-    const handleImportClick = () => { 
-        if (fileInputRef.current) { 
-            setImportResult(null); setCleanupResult(null); setAnalysisResult(null); setCsvDataToConfirm(null); setIsConfirmModalOpen(false); 
-            fileInputRef.current.value = ''; 
-            fileInputRef.current.click(); 
-        } 
+    const handleImportClick = () => {
+        fileInputRef.current.value = ''; fileInputRef.current.click();
     };
 
     const handleFileSelected = (event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'application/vnd.ms-excel') {
-            setFeedbackModal({ type: 'error', title: 'Invalid File', message: "Invalid file type. Please upload a CSV file (.csv)." });
-            if (fileInputRef.current) fileInputRef.current.value = '';
-            return;
-        }
+        const file = event.target.files?.[0]; if (!file) return;
         const reader = new FileReader();
         reader.onload = async (e) => {
-            const csvData = e.target?.result;
-            setIsImporting(true); setAnalysisResult(null); setImportResult(null); setCleanupResult(null);
+            setIs集中Importing(true);
             try {
-                const result = await importAttendanceData({ csvData, confirm: false });
-                if (result.data && result.data.analysis) { setAnalysisResult(result.data.analysis); setCsvDataToConfirm(csvData); setIsConfirmModalOpen(true); }
-                else { setImportResult({ message: result.data?.result || "Analysis failed.", errors: result.data?.errors || [] }); }
-            } catch (error) { setImportResult({ message: `Analysis failed: ${error.message}`, errors: [] }); }
-            finally { setIsImporting(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+                const result = await importAttendanceData({ csvData: e.target.result, confirm: false });
+                if (result.data?.analysis) { setAnalysisResult(result.data.analysis); setCsvDataToConfirm(e.target.result); setIsConfirmModalOpen(true); }
+                else setImportResult({ message: result.data?.result || "Analysis failed.", errors: result.data?.errors || [] });
+            } catch (error) { setImportResult({ message: error.message, errors: [] }); }
+            finally { setIsImporting(false); }
         };
         reader.readAsText(file);
     };
 
     const handleConfirmImport = async () => {
-        if (!csvDataToConfirm) return;
         setIsConfirmingImport(true);
-        setImportResult(null);
-        setCleanupResult(null);
-
         try {
             const result = await importAttendanceData({ csvData: csvDataToConfirm, confirm: true });
             setIsConfirmModalOpen(false);
-
-            if (!result.data.errors || result.data.errors.length === 0) {
-                setFeedbackModal({ type: 'success', title: 'Import Successful', message: result.data.result });
+            if (!result.data.errors?.length) {
+                setFeedbackModal({ type: 'success', title: 'Import Complete', message: result.data.result });
                 await handleGenerateReport();
-            } else {
-                setImportResult({ message: result.data.result, errors: result.data.errors || [] });
-                setFeedbackModal({ type: 'warning', title: 'Import Completed with Warnings', message: "Import completed with some warnings. Please check the result message below the buttons." });
-            }
-        } catch (error) {
-            setIsConfirmModalOpen(false);
-            setImportResult({ message: `Import failed: ${error.message}`, errors: [] });
-            setFeedbackModal({ type: 'error', title: 'Import Failed', message: error.message });
-        } finally {
-            setIsConfirmingImport(false);
-            setCsvDataToConfirm(null);
-            setAnalysisResult(null);
-        }
+            } else { setImportResult({ message: result.data.result, errors: result.data.errors }); }
+        } catch (error) { setFeedbackModal({ type: 'error', title: 'Import Failed', message: error.message }); }
+        finally { setIsConfirmingImport(false); setCsvDataToConfirm(null); }
     };
-
-    const handleCancelImport = () => { setIsConfirmModalOpen(false); setAnalysisResult(null); setCsvDataToConfirm(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
 
     const handleCleanup = async () => {
         setConfirmState({
-            isOpen: true,
-            title: "Run Cleanup",
-            message: "Run cleanup? This deletes bad attendance IDs.",
-            isDestructive: true,
-            confirmText: "Run Cleanup",
+            isOpen: true, title: "Run Database Cleanup", message: "Are you sure you want to scrub corrupted attendance IDs?", isDestructive: true, confirmText: "Run Cleanup",
             onConfirm: async () => {
-                setConfirmState({ isOpen: false });
-                setCleanupLoading(true); setCleanupResult(null); setImportResult(null);
-                try { 
-                    const response = await cleanupBadAttendanceIds(); 
-                    setCleanupResult({ message: response.data.message, error: false }); 
-                    await handleGenerateReport(); 
-                }
-                catch (err) { setCleanupResult({ message: err.message, error: true }); } 
+                setConfirmState({ isOpen: false }); setCleanupLoading(true);
+                try {
+                    const res = await cleanupBadAttendanceIds();
+                    setCleanupResult({ message: res.data.message, error: false });
+                    await handleGenerateReport();
+                } catch (err) { setCleanupResult({ message: err.message, error: true }); }
                 finally { setCleanupLoading(false); }
             },
             onCancel: () => setConfirmState({ isOpen: false })
         });
     };
 
-    const getSortIcon = (key) => { if (sortConfig.key !== key) return null; return sortConfig.direction === 'ascending' ? <ArrowUp className="inline-block h-4 w-4 ml-1" /> : <ArrowDown className="inline-block h-4 w-4 ml-1" />; };
+    const getSortIcon = (key) => { if (sortConfig.key !== key) return null; return sortConfig.direction === 'ascending' ? ' ↑' : ' ↓'; };
 
     return (
-        <div className="relative">
-            {/* INJECTION DES MODALES */}
-            <FeedbackModal 
-                isOpen={!!feedbackModal} 
-                type={feedbackModal?.type} 
-                title={feedbackModal?.title} 
-                message={feedbackModal?.message} 
-                onClose={() => setFeedbackModal(null)} 
-            />
-            <ConfirmModal 
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                onConfirm={confirmState.onConfirm}
-                onCancel={confirmState.onCancel}
-                isDestructive={confirmState.isDestructive}
-                confirmText={confirmState.confirmText || "Confirm"}
-            />
-
+        <div className="pb-20">
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} isDestructive={confirmState.isDestructive} confirmText={confirmState.confirmText} />
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}>
                     <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} />
                 </Modal>
             )}
-
-            <ImportConfirmationModal
-                isOpen={isConfirmModalOpen}
-                onClose={handleCancelImport}
-                analysis={analysisResult}
-                onConfirm={handleConfirmImport}
-                isLoading={isConfirmingImport}
-                fileName="Attendance Import"
-                entityName="Records"
-            />
+            <ImportConfirmationModal isOpen={isConfirmModalOpen} onClose={() => setIsConfirmModalOpen(false)} analysis={analysisResult} onConfirm={handleConfirmImport} isLoading={isConfirmingImport} fileName="Attendance Import" entityName="Records" />
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
 
-            <div className="bg-gray-800 rounded-lg shadow-lg p-4 md:p-6 mb-8">
-                <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
-                    <div className="flex-grow">
-                        <label className="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
-                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" />
+            {/* SECTION FILTRES PRINCIPAUX */}
+            <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-6 border border-gray-700">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Start Date</label>
+                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 text-sm outline-none" />
                     </div>
-                    <div className="flex-grow">
-                        <label className="block text-sm font-medium text-gray-300 mb-1">End Date</label>
-                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200" />
+                    <div>
+                        <label className="block text-xs font-bold text-gray-400 uppercase mb-1">End Date</label>
+                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 text-sm outline-none" />
                     </div>
-
-                    <div className="flex-grow relative" ref={dropdownRef}>
-                        <label className="block text-sm font-medium text-gray-300 mb-1">Staff Selection</label>
-                        <button onClick={() => setIsStaffDropdownOpen(!isStaffDropdownOpen)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 flex justify-between items-center">
-                            <span>{selectedStaffIds.length === 0 ? "All Staff in Period" : `${selectedStaffIds.length} Selected`}</span>
-                            <ChevronDown className="h-4 w-4" />
+                    <div className="relative" ref={dropdownRef}>
+                        <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Staff Member</label>
+                        <button onClick={() => setIsStaffDropdownOpen(!isStaffDropdownOpen)} className="w-full p-2 bg-gray-700 rounded-md border border-gray-600 text-gray-200 text-sm flex justify-between items-center outline-none">
+                            <span className="truncate">{selectedStaffIds.length === 0 ? "All Active Team" : `${selectedStaffIds.length} Selected`}</span>
+                            <ChevronDown className="h-4 w-4 text-gray-400" />
                         </button>
-
                         {isStaffDropdownOpen && (
-                            <div className="absolute z-50 w-full mt-1 bg-gray-700 border border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                            <div className="absolute z-50 w-full mt-1 bg-gray-700 border border-gray-600 rounded-md shadow-2xl max-h-60 overflow-y-auto">
                                 <div className="px-4 py-2 hover:bg-gray-600 cursor-pointer border-b border-gray-600 flex items-center" onClick={handleSelectAllStaff}>
                                     <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${selectedStaffIds.length === 0 ? 'bg-amber-600 border-amber-600' : 'border-gray-400'}`}>
                                         {selectedStaffIds.length === 0 && <Check className="h-3 w-3 text-white" />}
                                     </div>
-                                    <span className="text-sm text-white font-bold">Select All / None</span>
+                                    <span className="text-xs text-white font-bold">Select All / None</span>
                                 </div>
-                                {relevantStaffList.sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => {
-                                    const isSelected = selectedStaffIds.includes(staff.id);
-                                    return (
-                                        <div key={staff.id} className="px-4 py-2 hover:bg-gray-600 cursor-pointer flex items-center" onClick={() => handleToggleStaff(staff.id)}>
-                                            <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-400'}`}>
-                                                {isSelected && <Check className="h-3 w-3 text-white" />}
-                                            </div>
-                                            <span className="text-sm text-gray-200">{getDisplayName(staff)}</span>
+                                {relevantStaffList.sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).map(staff => (
+                                    <div key={staff.id} className="px-4 py-2 hover:bg-gray-600 cursor-pointer flex items-center" onClick={() => handleToggleStaff(staff.id)}>
+                                        <div className={`w-4 h-4 mr-2 border rounded flex items-center justify-center ${selectedStaffIds.includes(staff.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-400'}`}>
+                                            {selectedStaffIds.includes(staff.id) && <Check className="h-3 w-3 text-white" />}
                                         </div>
-                                    );
-                                })
-                                }
+                                        <span className="text-xs text-gray-200">{getDisplayName(staff)}</span>
+                                    </div>
+                                ))}
                             </div>
                         )}
                     </div>
-
-                    <button onClick={handleGenerateReport} disabled={isLoading || isImporting || isConfirmingImport || isExporting || cleanupLoading} className="w-full sm:w-auto px-5 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 text-white font-semibold">{isLoading ? 'Generating...' : 'Generate Report'}</button>
+                    <button onClick={handleGenerateReport} disabled={isLoading} className="px-5 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-600 text-white font-bold text-sm shadow-lg transition-colors">
+                        {isLoading ? 'Processing...' : 'Compile Metrics'}
+                    </button>
                 </div>
-                <div className="flex flex-col sm:flex-row sm:justify-end gap-3 mt-4 border-t border-gray-700 pt-4">
-                    <button onClick={handleExport} disabled={isExporting || isLoading} className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-500 text-white font-semibold"> <Download className="h-5 w-5 mr-2" /> {isExporting ? 'Exporting...' : 'Export CSV'} </button>
-                    <button onClick={handleImportClick} disabled={isImporting} className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:bg-gray-500 text-white font-semibold"> <Upload className="h-5 w-5 mr-2" /> {isImporting ? 'Analyzing...' : 'Import CSV'} </button>
-                    <input type="file" ref={fileInputRef} onChange={handleFileSelected} accept=".csv, text/csv, application/vnd.ms-excel" style={{ display: 'none' }} />
-                    {userRole === 'super_admin' && (
-                        <button onClick={handleCleanup} disabled={cleanupLoading} className="flex items-center justify-center px-4 py-2 h-10 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white font-semibold"> <Trash2 className="h-5 w-5 mr-2" /> {cleanupLoading ? 'Cleaning...' : 'Run Cleanup'} </button>
-                    )}
+
+                {/* ZONE ACTIONS ROUTINES ET PASSAGES SÉCURISÉS */}
+                <div className="flex flex-wrap gap-2 justify-between items-center mt-5 pt-4 border-t border-gray-700/60">
+                    <div className="flex items-center gap-2">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Isolate:</label>
+                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="p-1.5 bg-gray-700 border border-gray-600 text-white rounded text-xs outline-none">
+                            <option value="All">-- Show All Activities --</option>
+                            <option value="Completed">Completed Shifts</option>
+                            <option value="Late">Late Incidents</option>
+                            <option value="Absent">No Show / Absences</option>
+                            <option value="Leave">Approved Leaves</option>
+                            <option value="Extra Shift">Extra Shifts</option>
+                            <option value="Off">Scheduled Off Jumps</option>
+                        </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                        <button onClick={handleExportLocalPDF} disabled={isLoading || processedReportData.length === 0} className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow transition-colors">
+                            <Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF
+                        </button>
+                        
+                        {/* ACCÈS RESTREINTS PAR RÔLE AU CRU DU SYSTÈME (CSV) */}
+                        {isSuperAdmin && (
+                            <>
+                                <button onClick={handleExportCSV} disabled={isExporting || isLoading} className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs shadow transition-colors">
+                                    <Download className="w-3.5 h-3.5 mr-1.5" /> Backup CSV
+                                </button>
+                                <button onClick={handleImportClick} disabled={isImporting} className="flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold text-xs shadow transition-colors">
+                                    <Upload className="w-3.5 h-3.5 mr-1.5" /> Inject CSV
+                                </button>
+                                <button onClick={handleCleanup} disabled={cleanupLoading} className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-xs shadow transition-colors">
+                                    <Trash2 className="w-3.5 h-3.5 mr-1.5" /> DB Scrub
+                                </button>
+                                <input type="file" ref={fileInputRef} onChange={handleFileSelected} accept=".csv" style={{ display: 'none' }} />
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
+            {/* BLOC DE RAPPELS TECHNIQUES DE SUCCÈS OU D'ERREURS DE PURGE/IMPORT */}
             {cleanupResult && (
-                <div className={`p-4 rounded-lg mb-6 shadow ${cleanupResult.error ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
-                    <p className={`font-semibold ${cleanupResult.error ? 'text-red-300' : 'text-green-300'}`}>{cleanupResult.error ? 'Cleanup Failed' : 'Cleanup Success'}</p>
-                    <p className="text-sm text-gray-300">{cleanupResult.message}</p>
+                <div className={`p-4 rounded-lg mb-4 border ${cleanupResult.error ? 'bg-red-900/20 border-red-800 text-red-400' : 'bg-green-900/20 border-green-800 text-green-400'}`}>
+                    <p className="text-xs font-mono">{cleanupResult.message}</p>
                 </div>
             )}
 
-            {importResult && (
-                <div className={`p-4 rounded-lg mb-6 shadow ${importResult.errors?.length > 0 ? 'bg-red-900/30 border border-red-700' : 'bg-green-900/30 border border-green-700'}`}>
-                    <p className={`font-semibold ${importResult.errors?.length > 0 ? 'text-red-300' : 'text-green-300'}`}> Import Result: {importResult.message} </p>
-                    {importResult.errors?.length > 0 && (
-                        <div className="mt-3">
-                            <p className="text-sm font-semibold text-red-300 mb-1">Errors encountered during import:</p>
-                            <ul className="list-disc list-inside text-sm text-red-400 space-y-1 max-h-40 overflow-y-auto">
-                                {importResult.errors.map((err, index) => (<li key={index}>{err}</li>))}
-                            </ul>
-                        </div>
-                    )}
+            {/* ENCART ANALYTICS DYNAMIQUE STYLE FINANCIALS */}
+            {unsortedReportData.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-in fade-in duration-300">
+                    <FinancialSummaryCard title="Shift Compliance Rate" value={`${metricsSummary.complianceRate}%`} subText={`${metricsSummary.completedShifts} done / ${metricsSummary.plannedShifts} scheduled`} isCurrency={false} icon={Calendar} color={metricsSummary.complianceRate > 90 ? "green" : "amber"} isActive={true} />
+                    <FinancialSummaryCard title="Accumulated Lateness" value={`${metricsSummary.totalLateMinutes} Mins`} subText={`${metricsSummary.lateCount} flag events registered`} isCurrency={false} icon={Clock} color={metricsSummary.totalLateMinutes > 0 ? "red" : "blue"} isActive={true} />
+                    <FinancialSummaryCard title="Accumulated Overtime" value={`${metricsSummary.totalOtHours} Hours`} subText="Additional compiled hours" isCurrency={false} icon={Clock} color="green" isActive={true} />
+                    <FinancialSummaryCard title="Absences & Approved Leaves" value={`A: ${metricsSummary.absentCount} | L: ${metricsSummary.leaveCount}`} subText="Loss parameters summary" isCurrency={false} icon={AlertTriangle} color="purple" isActive={true} />
                 </div>
             )}
 
-            <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto">
+            {/* GRILLE PRINCIPALE DES DONNÉES COMPILÉES */}
+            <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto border border-gray-700">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"><button onClick={() => requestSort('staffName')} className="flex items-center hover:text-white">Staff Name {getSortIcon('staffName')}</button></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"><button onClick={() => requestSort('date')} className="flex items-center hover:text-white">Date {getSortIcon('date')}</button></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"><button onClick={() => requestSort('status')} className="flex items-center hover:text-white">Status {getSortIcon('status')}</button></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"><button onClick={() => requestSort('checkIn')} className="flex items-center hover:text-white">Check-In {getSortIcon('checkIn')}</button></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"><button onClick={() => requestSort('checkOut')} className="flex items-center hover:text-white">Check-Out {getSortIcon('checkOut')}</button></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"><button onClick={() => requestSort('workHours')} className="flex items-center hover:text-white">Work Hours {getSortIcon('workHours')}</button></th>
+                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-300 uppercase cursor-pointer hover:text-white" onClick={() => requestSort('staffName')}>Staff Member{getSortIcon('staffName')}</th>
+                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-300 uppercase cursor-pointer hover:text-white" onClick={() => requestSort('date')}>Date{getSortIcon('date')}</th>
+                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-300 uppercase cursor-pointer hover:text-white" onClick={() => requestSort('status')}>Status{getSortIcon('status')}</th>
+                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-300 uppercase">Check-In</th>
+                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-300 uppercase">Check-Out</th>
+                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-300 uppercase cursor-pointer hover:bg-gray-600" onClick={() => requestSort('workHours')}>Hours{getSortIcon('workHours')}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700">
                         {isLoading ? (
-                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Generating report...</td></tr>
-                        ) : reportData.length > 0 ? (
-                            reportData.map((row) => (
-                                <tr key={row.id || `${row.staffId}_${row.date}`} onClick={() => handleRowClick(row)} className="hover:bg-gray-700 cursor-pointer transition duration-150 ease-in-out">
+                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 italic">Compiling cloud parameters...</td></tr>
+                        ) : processedReportData.length > 0 ? (
+                            processedReportData.map((row) => (
+                                <tr key={row.id} onClick={() => handleRowClick(row)} className="hover:bg-gray-750 cursor-pointer transition duration-150">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white flex items-center">
                                         {row.staffName}
                                         {activeBranch === 'global' && (() => {
@@ -576,22 +468,22 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                                         })()}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(row.date)}</td>
-                                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-semibold ${row.status === 'Absent' ? 'text-red-400' :
+                                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-bold ${
+                                        row.status === 'Absent' ? 'text-red-400' :
                                         row.status.startsWith('Late') ? 'text-yellow-400' :
-                                            row.status.startsWith('Overtime') ? 'text-green-400' :
-                                                row.status === 'Leave' ? 'text-blue-400' :
-                                                    row.status === 'Off' ? 'text-gray-500' :
-                                                        'text-gray-300'
-                                        }`}>
+                                        row.status.startsWith('Overtime') ? 'text-green-400' :
+                                        row.status === 'Leave' ? 'text-blue-400' :
+                                        row.status === 'Off' ? 'text-gray-500' : 'text-gray-300'
+                                    }`}>
                                         {row.status}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkIn}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.checkOut}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{row.workHours < 0 ? 'N/A' : row.workHours.toFixed(2)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 font-mono">{row.checkIn}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 font-mono">{row.checkOut}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 font-mono">{row.workHours < 0 ? 'N/A' : `${row.workHours.toFixed(2)} h`}</td>
                                 </tr>
                             ))
                         ) : (
-                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500">No attendance data found for the selected criteria.</td></tr>
+                            <tr><td colSpan="6" className="px-6 py-10 text-center text-gray-500 text-sm">No synchronized tracking parameters found.</td></tr>
                         )}
                     </tbody>
                 </table>

@@ -1,5 +1,4 @@
 /* functions/src/attendance/importAttendanceData.js */
-
 const { HttpsError, onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
@@ -9,7 +8,6 @@ const { DateTime } = require('luxon');
 const db = getFirestore();
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 
-// --- Helpers ---
 const parseDateString = (dateString) => {
     if (!dateString) return null;
     const formatsToTry = [
@@ -25,7 +23,6 @@ const parseDateString = (dateString) => {
 
 const parseDateTimeToTimestamp = (dateStr, timeStr) => {
     if (!dateStr || !timeStr || timeStr === '-' || timeStr.trim() === '') return null;
-
     let dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm', { zone: THAILAND_TIMEZONE });
     if (!dt.isValid) dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd H:mm', { zone: THAILAND_TIMEZONE });
     if (!dt.isValid) dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm:ss', { zone: THAILAND_TIMEZONE });
@@ -45,17 +42,17 @@ exports.importAttendanceDataHandler = onCall({
     timeoutSeconds: 540,
     memory: "1GiB"
 }, async (request) => {
-
     if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
 
     const callerUid = request.auth.uid;
-
-    // Règle 3 - RBAC hiérarchique
     const callerDoc = await db.collection("users").doc(callerUid).get();
-    const callerRole = callerDoc.exists ? callerDoc.data().role : null;
+    const callerData = callerDoc.exists ? callerDoc.data() : {};
+    const callerRole = callerData.role || null;
+    const adminBranchIds = callerData.branchIds || [];
 
-    if (!['manager', 'admin', 'super_admin'].includes(callerRole)) {
-        throw new HttpsError("permission-denied", "Only managers, admins, and super admins can import attendance data.");
+    // ACCÈS STRICT : Seul le Super Admin peut exécuter l'import/injection CSV
+    if (callerRole !== "super_admin") {
+        throw new HttpsError("permission-denied", "Structural CSV imports are restricted to Super Administrators.");
     }
 
     const { csvData, confirm } = request.data;
@@ -73,6 +70,9 @@ exports.importAttendanceDataHandler = onCall({
 
         if (records.length === 0) return { result: "Empty CSV." };
 
+        // Cache des branches du staff pour éviter les appels redondants à la DB
+        const staffBranchCache = new Map();
+
         for (let index = 0; index < records.length; index++) {
             const row = records[index];
             const rowNum = index + 2;
@@ -87,10 +87,7 @@ exports.importAttendanceDataHandler = onCall({
 
                 const date = parseDateString(rawDate);
                 if (!date) throw new Error(`Invalid Date: ${rawDate}`);
-
-                // --- FIX: ADD DATE TO ANALYSIS OBJECT ---
-                analysis.date = date; // <--- This enables the "Date - Name" label in the modal
-                // ----------------------------------------
+                analysis.date = date;
 
                 if (!attendanceDocId) {
                     attendanceDocId = `${staffId}_${date}`;
