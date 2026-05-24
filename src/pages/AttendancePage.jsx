@@ -155,7 +155,7 @@ export default function AttendancePage({ db, staffList, userRole, staffProfile, 
     // --- FILTRAGE DE BASE (RBAC) ---
     // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
     const staffToDisplay = useMemo(() => {
-        let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive');
+        let list = showArchived ? staffList : staffList.filter(staff => staff.status !== 'inactive' && staff.status !== 'archived');
 
         if (userRole === 'dept_manager' && currentUserDept) {
             list = list.filter(staff => getStaffDepartment(staff) === currentUserDept);
