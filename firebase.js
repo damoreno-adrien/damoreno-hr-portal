@@ -1,12 +1,17 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getFunctions, connectFunctionsEmulator } from 'firebase/functions'; // <-- Ajout des imports Functions
+import { 
+    initializeFirestore, 
+    persistentLocalCache, 
+    persistentMultipleTabManager,
+    connectFirestoreEmulator 
+} from 'firebase/firestore'; // <-- Remplacement de getFirestore
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 let app;
 let auth;
 let db;
-let functions; // <-- Ajout de la variable pour exporter les fonctions
+let functions;
 
 try {
     const firebaseConfigString = typeof import.meta.env !== 'undefined'
@@ -17,22 +22,20 @@ try {
     if (firebaseConfig.apiKey) {
         app = initializeApp(firebaseConfig);
         auth = getAuth(app);
-        db = getFirestore(app);
         
-        // Initialisation des fonctions sur notre région v2
+        // --- ACTIVATION DU MODE HORS-LIGNE ROBUSTE ---
+        db = initializeFirestore(app, {
+            localCache: persistentLocalCache({
+                tabManager: persistentMultipleTabManager()
+            })
+        });
+        
         functions = getFunctions(app, "asia-southeast1");
 
-        // --- 🛡️ LE BOUCLIER DE SÉCURITÉ VERCEL ---
-        // import.meta.env.DEV est VRAI uniquement sur ton PC (localhost).
-        // Sur Vercel, ce code sera purement et simplement ignoré.
-        
-        // MODIFICATION ICI : On force à 'false' temporairement pour taper dans la prod
-        const useEmulator = false; // Remets à 'true' (ou import.meta.env.DEV) quand tu auras fini tes tests !
+        const useEmulator = false; 
 
         if (useEmulator) {
             console.info("🛠️ MODE DEV DÉTECTÉ : Connexion aux Émulateurs Locaux Firebase");
-            
-            // disableWarnings: true évite d'avoir un bandeau rouge géant sur l'écran de login local
             connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
             connectFirestoreEmulator(db, "127.0.0.1", 8080);
             connectFunctionsEmulator(functions, "127.0.0.1", 5001);
@@ -47,5 +50,4 @@ try {
     console.error("Firebase Initialization Error:", error);
 }
 
-// On n'oublie pas d'exporter `functions` pour que tes composants React l'utilisent !
 export { app, auth, db, functions };
