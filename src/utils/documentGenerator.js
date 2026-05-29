@@ -87,7 +87,8 @@ const TEMPLATE_FILES = {
     'warning': 'Warning_Notice.docx',
     'certificate': 'Certificate_Of_Employment.docx',
     'leave': 'Leave_Request.docx',
-    'receipt': 'Payment_receipt.docx'
+    'receipt': 'Payment_receipt.docx',
+    'loan_agreement': 'Loan_Agreement.docx'
 };
 
 export const generateDocument = async (docType, staffProfile, companyConfig, extraData = {}) => {

@@ -1,6 +1,6 @@
 /* src/components/Financials/TransactionRow.jsx */
 import React from 'react';
-import { Pencil, Trash2, CheckCircle, XCircle, Banknote } from 'lucide-react';
+import { Pencil, Trash2, CheckCircle, XCircle, Banknote, FileText } from 'lucide-react';
 import StatusBadge from '../common/StatusBadge';
 import * as dateUtils from '../../utils/dateUtils';
 
@@ -16,7 +16,8 @@ export default function TransactionRow({
     onEdit, 
     onDelete,
     onStaffClick,
-    onManualPayment
+    onManualPayment,
+    onDownloadAgreement
 }) {
     let branchBadge = null;
     if (activeBranch === 'global' && item.staff?.branchId) {
@@ -81,9 +82,15 @@ export default function TransactionRow({
                 ) : (
                     <>
                         {item.category === 'loan' && item.status === 'active' && (
-                            <button onClick={(e) => onManualPayment(e, item.raw)} className="p-1.5 text-green-400 hover:bg-green-900/30 rounded transition-colors" title="Manual Repayment">
-                                <Banknote className="h-4 w-4" />
-                            </button>
+                            <>
+                                {/* 3. Add the Download Agreement button here */}
+                                <button onClick={(e) => onDownloadAgreement(e, item.raw)} className="p-1.5 text-indigo-400 hover:bg-indigo-900/30 rounded transition-colors" title="Download Agreement">
+                                    <FileText className="h-4 w-4" />
+                                </button>
+                                <button onClick={(e) => onManualPayment(e, item.raw)} className="p-1.5 text-green-400 hover:bg-green-900/30 rounded transition-colors" title="Manual Repayment">
+                                    <Banknote className="h-4 w-4" />
+                                </button>
+                            </>
                         )}
                         <button onClick={(e) => onEdit(e, item.raw, item.category)} className="p-1.5 text-blue-400 hover:bg-blue-900/30 rounded transition-colors">
                             <Pencil className="h-4 w-4" />

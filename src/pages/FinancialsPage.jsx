@@ -19,6 +19,7 @@ import ManualPaymentModal from '../components/Financials/ManualPaymentModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import PromptModal from '../components/common/PromptModal';
 import StaffSearchAutocomplete from '../components/common/StaffSearchAutocomplete';
+import { generateDocument, translateNumber } from '../utils/documentGenerator';
 
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2];
@@ -148,7 +149,35 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
     };
 
     const handleApproveLoan = (e, id) => { e.stopPropagation(); setLoanToApprove(id); };
-    const confirmLoanApproval = (id, startDate) => { updateRecord('loans', id, { status: 'active', startDate }); setLoanToApprove(null); };
+    const confirmLoanApproval = async (id, startDate) => {
+        // 1. Find the specific loan from pending transactions before approving
+        const loan = pendingTransactions.find(tx => tx.id === id);
+
+        // 2. Update Firestore to set the loan to active
+        updateRecord('loans', id, { status: 'active', startDate });
+
+        // 3. Generate the document if the loan and staff data exist
+        if (loan && loan.raw) {
+            const staffProfile = staffList.find(s => s.id === loan.raw.staffId);
+
+            if (staffProfile) {
+                const totalAmount = Number(loan.raw.totalAmount) || 0;
+                const monthlyRepayment = Number(loan.raw.monthlyRepayment) || 0;
+
+                await generateDocument('loan_agreement', staffProfile, companyConfig, {
+                    LOAN_REASON: loan.raw.loanName || "Personal Loan",
+                    TOTAL_LOAN_AMOUNT: totalAmount.toLocaleString(),
+                    TOTAL_LOAN_AMOUNT_TH: translateNumber(totalAmount, 'TH'),
+                    MONTHLY_DEDUCTION: monthlyRepayment.toLocaleString(),
+                    MONTHLY_DEDUCTION_TH: translateNumber(monthlyRepayment, 'TH'),
+                    START_DEDUCTION_DATE: dateUtils.formatCustom(new Date(startDate), 'dd MMMM yyyy')
+                });
+            }
+        }
+
+        // 4. Close the modal
+        setLoanToApprove(null);
+    };
 
     const handleRejectLoan = (e, id) => {
         e.stopPropagation();
@@ -163,6 +192,29 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
     };
 
     const handleTriggerManualPayment = (e, loan) => { e.stopPropagation(); setLoanForPayment(loan); setIsManualPaymentOpen(true); };
+
+    const handleDownloadAgreement = async (e, loanRaw) => {
+        e.stopPropagation();
+
+        const staffProfile = staffList.find(s => s.id === loanRaw.staffId);
+        if (!staffProfile) {
+            console.error("Staff profile not found for document generation.");
+            return;
+        }
+
+        const totalAmount = Number(loanRaw.totalAmount) || 0;
+        const monthlyRepayment = Number(loanRaw.monthlyRepayment) || 0;
+        const startDate = loanRaw.startDate || new Date().toISOString();
+
+        await generateDocument('loan_agreement', staffProfile, companyConfig, {
+            LOAN_REASON: loanRaw.loanName || "General Loan",
+            TOTAL_LOAN_AMOUNT: totalAmount.toLocaleString(),
+            TOTAL_LOAN_AMOUNT_TH: translateNumber(totalAmount, 'TH'),
+            MONTHLY_DEDUCTION: monthlyRepayment.toLocaleString(),
+            MONTHLY_DEDUCTION_TH: translateNumber(monthlyRepayment, 'TH'),
+            START_DEDUCTION_DATE: dateUtils.formatCustom(new Date(startDate), 'dd MMMM yyyy')
+        });
+    };
 
     return (
         <div className="pb-20">
@@ -280,8 +332,16 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
                             {isLoading ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">Loading...</td></tr>) : displayedMonthlyTransactions.length === 0 ? (<tr><td colSpan="6" className="text-center py-10 text-gray-500">No records found for this selection.</td></tr>) : (
                                 displayedMonthlyTransactions.map(item =>
                                     <TransactionRow
-                                        key={`mth_${item.id}`} item={item} isPending={false} activeBranch={activeBranch} companyConfig={companyConfig}
-                                        onEdit={triggerEdit} onDelete={triggerDelete} onStaffClick={setSlideOverStaffId} onManualPayment={handleTriggerManualPayment}
+                                        key={`mth_${item.id}`}
+                                        item={item}
+                                        isPending={false}
+                                        activeBranch={activeBranch}
+                                        companyConfig={companyConfig}
+                                        onEdit={triggerEdit}
+                                        onDelete={triggerDelete}
+                                        onStaffClick={setSlideOverStaffId}
+                                        onManualPayment={handleTriggerManualPayment}
+                                        onDownloadAgreement={handleDownloadAgreement}
                                     />
                                 )
                             )}
