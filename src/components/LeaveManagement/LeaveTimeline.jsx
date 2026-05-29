@@ -6,7 +6,6 @@ import * as dateUtils from '../../utils/dateUtils';
 export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new Date(), onCellClick, onStaffClick, getStaffDepartment, activeBranch, companyConfig }) => {
     const [attData, setAttData] = useState([]);
     const [schedData, setSchedData] = useState([]);
-    const [shiftData, setShiftData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
@@ -18,16 +17,14 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
 
         const attQ = query(collection(db, 'attendance'), where('date', '>=', startStr), where('date', '<=', endStr));
         const schedQ = query(collection(db, 'schedules'), where('date', '>=', startStr), where('date', '<=', endStr));
-        const shiftQ = query(collection(db, 'shifts'), where('date', '>=', startStr), where('date', '<=', endStr));
 
-        let attLoaded = false, schedLoaded = false, shiftLoaded = false;
-        const checkLoading = () => { if (attLoaded && schedLoaded && shiftLoaded) setIsLoading(false); };
+        let attLoaded = false, schedLoaded = false;
+        const checkLoading = () => { if (attLoaded && schedLoaded) setIsLoading(false); };
 
         const unsubAtt = onSnapshot(attQ, snap => { setAttData(snap.docs.map(d => d.data())); attLoaded = true; checkLoading(); }, err => { console.error("Att Error:", err); attLoaded = true; checkLoading(); });
         const unsubSched = onSnapshot(schedQ, snap => { setSchedData(snap.docs.map(d => d.data())); schedLoaded = true; checkLoading(); }, err => { console.error("Sched Error:", err); schedLoaded = true; checkLoading(); });
-        const unsubShift = onSnapshot(shiftQ, snap => { setShiftData(snap.docs.map(d => d.data())); shiftLoaded = true; checkLoading(); }, err => { console.error("Shift Error:", err); shiftLoaded = true; checkLoading(); });
 
-        return () => { unsubAtt(); unsubSched(); unsubShift(); };
+        return () => { unsubAtt(); unsubSched(); };
     }, [db, currentMonth]);
 
     const daysInMonth = useMemo(() => {
@@ -54,6 +51,8 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
         const groups = {};
         
         staffList.forEach(staff => {
+            if (staff.status === 'inactive' || staff.status === 'archived') return;
+            
             const dept = getStaffDepartment ? getStaffDepartment(staff) : 'Unassigned';
             if (!groups[dept]) groups[dept] = [];
             
@@ -97,8 +96,7 @@ export const LeaveTimeline = ({ db, allRequests, staffList, currentMonth = new D
             return { type: 'present' }; 
         }
 
-        const allSchedules = [...schedData, ...shiftData];
-        const scheds = allSchedules.filter(s => {
+        const scheds = schedData.filter(s => {
             const sId = s.staffId || s.userId || s.employeeId;
             let sDate = s.date;
             if (!sDate && s.startDate) sDate = s.startDate.includes('T') ? s.startDate.split('T')[0] : s.startDate;
