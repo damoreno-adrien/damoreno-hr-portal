@@ -30,11 +30,10 @@ const getDisplayName = (staff) => {
 
 export default function AttendanceReportsPage({ db, staffList, activeBranch, userRole }) {
     const [unsortedReportData, setUnsortedReportData] = useState([]);
-    const [reportData, setReportData] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [startDate, setStartDate] = useState(dateUtils.formatISODate(new Date()));
     const [endDate, setEndDate] = useState(dateUtils.formatISODate(new Date()));
-    const [statusFilter, setStatusFilter] = useState('All'); // <-- NOUVEAU FILTRE DE STATUT
+    const [statusFilter, setStatusFilter] = useState('All'); 
 
     const [selectedStaffIds, setSelectedStaffIds] = useState([]);
     const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
@@ -142,7 +141,8 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                 }
             });
 
-            const staffToReport = selectedStaffIds.length === 0 ? relevantStaffList : relevantStaffList.filter(s => selectedStaffIds.includes(s.id));
+            // On compile toujours toutes les données pour rendre les filtres instantanés
+            const staffToReport = relevantStaffList; 
             const generatedData = [];
             const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
             const todayForReport = new Date(); todayForReport.setHours(23, 59, 59, 999);
@@ -213,31 +213,13 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         } finally { setIsLoading(false); }
     };
 
-    // --- ENCART ANALYTICS (CALCULÉ DYNAMIQUEMENT SUR LES DONNÉES GÉNÉRÉES) ---
-    const metricsSummary = useMemo(() => {
-        const totalItems = unsortedReportData.length;
-        if (totalItems === 0) return { complianceRate: 0, completedShifts: 0, plannedShifts: 0, totalLateMinutes: 0, lateCount: 0, totalOtHours: 0, absentCount: 0, leaveCount: 0 };
-
-        let plannedShifts = 0, completedShifts = 0, totalLateMinutes = 0, lateCount = 0, totalOtMinutes = 0, absentCount = 0, leaveCount = 0;
-
-        unsortedReportData.forEach(r => {
-            if (r.status === 'Absent') { plannedShifts++; absentCount++; }
-            else if (r.status === 'Leave') { leaveCount++; }
-            else if (r.status === 'Extra Shift') { completedShifts++; totalOtMinutes += (r.workHours * 60); }
-            else if (r.status === 'Completed') { plannedShifts++; completedShifts++; }
-            else if (r.status.startsWith('Late')) { plannedShifts++; completedShifts++; lateCount++; totalLateMinutes += r.rawLateMinutes; }
-            else if (r.status.startsWith('Overtime')) { plannedShifts++; completedShifts++; totalOtMinutes += r.rawOtMinutes; }
-        });
-
-        const complianceRate = plannedShifts > 0 ? Math.round((completedShifts / plannedShifts) * 100) : 100;
-        const totalOtHours = (totalOtMinutes / 60).toFixed(1);
-
-        return { complianceRate, completedShifts, plannedShifts, totalLateMinutes, lateCount, totalOtHours, absentCount, leaveCount };
-    }, [unsortedReportData]);
-
-    // --- APPLICATION FILTRE STATUT + TRI ---
+    // --- APPLICATION FILTRES (STAFF + STATUT) & TRI DYNAMIQUE ---
     const processedReportData = useMemo(() => {
         let data = [...unsortedReportData];
+
+        if (selectedStaffIds.length > 0) {
+            data = data.filter(r => selectedStaffIds.includes(r.staffId));
+        }
         
         if (statusFilter !== 'All') {
             if (statusFilter === 'Late') data = data.filter(r => r.status.startsWith('Late'));
@@ -254,10 +236,36 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         });
 
         return data;
-    }, [unsortedReportData, statusFilter, sortConfig]);
+    }, [unsortedReportData, statusFilter, sortConfig, selectedStaffIds]);
+
+    // --- CALCUL DES STATISTIQUES (Basé sur les données filtrées) ---
+    const metricsSummary = useMemo(() => {
+        const totalItems = processedReportData.length;
+        if (totalItems === 0) return { complianceRate: 0, completedShifts: 0, plannedShifts: 0, totalLateMinutes: 0, lateCount: 0, totalOtHours: 0, absentCount: 0, leaveCount: 0 };
+
+        let plannedShifts = 0, completedShifts = 0, totalLateMinutes = 0, lateCount = 0, totalOtMinutes = 0, absentCount = 0, leaveCount = 0;
+
+        processedReportData.forEach(r => {
+            if (r.status === 'Absent') { plannedShifts++; absentCount++; }
+            else if (r.status === 'Leave') { leaveCount++; }
+            else if (r.status === 'Extra Shift') { completedShifts++; totalOtMinutes += (r.workHours * 60); }
+            else if (r.status === 'Completed') { plannedShifts++; completedShifts++; }
+            else if (r.status.startsWith('Late')) { plannedShifts++; completedShifts++; lateCount++; totalLateMinutes += r.rawLateMinutes; }
+            else if (r.status.startsWith('Overtime')) { plannedShifts++; completedShifts++; totalOtMinutes += r.rawOtMinutes; }
+        });
+
+        const complianceRate = plannedShifts > 0 ? Math.round((completedShifts / plannedShifts) * 100) : 100;
+        const totalOtHours = (totalOtMinutes / 60).toFixed(1);
+
+        return { complianceRate, completedShifts, plannedShifts, totalLateMinutes, lateCount, totalOtHours, absentCount, leaveCount };
+    }, [processedReportData]);
 
     const requestSort = (key) => {
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending' }));
+    };
+
+    const handleRowClick = (row) => {
+        setEditingRecord(row);
     };
 
     const handleExportLocalPDF = () => {
@@ -287,7 +295,7 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         const file = event.target.files?.[0]; if (!file) return;
         const reader = new FileReader();
         reader.onload = async (e) => {
-            setIs集中Importing(true);
+            setIsImporting(true);
             try {
                 const result = await importAttendanceData({ csvData: e.target.result, confirm: false });
                 if (result.data?.analysis) { setAnalysisResult(result.data.analysis); setCsvDataToConfirm(e.target.result); setIsConfirmModalOpen(true); }
@@ -333,11 +341,13 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         <div className="pb-20">
             <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
             <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} isDestructive={confirmState.isDestructive} confirmText={confirmState.confirmText} />
+            
             {editingRecord && (
                 <Modal isOpen={true} onClose={() => setEditingRecord(null)} title={editingRecord.fullRecord?.id ? "Edit Attendance Record" : "Manually Create Record"}>
                     <EditAttendanceModal db={db} record={editingRecord} onClose={() => { setEditingRecord(null); handleGenerateReport(); }} />
                 </Modal>
             )}
+            
             <ImportConfirmationModal isOpen={isConfirmModalOpen} onClose={() => setIsConfirmModalOpen(false)} analysis={analysisResult} onConfirm={handleConfirmImport} isLoading={isConfirmingImport} fileName="Attendance Import" entityName="Records" />
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
@@ -403,7 +413,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                             <Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF
                         </button>
                         
-                        {/* ACCÈS RESTREINTS PAR RÔLE AU CRU DU SYSTÈME (CSV) */}
                         {isSuperAdmin && (
                             <>
                                 <button onClick={handleExportCSV} disabled={isExporting || isLoading} className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs shadow transition-colors">
@@ -422,20 +431,27 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                 </div>
             </div>
 
-            {/* BLOC DE RAPPELS TECHNIQUES DE SUCCÈS OU D'ERREURS DE PURGE/IMPORT */}
             {cleanupResult && (
                 <div className={`p-4 rounded-lg mb-4 border ${cleanupResult.error ? 'bg-red-900/20 border-red-800 text-red-400' : 'bg-green-900/20 border-green-800 text-green-400'}`}>
                     <p className="text-xs font-mono">{cleanupResult.message}</p>
                 </div>
             )}
 
-            {/* ENCART ANALYTICS DYNAMIQUE STYLE FINANCIALS */}
+            {/* ENCART ANALYTICS DYNAMIQUE & INTERACTIF */}
             {unsortedReportData.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-in fade-in duration-300">
-                    <FinancialSummaryCard title="Shift Compliance Rate" value={`${metricsSummary.complianceRate}%`} subText={`${metricsSummary.completedShifts} done / ${metricsSummary.plannedShifts} scheduled`} isCurrency={false} icon={Calendar} color={metricsSummary.complianceRate > 90 ? "green" : "amber"} isActive={true} />
-                    <FinancialSummaryCard title="Accumulated Lateness" value={`${metricsSummary.totalLateMinutes} Mins`} subText={`${metricsSummary.lateCount} flag events registered`} isCurrency={false} icon={Clock} color={metricsSummary.totalLateMinutes > 0 ? "red" : "blue"} isActive={true} />
-                    <FinancialSummaryCard title="Accumulated Overtime" value={`${metricsSummary.totalOtHours} Hours`} subText="Additional compiled hours" isCurrency={false} icon={Clock} color="green" isActive={true} />
-                    <FinancialSummaryCard title="Absences & Approved Leaves" value={`A: ${metricsSummary.absentCount} | L: ${metricsSummary.leaveCount}`} subText="Loss parameters summary" isCurrency={false} icon={AlertTriangle} color="purple" isActive={true} />
+                    <div onClick={() => setStatusFilter(statusFilter === 'All' ? 'All' : 'All')} className="cursor-pointer transition-transform hover:scale-[1.02]">
+                        <FinancialSummaryCard title="Shift Compliance Rate" value={`${metricsSummary.complianceRate}%`} subText={`${metricsSummary.completedShifts} done / ${metricsSummary.plannedShifts} scheduled`} isCurrency={false} icon={Calendar} color={metricsSummary.complianceRate > 90 ? "green" : "amber"} isActive={statusFilter === 'All'} />
+                    </div>
+                    <div onClick={() => setStatusFilter(statusFilter === 'Late' ? 'All' : 'Late')} className="cursor-pointer transition-transform hover:scale-[1.02]">
+                        <FinancialSummaryCard title="Accumulated Lateness" value={`${metricsSummary.totalLateMinutes} Mins`} subText={`${metricsSummary.lateCount} flag events registered`} isCurrency={false} icon={Clock} color={metricsSummary.totalLateMinutes > 0 ? "red" : "blue"} isActive={statusFilter === 'Late'} />
+                    </div>
+                    <div onClick={() => setStatusFilter(statusFilter === 'Overtime' ? 'All' : 'Overtime')} className="cursor-pointer transition-transform hover:scale-[1.02]">
+                        <FinancialSummaryCard title="Accumulated Overtime" value={`${metricsSummary.totalOtHours} Hours`} subText="Additional compiled hours" isCurrency={false} icon={Clock} color="green" isActive={statusFilter === 'Overtime'} />
+                    </div>
+                    <div onClick={() => setStatusFilter(statusFilter === 'Absent' ? 'All' : 'Absent')} className="cursor-pointer transition-transform hover:scale-[1.02]">
+                        <FinancialSummaryCard title="Absences & Approved Leaves" value={`A: ${metricsSummary.absentCount} | L: ${metricsSummary.leaveCount}`} subText="Loss parameters summary" isCurrency={false} icon={AlertTriangle} color="purple" isActive={statusFilter === 'Absent'} />
+                    </div>
                 </div>
             )}
 
