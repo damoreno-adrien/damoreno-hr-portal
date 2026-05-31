@@ -5,20 +5,42 @@ import { collection, getDocs, doc, deleteDoc, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
-import { Shield, UserCog, UserPlus, Loader2, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown, Edit2, Check, X, Trash2 } from 'lucide-react';
+import { Shield, UserCog, UserPlus, Loader2, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown, Edit2, Check, X, Trash2, Key } from 'lucide-react';
 import { logSystemAction } from '../../utils/auditLogger';
 import ConfirmModal from '../common/ConfirmModal';
-import FeedbackModal from '../common/FeedbackModal'; // <-- AJOUT
+import FeedbackModal from '../common/FeedbackModal';
+import Modal from '../common/Modal'; // <-- AJOUT POUR LA MODALE CUSTOM PERMS
 
 const functions = getFunctions(app, "asia-southeast1");
 const inviteAdminFunc = httpsCallable(functions, 'inviteAdmin'); 
 const updateUserRoleFunc = httpsCallable(functions, 'updateUserRole');
 const updateAdminBranchesFunc = httpsCallable(functions, 'updateAdminBranchesHandler');
 
+// --- LISTE DES PERMISSIONS POUR LE PANNEAU DE CONTRÔLE ---
+const AVAILABLE_PERMISSIONS = [
+    { key: 'canEditGeofence', label: 'Edit Geofences', desc: 'Modify GPS boundaries' },
+    { key: 'canEditDepartments', label: 'Edit Departments', desc: 'Create/Delete structural departments' },
+    { key: 'canEditHolidays', label: 'Edit Holidays', desc: 'Manage public holidays' },
+    { key: 'canEditRoleDescriptions', label: 'Edit Role Descriptions', desc: 'Modify job descriptions' },
+    { key: 'canManageUsers', label: 'Manage Users', desc: 'Access this control panel' },
+    { key: 'canViewAuditLogs', label: 'View Audit Logs', desc: 'Read the system action history' },
+    { key: 'canEditCompanyInfo', label: 'Edit Company Info', desc: 'Change global company settings' },
+    { key: 'canViewFinancialRules', label: 'View Financial Rules', desc: 'See tax and payroll multipliers' },
+    { key: 'canEditFinancialRules', label: 'Edit Financial Rules', desc: 'Modify financial settings' },
+    { key: 'canEditBonusRules', label: 'Edit Bonus Rules', desc: 'Change attendance bonus amounts' },
+    { key: 'canEditLeavePolicies', label: 'Edit Leave Policies', desc: 'Modify annual leave quotas' },
+    { key: 'canRunPayroll', label: 'Run Payroll', desc: 'Generate and lock monthly payslips' },
+    { key: 'canApproveLeave', label: 'Approve Leave', desc: 'Accept or reject staff leave requests' },
+    { key: 'canOffboardStaff', label: 'Offboard Staff', desc: 'Archive and terminate staff members' },
+    { key: 'canResetPassword', label: 'Reset Passwords', desc: 'Force password reset for staff' }
+];
+
 export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches = [] }) => {
-    // --- CORRECTION : Les Hooks doivent être ICI, à l'intérieur du composant ---
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
     const [feedbackModal, setFeedbackModal] = useState(null);
+
+    // --- ETAT POUR LA MODALE DES EXCEPTIONS INDIVIDUELLES ---
+    const [customPermsModal, setCustomPermsModal] = useState({ isOpen: false, user: null, perms: {} });
 
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -257,6 +279,41 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
         });
     };
 
+    // --- LOGIQUE POUR LES EXCEPTIONS INDIVIDUELLES ---
+    const handleOpenCustomPerms = (targetUser) => {
+        setCustomPermsModal({
+            isOpen: true,
+            user: targetUser,
+            perms: targetUser.customPermissions || {}
+        });
+    };
+
+    const handleToggleCustomPerm = (key) => {
+        setCustomPermsModal(prev => ({
+            ...prev,
+            perms: { ...prev.perms, [key]: !prev.perms[key] }
+        }));
+    };
+
+    const handleSaveCustomPerms = async () => {
+        setIsSaving(true);
+        try {
+            await setDoc(doc(db, 'users', customPermsModal.user.id), {
+                customPermissions: customPermsModal.perms
+            }, { merge: true });
+            
+            await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_CUSTOM_PERMISSIONS', `Updated custom exceptions for ${customPermsModal.user.name}.`);
+            
+            setFeedbackModal({ type: 'success', title: 'Permissions Saved', message: `Custom overrides successfully applied for ${customPermsModal.user.name}.` });
+            setCustomPermsModal({ isOpen: false, user: null, perms: {} });
+            await fetchUsers(); 
+        } catch (error) {
+            setFeedbackModal({ type: 'error', title: 'Update Failed', message: error.message });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const handleSort = (key) => {
         let direction = 'asc';
         if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
@@ -292,22 +349,44 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
 
     return (
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden relative" id="access-control">
-            {/* INJECTION DES MODALES */}
-            <FeedbackModal 
-                isOpen={!!feedbackModal} 
-                type={feedbackModal?.type} 
-                title={feedbackModal?.title} 
-                message={feedbackModal?.message} 
-                onClose={() => setFeedbackModal(null)} 
-            />
-            <ConfirmModal
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                onConfirm={confirmState.onConfirm}
-                onCancel={() => setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null })}
-                isDestructive={true}
-            />
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={() => setConfirmState({ isOpen: false, title: '', message: '', onConfirm: null })} isDestructive={true} />
+
+            {/* MODALE DES EXCEPTIONS INDIVIDUELLES */}
+            {customPermsModal.user && (
+                <Modal isOpen={customPermsModal.isOpen} onClose={() => setCustomPermsModal({ isOpen: false, user: null, perms: {} })} title={`Custom Permissions: ${customPermsModal.user.name}`}>
+                    <div className="space-y-4 pb-4">
+                        <div className="bg-amber-900/20 border border-amber-700/50 p-3 rounded-lg mb-4">
+                            <p className="text-xs text-amber-400 font-bold">Override Warning</p>
+                            <p className="text-xs text-amber-300 mt-1">Checkboxes here represent individual exceptions. They will completely override the default Role Matrix for this specific user.</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
+                            {AVAILABLE_PERMISSIONS.map(perm => (
+                                <label key={perm.key} className="flex items-start gap-3 p-3 bg-gray-800 border border-gray-700 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={customPermsModal.perms[perm.key] || false}
+                                        onChange={() => handleToggleCustomPerm(perm.key)}
+                                        className="mt-0.5 rounded border-gray-600 bg-gray-900 text-indigo-500 focus:ring-indigo-500" 
+                                    />
+                                    <div>
+                                        <p className={`text-sm font-bold ${customPermsModal.perms[perm.key] ? 'text-indigo-400' : 'text-gray-200'}`}>{perm.label}</p>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">{perm.desc}</p>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+
+                        <div className="flex gap-3 pt-4 border-t border-gray-700">
+                            <button onClick={handleSaveCustomPerms} disabled={isSaving} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-sm transition-colors flex items-center justify-center">
+                                {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Check className="w-4 h-4 mr-2" />} Save Exceptions
+                            </button>
+                            <button onClick={() => setCustomPermsModal({ isOpen: false, user: null, perms: {} })} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg text-sm transition-colors">Cancel</button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
 
             {isSaving && (
                 <div className="absolute inset-0 bg-gray-900/80 z-40 flex flex-col items-center justify-center backdrop-blur-sm">
@@ -319,7 +398,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
             <div className="bg-gray-900/50 p-6 border-b border-gray-700">
                 <div className="flex items-center gap-3">
                     <div className="bg-indigo-500/20 p-2 rounded-lg"><Shield className="w-6 h-6 text-indigo-400" /></div>
-                    <div><h3 className="text-xl font-bold text-white">Access Control & Security</h3><p className="text-sm text-gray-400">Manage executive access and promote working staff.</p></div>
+                    <div><h3 className="text-xl font-bold text-white">Access Control & Security</h3><p className="text-sm text-gray-400">Manage executive access, promote staff, and configure overrides.</p></div>
                 </div>
             </div>
 
@@ -407,7 +486,11 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                     }
 
                                     return (
-                                        <div key={user.id} className="bg-gray-800 p-3 rounded-lg border border-gray-700 shadow-sm">
+                                        <div key={user.id} className="bg-gray-800 p-3 rounded-lg border border-gray-700 shadow-sm relative">
+                                            {Object.keys(user.customPermissions || {}).some(k => user.customPermissions[k]) && (
+                                                <div className="absolute top-2 right-2 w-2 h-2 bg-amber-500 rounded-full" title="Has custom permission overrides"></div>
+                                            )}
+                                            
                                             <div className="flex items-start justify-between">
                                                 <div>
                                                     <div className="flex items-center gap-2">
@@ -421,6 +504,11 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                                 
                                                 {userRole === 'super_admin' && (
                                                     <div className="flex gap-1">
+                                                        {user.role !== 'super_admin' && (
+                                                            <button onClick={() => handleOpenCustomPerms(user)} className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-amber-500/10 rounded transition-colors" title="Manage Custom Permissions">
+                                                                <Key className="w-4 h-4" />
+                                                            </button>
+                                                        )}
                                                         {!user.hasStaffProfile && (
                                                             <button onClick={() => handleGenerateStaffProfile(user)} className="p-1.5 text-gray-400 hover:text-green-400 hover:bg-green-500/10 rounded transition-colors" title="Generate Staff Profile">
                                                                 <UserPlus className="w-4 h-4" />
@@ -506,7 +594,17 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                             <p className="text-xs text-gray-400">{user.email || 'No email registered'}</p>
                                             <p className="text-[9px] text-gray-600 font-mono mt-0.5">UID: {user.id}</p>
                                         </td>
-                                        <td className="px-4 py-3 text-right">
+                                        <td className="px-4 py-3 flex items-center justify-end gap-2">
+                                            {/* BOUTON D'EXCEPTION POUR LES MANAGERS/DEPT_MANAGERS */}
+                                            {(user.role === 'manager' || user.role === 'dept_manager') && userRole === 'super_admin' && (
+                                                <button onClick={() => handleOpenCustomPerms(user)} className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-amber-500/10 rounded transition-colors relative" title="Manage Custom Permissions">
+                                                    <Key className="w-4 h-4" />
+                                                    {Object.keys(user.customPermissions || {}).some(k => user.customPermissions[k]) && (
+                                                        <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+                                                    )}
+                                                </button>
+                                            )}
+                                            
                                             <select
                                                 value={user.role || 'staff'}
                                                 onChange={(e) => handleRoleChange(user.id, e.target.value, user.name)}
