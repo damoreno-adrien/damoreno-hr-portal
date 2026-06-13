@@ -79,3 +79,7 @@ company_config_extract.json
 company_config_extract.md
 functions/service-account.json
 full_database_extract.json
+scan_permissions.cjs
+architecture_map.md
+.gitignore
+generate_architecture_map.cjs
