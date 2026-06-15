@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Trash2, UploadCloud, FileText, AlertCircle, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Calendar, Tag, Edit } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils';
 
-const MAX_FILE_SIZE_MB = 5;
+const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
 
 const THAI_REQS = ['Thai ID Card', 'Tambian Baan', 'Employment Contract'];
