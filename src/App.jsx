@@ -4,6 +4,8 @@ import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { app, auth, db } from '../firebase';
 import useAuth from './hooks/useAuth';
+// --- AJOUT DE L'IMPORT DES PERMISSIONS ---
+import usePermissions from './hooks/usePermissions';
 import { WifiOff, ServerCrash, ShieldAlert, RefreshCw } from 'lucide-react';
 
 import useCompanyConfig from './hooks/useCompanyConfig';
@@ -50,6 +52,10 @@ export default function App() {
     const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
 
     const { user, userRole, hasStaffProfile, isLoading: isAuthLoading, authError } = useAuth(auth, db);
+    
+    // --- INTEGRATION DU HOOK DE PERMISSIONS ---
+    const { permissions } = usePermissions(db, userRole, user?.uid);
+
     const companyConfig = useCompanyConfig(db, user);
     const staffList = useStaffList(db, user);
 
@@ -100,6 +106,7 @@ export default function App() {
         };
     }, [companyConfig, activeBranch, activeRole, staffProfile]);
 
+    // ... (Reste de tes UseEffects pour les compteurs)
     useEffect(() => {
         if (!db) return;
         if (['manager', 'admin', 'dept_manager', 'super_admin'].includes(userRole)) {
@@ -229,13 +236,16 @@ export default function App() {
                     companyConfig={resolvedConfig} 
                     leaveBalances={leaveBalances} 
                     staffList={staffList} 
-                    staffProfile={staffProfile} // <-- FIX: Prop added here
+                    staffProfile={staffProfile} 
                     setCurrentPage={setCurrentPage} 
                 />;
             }
         }
 
-        const requireFullManager = (Component) => {
+        // --- MISE À JOUR : On accepte un argument hasOverride pour court-circuiter le rôle ---
+        const requireFullManager = (Component, hasOverride = false) => {
+            if (hasOverride) return Component;
+            
             if (!['admin', 'super_admin', 'manager'].includes(userRole)) {
                 return (
                     <div className="flex flex-col items-center justify-center h-full text-center">
@@ -268,12 +278,21 @@ export default function App() {
             case 'financials-dashboard': return <FinancialsDashboardPage db={db} user={user} companyConfig={resolvedConfig} />;
             case 'my-payslips': return <MyPayslipsPage db={db} user={user} staffProfile={staffProfile} companyConfig={resolvedConfig} />;
 
-            case 'staff': return requireFullManager(<StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={resolvedConfig} activeBranch={activeBranch} staffProfile={staffProfile} />);
-            case 'reports': return requireFullManager(<AttendanceReportsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
-            case 'financials': return requireFullManager(<FinancialsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />);
-            case 'payroll': return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={resolvedConfig} activeBranch={activeBranch} />);
+            // --- ROUTES MANAGER : Injection des dérogations (overrides) ---
+            case 'staff': 
+                return requireFullManager(<StaffManagementPage auth={auth} db={db} staffList={staffList} departments={companyConfig?.departments || []} userRole={userRole} companyConfig={resolvedConfig} activeBranch={activeBranch} staffProfile={staffProfile} />, permissions.canOffboardStaff || permissions.canEditRoleDescriptions);
             
-            case 'settings': return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} activeBranch={activeBranch} />);
+            case 'reports': 
+                return requireFullManager(<AttendanceReportsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />, permissions.canViewAuditLogs);
+            
+            case 'financials': 
+                return requireFullManager(<FinancialsPage db={db} staffList={staffList} activeBranch={activeBranch} userRole={userRole} />, permissions.canViewFinancialRules || permissions.canEditFinancialRules);
+            
+            case 'payroll': 
+                return requireFullManager(<PayrollPage db={db} staffList={staffList} companyConfig={resolvedConfig} activeBranch={activeBranch} />, permissions.canRunPayroll);
+            
+            case 'settings': 
+                return requireFullManager(<SettingsPage db={db} companyConfig={companyConfig} userRole={userRole} activeBranch={activeBranch} />, permissions.canManageUsers || permissions.canEditCompanyInfo || permissions.canEditGeofence);
 
             default: return <h2 className="text-3xl font-bold text-white">Dashboard</h2>;
         }

@@ -14,6 +14,9 @@ import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
 import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye } from 'lucide-react';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
+import usePermissions from '../../hooks/usePermissions';
+import { getAuth } from 'firebase/auth';
+import { StaffPermissionsOverrides } from './StaffPermissionsOverrides';
 
 // --- IMPORTS DES MODALES ---
 import FeedbackModal from '../common/FeedbackModal';
@@ -208,6 +211,7 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
 
 
 export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole, branches }) {
+    const { permissions } = usePermissions(db, userRole, getAuth().currentUser?.uid);
     const [activeTab, setActiveTab] = useState('details');
     const [formData, setFormData] = useState(getInitialFormData(staff));
     const [isEditing, setIsEditing] = useState(false);
@@ -838,9 +842,9 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 <div className="space-y-6">
                     {isEditing ? (
                         <ProfileDetailsEdit
-                            formData={formData} 
-                            handleInputChange={handleInputChange} 
-                            branches={branches || []} 
+                            formData={formData}
+                            handleInputChange={handleInputChange}
+                            branches={branches || []}
                             userRole={userRole}
                         />
                     ) : (
@@ -905,27 +909,42 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         </div>
                     </div>
 
-                    {canManageLifecycle && userRole === 'super_admin' && (
+                    {/* --- CUSTOM PERMISSIONS OVERRIDES --- */}
+                    {permissions.canManageUsers && (
+                        <StaffPermissionsOverrides db={db} staffId={staff.id} />
+                    )}
+
+                    {/* --- CRITICAL STAFF ACTIONS : Gérées par le hook usePermissions --- */}
+                    {(permissions.canOffboardStaff || permissions.canResetPassword || userRole === 'super_admin') && (
                         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
                             <h4 className="text-base font-semibold text-white">Critical Staff Actions</h4>
-                            <div>
-                                {isCurrentlyWorking ? (
-                                    <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff">
-                                        <Archive className="h-4 w-4 mr-2" /> Archive Staff Member
-                                    </button>
-                                ) : (
-                                    <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff">
-                                        <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active
-                                    </button>
-                                )}
-                            </div>
-                            <div>
-                                <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password">
-                                    <Key className="h-4 w-4 mr-2" /> Reset Password
-                                </button>
-                            </div>
 
-                            {!isCurrentlyWorking && (
+                            {/* OFFBOARDING / REACTIVATION */}
+                            {permissions.canOffboardStaff && (
+                                <div>
+                                    {isCurrentlyWorking ? (
+                                        <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff">
+                                            <Archive className="h-4 w-4 mr-2" /> Archive Staff Member
+                                        </button>
+                                    ) : (
+                                        <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff">
+                                            <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* RESET PASSWORD */}
+                            {permissions.canResetPassword && (
+                                <div>
+                                    <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password">
+                                        <Key className="h-4 w-4 mr-2" /> Reset Password
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* DELETE PERMANENTLY : Toujours bloqué en dur pour le Super Admin uniquement */}
+                            {!isCurrentlyWorking && userRole === 'super_admin' && (
                                 <div className="pt-4 border-t border-gray-700">
                                     <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently">
                                         <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently

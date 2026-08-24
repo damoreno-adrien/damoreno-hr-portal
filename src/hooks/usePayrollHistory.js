@@ -22,11 +22,11 @@ export default function usePayrollHistory(db, activeBranch, userRole, adminBranc
             // --- COUCHE DE SÉCURITÉ ET FILTRAGE PAR SUCCURSALE ---
             const filteredPayslips = allPayslips.filter(payslip => {
                 if (activeBranch === 'global') {
-                    // Si Admin, ne voir que les succursales autorisées
-                    if (userRole === 'admin') return adminBranchIds.includes(payslip.branchId);
-                    return true; // Super Admin voit tout
+                    if (userRole === 'super_admin') return true; // Seul le super admin voit TOUT
+                    // Les autres (Admin, Manager, ou Staff avec dérogation) sont restreints à leurs branches
+                    return adminBranchIds.includes(payslip.branchId); 
                 } else if (activeBranch) {
-                    // Filtrage strict sur une succursale sélectionnée
+                    // Filtrage strict sur la succursale sélectionnée dans la Sidebar
                     return payslip.branchId === activeBranch;
                 }
                 return true;

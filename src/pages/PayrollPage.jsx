@@ -30,13 +30,18 @@ export default function PayrollPage({ db, staffList, companyConfig, activeBranch
         const uid = getAuth().currentUser?.uid;
         if (uid && db) {
             getDoc(doc(db, 'users', uid)).then(snap => {
-                if (snap.exists()) {
-                    setAdminBranchIds(snap.data().branchIds || []);
-                    setLocalUserRole(snap.data().role);
+                let allowedBranches = [];
+                if (snap.exists() && snap.data().branchIds && snap.data().branchIds.length > 0) {
+                    allowedBranches = snap.data().branchIds;
+                } else if (activeBranch !== 'global') {
+                    // Fallback : on restreint l'utilisateur à sa propre branche
+                    allowedBranches = [activeBranch];
                 }
+                setAdminBranchIds(allowedBranches);
+                setLocalUserRole(snap.exists() ? snap.data().role : 'staff');
             }).catch(err => console.error(err));
         }
-    }, [db]);
+    }, [db, activeBranch]);
 
     const handleViewHistoryDetails = (payslip, period) => {
         setSelectedHistoryDetails(payslip);

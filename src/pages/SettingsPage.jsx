@@ -139,6 +139,7 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     ];
 
     const availableTabs = allTabs.filter(tab => {
+        if (userRole === 'super_admin') return true; 
         if (tab.superAdminOnly && userRole !== 'super_admin') return false;
         if (tab.permissionKey && !permissions[tab.permissionKey]) return false;
         return true;

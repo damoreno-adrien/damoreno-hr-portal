@@ -3,6 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
+import { getAuth } from 'firebase/auth';
+import usePermissions from '../../hooks/usePermissions';
+import { ROLE_DEFINITIONS } from '../../config/permissions.config';
 import { 
     User, Users, Briefcase, Calendar, Send, Settings, LogOut, 
     BarChart, DollarSign, X, ChevronLeft, ChevronRight, 
@@ -21,6 +24,9 @@ const NavLink = ({ icon, label, page, badgeCount, isSidebarCollapsed, setCurrent
     </button>
 );
 
+// Helper dynamique basé sur notre Registre Central
+const getRoleLevel = (roleId) => ROLE_DEFINITIONS.find(r => r.id === roleId)?.level || 1;
+
 export default function Sidebar({
     user, userRole, activeRole, setActiveRole, hasStaffProfile, handleLogout, currentPage, setCurrentPage,
     isMobileMenuOpen, setIsMobileMenuOpen, isSidebarCollapsed, setIsSidebarCollapsed,
@@ -29,10 +35,19 @@ export default function Sidebar({
     activeBranch, setActiveBranch, companyConfig 
 }) {
     const [adminBranchIds, setAdminBranchIds] = useState([]);
+    const auth = getAuth();
+    
+    // Branchement de notre Cerveau de Permissions
+    const { permissions } = usePermissions(db, userRole, auth.currentUser?.uid);
+    const roleLevel = getRoleLevel(userRole);
+
+    const isSuperAdmin = roleLevel === 5;
+    const isAdmin = roleLevel === 4;
+    const isManager = roleLevel === 3;
 
     useEffect(() => {
-        // We now fetch branch IDs for both 'admin' and 'manager' roles
-        if (['admin', 'manager'].includes(userRole) && user?.uid) {
+        // Les niveaux 3 (Manager) et 4 (Admin) ont des restrictions de branches
+        if (roleLevel >= 3 && roleLevel <= 4 && user?.uid) {
             getDoc(doc(db, 'users', user.uid)).then(docSnap => {
                 if (docSnap.exists()) {
                     const assignedBranches = docSnap.data().branchIds || [];
@@ -44,7 +59,7 @@ export default function Sidebar({
                 }
             }).catch(err => console.error("Error fetching admin branches:", err));
         }
-    }, [userRole, user?.uid, activeBranch, setActiveBranch]);
+    }, [roleLevel, user?.uid, activeBranch, setActiveBranch]);
 
     const handleToggleRole = () => {
         setActiveRole(activeRole === 'manager' ? 'staff' : 'manager');
@@ -52,41 +67,28 @@ export default function Sidebar({
         if (isMobileMenuOpen) setIsMobileMenuOpen(false);
     };
 
-    const isFullManager = ['admin', 'manager', 'super_admin'].includes(userRole);
-
     const getRoleBranding = () => {
         if (activeRole === 'staff') return { title: 'Staff Portal', color: 'text-blue-400', bg: 'bg-blue-600', hover: 'hover:bg-blue-700' };
+        
+        // On récupère le label dynamique du rôle configuré dans notre registre central
+        const dynamicTitle = ROLE_DEFINITIONS.find(r => r.id === userRole)?.label.split(' (')[0] || userRole;
+        
         switch(userRole) {
-            case 'super_admin': return { title: 'Super Admin', color: 'text-red-400', bg: 'bg-red-600', hover: 'hover:bg-red-700' };
-            case 'admin': return { title: 'Director Command', color: 'text-purple-400', bg: 'bg-purple-600', hover: 'hover:bg-purple-700' };
-            case 'dept_manager': return { title: 'Dept Manager', color: 'text-teal-400', bg: 'bg-teal-600', hover: 'hover:bg-teal-700' };
-            case 'manager': default: return { title: 'Manager Portal', color: 'text-amber-400', bg: 'bg-indigo-600', hover: 'hover:bg-indigo-700' };
+            case 'super_admin': return { title: dynamicTitle, color: 'text-red-400', bg: 'bg-red-600', hover: 'hover:bg-red-700' };
+            case 'admin': return { title: dynamicTitle, color: 'text-purple-400', bg: 'bg-purple-600', hover: 'hover:bg-purple-700' };
+            case 'dept_manager': return { title: dynamicTitle, color: 'text-teal-400', bg: 'bg-teal-600', hover: 'hover:bg-teal-700' };
+            case 'manager': default: return { title: dynamicTitle, color: 'text-amber-400', bg: 'bg-indigo-600', hover: 'hover:bg-indigo-700' };
         }
     };
     const branding = getRoleBranding();
 
-    const getSwitchText = () => {
-        if (userRole === 'super_admin') return 'Super Admin';
-        if (userRole === 'admin') return 'Director';
-        if (userRole === 'dept_manager') return 'Dept Manager';
-        return 'Manager';
-    };
-
-    const isSuperAdmin = userRole === 'super_admin';
-    const isAdmin = userRole === 'admin';
-    const isManager = userRole === 'manager'; // Added check for general managers
-    
-    // Determine which branches the user is allowed to see
     const visibleBranches = companyConfig?.branches?.filter(b => {
         if (isSuperAdmin) return true;
         if (isAdmin || isManager) return adminBranchIds.includes(b.id);
         return false;
     }) || [];
 
-    // Only show the dropdown if the user has more than one branch to choose from, or is a super_admin
     const showDropdown = (isSuperAdmin || visibleBranches.length > 1) && activeRole === 'manager';
-    
-    // Show static branch name for managers with only one branch
     const showStaticBranch = !showDropdown && visibleBranches.length === 1 && activeRole === 'manager';
 
     return (
@@ -108,23 +110,15 @@ export default function Sidebar({
                             onChange={(e) => setActiveBranch(e.target.value)}
                             className="w-full bg-gray-900 border border-gray-700 text-white text-sm font-bold rounded-lg pl-9 pr-3 py-2 outline-none focus:border-indigo-500 appearance-none cursor-pointer shadow-inner"
                         >
-                            {/* --- RBAC Secured Dropdowns --- */}
                             {isSuperAdmin && <option value="global">🌍 Global View</option>}
-                            
-                            {isAdmin && adminBranchIds.length > 1 && (
-                                <option value="global">🌍 All My Branches</option>
-                            )}
-                            
-                            {visibleBranches.map(branch => (
-                                <option key={branch.id} value={branch.id}>📍 {branch.name}</option>
-                            ))}
+                            {isAdmin && adminBranchIds.length > 1 && <option value="global">🌍 All My Branches</option>}
+                            {visibleBranches.map(branch => <option key={branch.id} value={branch.id}>📍 {branch.name}</option>)}
                         </select>
                         <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                     </div>
                 </div>
             )}
 
-            {/* Static branch display for managers restricted to a single branch */}
             {showStaticBranch && (
                  <div className={`px-4 mb-4 ${isSidebarCollapsed ? 'hidden' : 'block'}`}>
                     <div className="bg-gray-900 border border-gray-700 text-white text-sm font-bold rounded-lg px-4 py-2 shadow-inner flex items-center">
@@ -138,16 +132,31 @@ export default function Sidebar({
                 {activeRole === 'manager' && (
                     <>
                         <NavLink page="dashboard" label="Dashboard" icon={<User className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        {isFullManager && <NavLink page="staff" label="Manage Staff" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />}
+                        
+                        {/* MANAGE STAFF : Bloqué si niveau < 3 (sauf s'il a une exception RH) */}
+                        {(roleLevel >= 3 || permissions.canOffboardStaff || permissions.canEditRoleDescriptions) && (
+                            <NavLink page="staff" label="Manage Staff" icon={<Briefcase className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        )}
+                        
                         <NavLink page="planning" label="Planning" icon={<Calendar className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         <NavLink page="leave" label="Leave Management" icon={<Send className="h-5 w-5" />} badgeCount={pendingLeaveCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                        {isFullManager && (
-                            <>
-                                <NavLink page="reports" label="Reports" icon={<BarChart className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                                <NavLink page="financials" label="Financials" icon={<DollarSign className="h-5 w-5" />} badgeCount={pendingAdvanceCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                                <NavLink page="payroll" label="Payroll" icon={<DollarSign className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                                <NavLink page="settings" label="Settings & Config" icon={<Settings className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
-                            </>
+                        
+                        {/* RAPPORTS : Restreints */}
+                        {(roleLevel >= 3 || permissions.canViewAuditLogs) && (
+                            <NavLink page="reports" label="Reports" icon={<BarChart className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        )}
+                        
+                        {/* FINANCES & PAYROLL : Verrouillés via les permissions strictes */}
+                        {(isSuperAdmin || permissions.canViewFinancialRules || permissions.canEditFinancialRules) && (
+                            <NavLink page="financials" label="Financials" icon={<DollarSign className="h-5 w-5" />} badgeCount={pendingAdvanceCount} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        )}
+                        
+                        {(isSuperAdmin || permissions.canRunPayroll) && (
+                            <NavLink page="payroll" label="Payroll" icon={<DollarSign className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
+                        )}
+                        
+                        {(isSuperAdmin || permissions.canManageUsers || permissions.canEditCompanyInfo || permissions.canEditGeofence) && (
+                            <NavLink page="settings" label="Settings & Config" icon={<Settings className="h-5 w-5" />} {...{ currentPage, setCurrentPage, setIsMobileMenuOpen, isSidebarCollapsed }} />
                         )}
                     </>
                 )}
@@ -176,11 +185,12 @@ export default function Sidebar({
                 )}
             </nav>
             <div className="mt-auto p-4">
-                {['manager', 'dept_manager', 'admin', 'super_admin'].includes(userRole) && hasStaffProfile && (
+                {/* BOUTON SWITCH : Réservé aux niveaux 2 et plus qui ont un profil */}
+                {roleLevel >= 2 && hasStaffProfile && (
                     <button onClick={handleToggleRole} className={`flex items-center justify-center w-full px-4 py-3 mb-3 rounded-lg ${branding.bg} ${branding.hover} text-white transition-colors`}>
                         <RefreshCw className="h-5 w-5" />
                         <span className={`ml-3 font-medium ${isSidebarCollapsed ? 'hidden' : 'inline'}`}>
-                            {activeRole === 'manager' ? 'Switch to Staff' : `Switch to ${getSwitchText()}`}
+                            {activeRole === 'manager' ? 'Switch to Staff' : 'Switch to Manager'}
                         </span>
                     </button>
                 )}
