@@ -10,30 +10,7 @@ const InfoRow = ({ label, value }) => (
     </div>
 );
 
-const getCurrentJob = (staff) => {
-    if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-        if (staff?.baseSalary) return { position: staff.position || 'Staff', department: staff.department, baseSalary: staff.baseSalary, payType: 'Monthly' };
-        return { position: 'N/A', department: 'N/A', rate: 'N/A', payType: 'N/A' };
-    }
-    return [...staff.jobHistory].sort((a, b) => {
-        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
-        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
-        return dateA - dateB; 
-    })[0];
-};
-
-const formatRate = (job) => {
-    if (job?.baseSalary) {
-        const salary = parseFloat(job.baseSalary);
-        if (!isNaN(salary)) return `฿${salary.toLocaleString()} / month`;
-    }
-    if (typeof job?.rate === 'number') {
-        const rateString = job.rate.toLocaleString();
-        const payType = job.payType || 'Monthly';
-        return payType === 'Hourly' ? `฿${rateString} / hour` : `฿${rateString} / month`;
-    }
-    return 'N/A';
-};
+import { getCurrentJob, formatRate } from '../utils/staffUtils';
 
 export default function MyProfilePage({ staffProfile }) {
     const [isSalaryVisible, setIsSalaryVisible] = useState(false);

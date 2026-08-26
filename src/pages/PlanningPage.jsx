@@ -60,10 +60,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
     const getDeptStyle = (deptName) => DEPT_STYLES[deptName] || DEPT_STYLES['Unassigned'];
 
-    const getCurrentJob = (staff) => {
-        if (!staff.jobHistory || staff.jobHistory.length === 0) return { department: 'Unassigned', position: 'Staff' };
-        return [...staff.jobHistory].sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
-    };
+    import { getCurrentJob } from '../utils/staffUtils';
 
     const getShiftStatus = (schedule, attendance, dateString) => {
         const now = new Date();

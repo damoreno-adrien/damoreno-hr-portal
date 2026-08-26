@@ -70,18 +70,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
         return staff.fullName || 'Unknown';
     };
 
-    const getCurrentJob = (staff) => {
-        if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-            return { position: 'N/A', department: 'Unassigned', displayRate: 0, payType: 'Salary' };
-        }
-        const latestJob = [...staff.jobHistory].sort((a, b) => {
-            const dateA = fromFirestore(b.startDate) || new Date(0);
-            const dateB = fromFirestore(a.startDate) || new Date(0);
-            return dateA - dateB;
-        })[0];
-        let rate = latestJob.payType === 'Hourly' ? (latestJob.hourlyRate || latestJob.rate || 0) : (latestJob.baseSalary || latestJob.rate || 0);
-        return { ...latestJob, displayRate: rate };
-    };
+    import { getCurrentJob } from '../utils/staffUtils';
 
     const availableBranches = useMemo(() => {
         if (userRole === 'super_admin') return companyConfig?.branches || [];
