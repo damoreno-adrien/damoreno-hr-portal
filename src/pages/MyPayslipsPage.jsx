@@ -57,8 +57,12 @@ export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }
                     {isLoading ? (
                         <p className="text-center py-10 text-gray-400">Loading payslip history...</p>
                     ) : payslips.length > 0 ? (
-                        payslips.map(payslip => (
-                            <button key={payslip.id} onClick={() => setSelectedPayslip(payslip)} className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-700 transition-colors">
+                        payslips.map((payslip, index) => (
+                            <button 
+                                key={payslip.id || `${payslip.staffId}_${payslip.payPeriodMonth}_${payslip.payPeriodYear}` || index}
+                                onClick={() => setSelectedPayslip(payslip)} 
+                                className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-700 transition-colors"
+                            >
                                 <div>
                                     <p className="font-bold text-white">{months[payslip.payPeriodMonth - 1]} {payslip.payPeriodYear}</p>
                                     <p className="text-sm text-gray-400">Generated on: {dateUtils.formatDisplayDate(payslip.generatedAt)}</p>
