@@ -11,7 +11,8 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye } from 'lucide-react';
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield } from 'lucide-react';
+import { StaffPermissionsOverrides } from './StaffPermissionsOverrides';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 import usePermissions from '../../hooks/usePermissions';
@@ -881,6 +882,11 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {activeTab === 'settings' && isFullManager && (
                 <div className="space-y-6">
+                    {/* Permissions Overrides Section */}
+                    {permissions.canManageUsers && (
+                        <StaffPermissionsOverrides db={db} staffId={staff.id} />
+                    )}
+
                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                         <h4 className="text-base font-semibold text-white">Bonus Management</h4>
                         <div className="mt-4 space-y-4">
@@ -909,10 +915,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         </div>
                     </div>
 
-                    {/* --- CUSTOM PERMISSIONS OVERRIDES --- */}
-                    {permissions.canManageUsers && (
-                        <StaffPermissionsOverrides db={db} staffId={staff.id} />
-                    )}
 
                     {/* --- CRITICAL STAFF ACTIONS : Gérées par le hook usePermissions --- */}
                     {(permissions.canOffboardStaff || permissions.canResetPassword || userRole === 'super_admin') && (
