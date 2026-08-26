@@ -175,7 +175,7 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
     const lockedBranchName = companyConfig?.branches?.find(b => b.id === effectiveBranch)?.name || effectiveBranch;
 
     return (
-        <div className="flex flex-col h-[calc(100vh-2rem)] animate-fadeIn relative">
+        <div className="flex flex-col md:h-[calc(100vh-2rem)] md:min-h-0 animate-fadeIn relative">
             {/* INJECTION DE LA MODALE */}
             <ConfirmModal 
                 isOpen={confirmState.isOpen}
@@ -224,12 +224,12 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
                 </select>
             </div>
 
-            <div className="flex flex-col md:flex-row gap-6 flex-grow overflow-hidden">
-                <div className="hidden md:flex w-64 lg:w-72 flex-shrink-0 bg-gray-800 rounded-xl border border-gray-700 shadow-lg flex-col">
+            <div className="flex flex-col md:flex-row gap-6 md:flex-grow md:overflow-hidden md:min-h-0">
+                <div className="hidden md:flex w-64 lg:w-72 flex-shrink-0 bg-gray-800 rounded-xl border border-gray-700 shadow-lg flex-col md:min-h-0">
                     <div className="p-4 border-b border-gray-700 bg-gray-900/50 flex-shrink-0">
                         <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Configuration Modules</h3>
                     </div>
-                    <nav className="p-2 space-y-1 overflow-y-auto flex-grow custom-scrollbar">
+                    <nav className="p-2 space-y-1 overflow-y-auto flex-grow custom-scrollbar md:min-h-0">
                         {availableTabs.map((tab) => {
                             const Icon = tab.icon;
                             const isActive = activeTab === tab.id;
@@ -246,7 +246,7 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
                     </nav>
                 </div>
 
-                <div className="flex-grow bg-gray-900 rounded-xl border border-gray-700 overflow-y-auto shadow-inner custom-scrollbar p-4 md:p-6">
+                <div className="flex-grow bg-gray-900 rounded-xl border border-gray-700 md:overflow-y-auto shadow-inner custom-scrollbar p-4 md:p-6 md:min-h-0">
                     {renderContent()}
                 </div>
             </div>
