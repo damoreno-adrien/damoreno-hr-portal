@@ -29,7 +29,7 @@ const generateDateRange = (startDateStr, endDateStr) => {
 
 
 exports.exportPlanningDataHandler = onCall({
-    region: "asia-southeast1",
+    region: "asia-southeast1", 
     timeoutSeconds: 300,
 }, async (request) => {
     console.log("exportPlanningData: Function execution started.");
@@ -38,6 +38,13 @@ exports.exportPlanningDataHandler = onCall({
     if (!request.auth) {
         console.error("exportPlanningData: Unauthenticated access attempt.");
         throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    // Vérification des permissions spécifiques
+    const callerDoc = await admin.firestore().collection('users').doc(request.auth.uid).get();
+    if (!callerDoc.exists || !callerDoc.data().customPermissions?.canExportPlanning) {
+        console.error(`exportPlanningData: User ${request.auth.uid} lacks export permissions`);
+        throw new HttpsError("permission-denied", "Insufficient permissions to export planning data");
     }
     const callerUid = request.auth.uid;
     try {

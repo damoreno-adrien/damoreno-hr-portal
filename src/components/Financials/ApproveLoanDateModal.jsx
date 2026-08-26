@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 
-export default function ApproveLoanDateModal({ isOpen, onClose, onApprove, loanId }) {
+export default function ApproveLoanDateModal({ isOpen, onClose, onApprove, loanId, db, user }) {
+    const { permissions } = usePermissions(db, user?.role, user?.uid);
+    
+    if (!isOpen || !permissions.canApproveLoans) return null;
     const minDate = new Date().toISOString().split('T')[0];
     const [startDate, setStartDate] = useState(minDate);
 

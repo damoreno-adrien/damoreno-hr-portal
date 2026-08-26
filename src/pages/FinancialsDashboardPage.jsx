@@ -23,6 +23,10 @@ const getStaffCurrentJob = (staff) => { /* ... (reste inchangé) ... */
 };
 
 export default function FinancialsDashboardPage({ db, user, companyConfig }) {
+    const { permissions, loadingPermissions } = usePermissions(db, user?.role, user?.uid);
+    
+    if (loadingPermissions) return <LoadingSpinner />;
+    if (!permissions.canViewFinancials) return <UnauthorizedView />;
     const [payEstimate, setPayEstimate] = useState(null);
     const [isLoadingEstimate, setIsLoadingEstimate] = useState(true);
     const [latestPayslipForModal, setLatestPayslipForModal] = useState(null);
