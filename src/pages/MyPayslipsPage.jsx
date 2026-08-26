@@ -65,7 +65,7 @@ export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }
                     ) : payslips.length > 0 ? (
                         payslips.map((payslip, index) => (
                             <button 
-                                key={payslip.id || `${payslip.staffId}_${payslip.payPeriodYear}_${payslip.payPeriodMonth}_${index}`}
+                                key={payslip.id || `payslip-${payslip.payPeriodYear}-${payslip.payPeriodMonth}-${index}`}
                                 onClick={() => setSelectedPayslip(payslip)} 
                                 className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-700 transition-colors"
                             >
