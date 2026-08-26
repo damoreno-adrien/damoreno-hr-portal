@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import usePermissions from '../hooks/usePermissions';
-import LoadingSpinner from '../components/common/LoadingSpinner';
 import { Shield } from 'lucide-react';
 import { PayEstimateCard } from '../components/FinancialsDashboard/PayEstimateCard';
 import { SideCards } from '../components/FinancialsDashboard/SideCards';
