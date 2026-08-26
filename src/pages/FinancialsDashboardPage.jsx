@@ -32,13 +32,6 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500"></div>
         </div>
     );
-    if (!permissions.canViewFinancials) return (
-        <div className="flex flex-col items-center justify-center h-64 text-center p-8">
-            <Shield className="h-12 w-12 text-red-500 mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">Access Denied</h3>
-            <p className="text-gray-400">You don't have permission to view this page.</p>
-        </div>
-    );
     const [payEstimate, setPayEstimate] = useState(null);
     const [isLoadingEstimate, setIsLoadingEstimate] = useState(true);
     const [latestPayslipForModal, setLatestPayslipForModal] = useState(null);
