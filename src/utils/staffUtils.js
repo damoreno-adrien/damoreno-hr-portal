@@ -8,6 +8,53 @@ export const getDisplayName = (staff) => {
     return 'Unknown Staff';
 };
 
+export const getCurrentJob = (staff) => {
+    if (!staff?.jobHistory || staff.jobHistory.length === 0) {
+        return { 
+            position: staff?.position || 'Staff',
+            department: staff?.department || 'Unassigned',
+            rate: staff?.baseSalary || 0,
+            payType: 'Salary',
+            baseSalary: staff?.baseSalary || 0,
+            hourlyRate: staff?.hourlyRate || 0,
+            standardDayHours: staff?.standardDayHours || 8,
+            displayRate: staff?.baseSalary || 0
+        };
+    }
+    
+    const latestJob = [...staff.jobHistory].sort((a, b) => {
+        const dateA = new Date(b.startDate) || new Date(0);
+        const dateB = new Date(a.startDate) || new Date(0);
+        return dateA - dateB;
+    })[0];
+
+    const payType = latestJob.payType || 'Salary';
+    const displayRate = payType === 'Hourly' 
+        ? (latestJob.hourlyRate || latestJob.rate || 0)
+        : (latestJob.baseSalary || latestJob.rate || 0);
+
+    return {
+        ...latestJob,
+        position: latestJob.position || 'Staff',
+        department: latestJob.department || 'Unassigned',
+        payType,
+        displayRate,
+        baseSalary: latestJob.baseSalary || latestJob.rate || 0,
+        hourlyRate: latestJob.hourlyRate || latestJob.rate || 0,
+        standardDayHours: latestJob.standardDayHours || 8
+    };
+};
+
+export const formatRate = (rate, payType) => {
+    if (rate === undefined || rate === null) return 'N/A';
+    const numValue = Number(rate);
+    if (isNaN(numValue)) return 'N/A';
+    
+    return payType === 'Hourly' 
+        ? `฿${numValue.toLocaleString('en-US')}/h`
+        : `฿${numValue.toLocaleString('en-US')}/mo`;
+};
+
 export const checkIsBirthday = (birthdate) => {
     if (!birthdate) return false;
     const today = new Date();
