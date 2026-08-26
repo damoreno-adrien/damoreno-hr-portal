@@ -63,14 +63,7 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
 
-    const getDisplayName = (staff) => {
-        if (!staff) return 'Unknown';
-        if (staff.nickname) return staff.nickname;
-        if (staff.firstName) return `${staff.firstName} ${staff.lastName}`;
-        return staff.fullName || 'Unknown';
-    };
-
-    import { getCurrentJob } from '../utils/staffUtils';
+    import { getCurrentJob, getDisplayName } from '../utils/staffUtils';
 
     const availableBranches = useMemo(() => {
         if (userRole === 'super_admin') return companyConfig?.branches || [];
