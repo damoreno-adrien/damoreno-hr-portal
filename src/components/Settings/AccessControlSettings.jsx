@@ -357,7 +357,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                     <div className="space-y-4 pb-4">
                         <div className="bg-amber-900/20 border border-amber-700/50 p-3 rounded-lg mb-4">
                             <p className="text-xs text-amber-400 font-bold">Override Warning</p>
-                            <p className="text-xs text-amber-300 mt-1">Leave a permission on <b>"Inherit"</b> to follow the global Permission Matrix. Selecting Allow/Block will permanently override the default rules for this user.</p>
+                            <p className="text-xs text-amber-300 mt-1">Leave a permission on <b>&quot;Inherit&quot;</b> to follow the global Permission Matrix. Selecting Allow/Block will permanently override the default rules for this user.</p>
                         </div>
                         
                         <div className="flex flex-col gap-3 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
@@ -416,7 +416,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
             <div className="bg-gray-900/50 p-6 border-b border-gray-700">
                 <div className="flex items-center gap-3">
                     <div className="bg-indigo-500/20 p-2 rounded-lg"><Shield className="w-6 h-6 text-indigo-400" /></div>
-                    <div><h3 className="text-xl font-bold text-white">Access Control & Security</h3><p className="text-sm text-gray-400">Manage executive access, promote staff, and configure overrides.</p></div>
+                    <div><h3 className="text-xl font-bold text-white">Access Control &amp; Security</h3><p className="text-sm text-gray-400">Manage executive access, promote staff, and configure overrides.</p></div>
                 </div>
             </div>
 
