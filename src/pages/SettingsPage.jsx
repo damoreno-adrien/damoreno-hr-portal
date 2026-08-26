@@ -27,7 +27,16 @@ import ConfirmModal from '../components/common/ConfirmModal';
 // --- ADDED: adminBranchIds prop pour sécuriser le scope des données ---
 export default function SettingsPage({ db, companyConfig, userRole, activeBranch, adminBranchIds = [] }) {
     const [activeTab, setActiveTab] = useState('');
-    const { permissions, loadingPermissions } = usePermissions(db, userRole);
+
+    // Initialisation de l'auth EN PREMIER, avant les hooks qui en dépendent.
+    const auth = getAuth(app);
+
+    // --- FIX: On passe désormais l'UID de l'utilisateur courant. ---
+    // Sans cet UID, le hook usePermissions() bloque immédiatement (bail-out)
+    // et renvoie un objet de permissions vide pour TOUT LE MONDE sauf super_admin,
+    // ce qui cachait injustement les onglets "Financial Rules", "Geofence Config",
+    // et "Access Control" pour les rôles ayant pourtant reçu ces droits.
+    const { permissions, loadingPermissions } = usePermissions(db, userRole, auth.currentUser?.uid);
 
     const [localSelectedBranch, setLocalSelectedBranch] = useState('');
 
@@ -65,9 +74,6 @@ export default function SettingsPage({ db, companyConfig, userRole, activeBranch
             geofence: branchOverrides.geofence || companyConfig.geofence,
         };
     }, [companyConfig, effectiveBranch]);
-
-    // Initialisation de l'auth pour les logs (à mettre juste au dessus des fonctions)
-    const auth = getAuth(app);
 
     const handleAddDepartment = async (deptName) => { 
         const field = effectiveBranch ? `branchSettings.${effectiveBranch}.departments` : 'departments';

@@ -1,0 +1,4 @@
+if (!db || !userRole || !userId) {
+    setLoadingPermissions(false);
+    return;
+}
