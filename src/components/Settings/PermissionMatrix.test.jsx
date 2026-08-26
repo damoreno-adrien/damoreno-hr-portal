@@ -25,4 +25,35 @@ describe('PermissionMatrix Component', () => {
 
     expect(firstToggle).toBeDisabled();
   });
+});import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import PermissionMatrix from './PermissionMatrix';
+
+describe('PermissionMatrix Component', () => {
+  const mockProps = {
+    db: {},
+    auth: { currentUser: { uid: 'test-user' } }
+  };
+
+  test('affiche correctement les permissions', async () => {
+    render(<PermissionMatrix {...mockProps} />);
+    
+    await waitFor(() => {
+      expect(screen.getByText('Staff')).toBeInTheDocument();
+      expect(screen.getByLabelText('staff-can_view')).toBeChecked();
+      expect(screen.getByLabelText('staff-can_edit')).not.toBeChecked();
+    });
+  });
+
+  test('bloque les modifications sans permission', async () => {
+    vi.spyOn(require('../../hooks/usePermissions'), 'default')
+      .mockImplementation(() => ({
+        permissions: { canManageUsers: false },
+        loadingPermissions: false
+      }));
+
+    render(<PermissionMatrix {...mockProps} />);
+    
+    fireEvent.click(screen.getByLabelText('staff-can_view'));
+    expect(screen.getByText(/non autorisé/i)).toBeInTheDocument();
+  });
 });
