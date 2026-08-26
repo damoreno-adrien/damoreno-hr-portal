@@ -17,7 +17,6 @@ import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
 import usePermissions from '../../hooks/usePermissions';
 import { getAuth } from 'firebase/auth';
-import { StaffPermissionsOverrides } from './StaffPermissionsOverrides';
 
 // --- IMPORTS DES MODALES ---
 import FeedbackModal from '../common/FeedbackModal';
