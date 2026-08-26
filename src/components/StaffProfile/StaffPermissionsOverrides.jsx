@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import usePermissions from '../../hooks/usePermissions';
 import { PERMISSION_CATEGORIES } from '../../config/permissions.config';
 import { Loader2, Shield, Save, AlertCircle } from 'lucide-react';
 
-export function StaffPermissionsOverrides({ db, staffId }) {
+export function StaffPermissionsOverrides({ db, staffId, userRole, staffProfile }) {
+    const { permissions } = usePermissions(db, userRole, getAuth().currentUser?.uid);
     const [targetRole, setTargetRole] = useState('staff');
     const [roleDefaults, setRoleDefaults] = useState({});
     const [customOverrides, setCustomOverrides] = useState({});
@@ -45,11 +48,15 @@ export function StaffPermissionsOverrides({ db, staffId }) {
     }, [db, staffId]);
 
     const handleToggle = (key) => {
-      // Vérification hiérarchique
-      if (ROLE_HIERARCHY[staffProfile.role]?.level >= ROLE_HIERARCHY[userRole]?.level) {
-        setError("Vous ne pouvez pas modifier les permissions d'un rôle supérieur ou égal au vôtre");
-        return;
-      }
+        // Vérification hiérarchique et permissions
+        if (!permissions.canManageUsers) {
+            setError("You don't have permission to modify user permissions");
+            return;
+        }
+        if (ROLE_HIERARCHY[staffProfile.role]?.level >= ROLE_HIERARCHY[userRole]?.level) {
+            setError("You can't modify permissions for roles equal or higher than yours");
+            return;
+        }
         setCustomOverrides(prev => {
             const newOverrides = { ...prev };
             const defaultVal = !!roleDefaults[key];
@@ -68,13 +75,26 @@ export function StaffPermissionsOverrides({ db, staffId }) {
     };
 
     const handleSave = async () => {
+        if (!permissions.canManageUsers) {
+            setError("You don't have permission to save permission overrides");
+            return;
+        }
+
         setSaving(true);
         setError('');
         setSuccess(false);
         try {
-            await updateDoc(doc(db, 'users', staffId), {
+            const batch = writeBatch(db);
+            
+            // Update both staff profile and user doc for consistency
+            batch.update(doc(db, 'staff_profiles', staffId), {
                 customPermissions: customOverrides
             });
+            batch.update(doc(db, 'users', staffId), {
+                customPermissions: customOverrides
+            });
+
+            await batch.commit();
             setSuccess(true);
             setTimeout(() => setSuccess(false), 3000);
         } catch (err) {

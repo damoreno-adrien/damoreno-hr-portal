@@ -883,7 +883,12 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                 <div className="space-y-6">
                     {/* Permissions Overrides Section */}
                     {permissions.canManageUsers && (
-                        <StaffPermissionsOverrides db={db} staffId={staff.id} />
+                        <StaffPermissionsOverrides 
+                            db={db} 
+                            staffId={staff.id}
+                            userRole={userRole}
+                            staffProfile={staff}
+                        />
                     )}
 
                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
