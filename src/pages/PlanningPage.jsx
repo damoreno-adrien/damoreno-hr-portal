@@ -6,6 +6,7 @@ import { getAuth } from 'firebase/auth'; // <-- NEW
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
+import { getCurrentJob, getDisplayName } from '../utils/staffUtils';
 import {
     ChevronLeft, ChevronRight, ChevronDown, Download, Upload,
     Clock, Coffee, Flame, Plus, Loader2, ArrowUpDown,
@@ -59,8 +60,6 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
     }, [weekStart]);
 
     const getDeptStyle = (deptName) => DEPT_STYLES[deptName] || DEPT_STYLES['Unassigned'];
-
-    import { getCurrentJob, getDisplayName } from '../utils/staffUtils';
 
     const getShiftStatus = (schedule, attendance, dateString) => {
         const now = new Date();
