@@ -22,7 +22,13 @@ export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const payslipData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const payslipData = snapshot.docs.map(doc => ({ 
+                id: doc.id, 
+                ...doc.data(),
+                staffId: doc.data().staffId,
+                payPeriodMonth: doc.data().payPeriodMonth,
+                payPeriodYear: doc.data().payPeriodYear
+            }));
             setPayslips(payslipData);
             setIsLoading(false);
         }, (error) => {
@@ -59,7 +65,7 @@ export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }
                     ) : payslips.length > 0 ? (
                         payslips.map((payslip, index) => (
                             <button 
-                                key={payslip.id || `${payslip.staffId || 'ps'}-${payslip.payPeriodMonth}-${payslip.payPeriodYear}-${index}`}
+                                key={payslip.id || `${payslip.staffId}_${payslip.payPeriodYear}_${payslip.payPeriodMonth}_${index}`}
                                 onClick={() => setSelectedPayslip(payslip)} 
                                 className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-700 transition-colors"
                             >
