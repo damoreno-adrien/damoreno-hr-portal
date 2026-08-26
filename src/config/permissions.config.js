@@ -58,11 +58,5 @@ export const ROLE_DEFINITIONS = Object.entries(ROLE_HIERARCHY).map(([id, config]
   label: id.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' '),
   ...config
 }));
-    { id: 'staff', label: 'Staff (No Admin Access)', level: 1 },
-    { id: 'dept_manager', label: 'Department Manager', level: 2 },
-    { id: 'manager', label: 'General Manager', level: 3 },
-    { id: 'admin', label: 'Branch Admin (Limited View)', level: 4 },
-    { id: 'super_admin', label: 'Global Super Admin (Full View)', level: 5 }
-];
 
 export const DEFAULT_ROLE_IDS = ROLE_DEFINITIONS.map(role => role.id);
