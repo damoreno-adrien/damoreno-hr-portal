@@ -16,7 +16,7 @@ export default function useFinancials(db, staffList, activeBranch, adminBranchId
         onConfirm: null
     });
 
-    const getDisplayName = (staff) => staff?.nickname || staff?.firstName || staff?.fullName || 'Unknown';
+    import { getDisplayName } from '../utils/staffUtils';
 
     // 1. FETCH GLOBAL
     useEffect(() => {

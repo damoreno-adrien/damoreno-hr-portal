@@ -9,6 +9,13 @@ export const getDisplayName = (staff) => {
 };
 
 export const getCurrentJob = (staff) => {
+    if (!staff) return {
+        position: 'N/A',
+        department: 'Unassigned',
+        rate: 0,
+        payType: 'Salary',
+        displayRate: 0
+    };
     if (!staff?.jobHistory || staff.jobHistory.length === 0) {
         return { 
             position: staff?.position || 'Staff',

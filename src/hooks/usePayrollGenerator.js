@@ -11,27 +11,7 @@ import { calculateStaffLeaveBalances } from '../utils/leaveCalculator';
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips');
 
-const getCurrentJob = (staff) => {
-    if (!staff?.jobHistory || staff.jobHistory.length === 0) {
-        return { rate: 0, payType: 'Salary', department: 'N/A', baseSalary: 0, standardDayHours: 8 };
-    }
-    const latestJob = [...staff.jobHistory].sort((a, b) => {
-        const dateA = dateUtils.fromFirestore(b.startDate) || new Date(0);
-        const dateB = dateUtils.fromFirestore(a.startDate) || new Date(0);
-        return dateA - dateB;
-    })[0];
-
-    let type = latestJob.payType || 'Salary';
-    const lowerType = type.toLowerCase().trim();
-    if (lowerType === 'monthly' || lowerType === 'salary') type = 'Salary';
-
-    return {
-        ...latestJob, payType: type,
-        baseSalary: Number(latestJob.baseSalary) || Number(latestJob.rate) || 0,
-        hourlyRate: Number(latestJob.hourlyRate) || Number(latestJob.rate) || 0,
-        standardDayHours: Number(latestJob.standardDayHours) || 8
-    };
-};
+import { getCurrentJob } from '../utils/staffUtils';
 
 export default function usePayrollGenerator(db, staffList, companyConfig, payPeriod, activeBranch) {
     const [payrollData, setPayrollData] = useState([]);

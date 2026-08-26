@@ -60,7 +60,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
     const getDeptStyle = (deptName) => DEPT_STYLES[deptName] || DEPT_STYLES['Unassigned'];
 
-    import { getCurrentJob } from '../utils/staffUtils';
+    import { getCurrentJob, getDisplayName } from '../utils/staffUtils';
 
     const getShiftStatus = (schedule, attendance, dateString) => {
         const now = new Date();

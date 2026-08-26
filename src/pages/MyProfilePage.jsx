@@ -10,7 +10,7 @@ const InfoRow = ({ label, value }) => (
     </div>
 );
 
-import { getCurrentJob, formatRate } from '../utils/staffUtils';
+import { getCurrentJob, formatRate, getDisplayName } from '../utils/staffUtils';
 
 export default function MyProfilePage({ staffProfile }) {
     const [isSalaryVisible, setIsSalaryVisible] = useState(false);
