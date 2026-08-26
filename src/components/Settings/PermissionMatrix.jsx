@@ -8,6 +8,8 @@ import { app } from '../../../firebase.js';
 import { logSystemAction } from '../../utils/auditLogger';
 import FeedbackModal from '../common/FeedbackModal';
 import { PERMISSION_CATEGORIES, DEFAULT_ROLE_IDS } from '../../config/permissions.config';
+import { Tooltip } from 'react-tooltip';
+import 'react-tooltip/dist/react-tooltip.css';
 
 export function PermissionMatrix({ db }) {
     const [matrix, setMatrix] = useState(null);
@@ -72,6 +74,12 @@ export function PermissionMatrix({ db }) {
     return (
         <div className="space-y-6 animate-fadeIn pb-10 relative">
             <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+
+            <Tooltip 
+                id="perm-tooltip" 
+                className="!bg-gray-900 !text-gray-100 !border !border-indigo-700/50 !text-xs !max-w-xs !z-50 !shadow-xl"
+                place="top"
+            />
 
             <div className="bg-red-900/20 border border-red-700/50 p-4 rounded-xl flex gap-4 items-start">
                 <ShieldAlert className="w-6 h-6 text-red-500 flex-shrink-0 mt-1" />
