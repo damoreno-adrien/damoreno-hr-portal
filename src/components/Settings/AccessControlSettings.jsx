@@ -194,6 +194,15 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
     };
 
     const handleDemoteExecutive = async (admin) => {
+        // Empêche de descendre en dessous du niveau actuel
+        if (getRoleLevel(admin.role) <= getRoleLevel(userRole)) {
+            setFeedbackModal({
+                type: 'error', 
+                title: 'Action Refusée',
+                message: "Vous ne pouvez pas modifier les rôles de niveau égal ou supérieur"
+            });
+            return;
+        }
         if (!admin.hasStaffProfile) {
             return setFeedbackModal({ type: 'error', title: 'Action Blocked', message: `Cannot demote ${admin.name}. They must have a Staff Profile first to ensure they are assigned to a specific branch.` });
         }
@@ -256,6 +265,16 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
     };
 
     const handleRoleChange = async (targetUid, newRole, userName) => {
+        // Blocage des modifications sur super_admin
+        const targetUser = users.find(u => u.id === targetUid);
+        if (targetUser?.role === 'super_admin') {
+            setFeedbackModal({
+                type: 'error',
+                title: 'Action Bloquée',
+                message: "Le rôle Super Admin ne peut être modifié"
+            });
+            return;
+        }
         setConfirmState({
             isOpen: true,
             title: "Change Security Clearance",
@@ -265,6 +284,14 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                 setIsSaving(true);
                 try {
                     await updateUserRoleFunc({ targetUid, newRole });
+                    await logSystemAction(
+                        db, 
+                        auth.currentUser, 
+                        selectedBranchId, 
+                        'ROLE_CHANGE',
+                        `Changed ${userName}'s role from ${targetUser.role} to ${newRole}`,
+                        { previousRole: targetUser.role, newRole }
+                    );
                     await logSystemAction(db, auth.currentUser, selectedBranchId, 'UPDATE_STAFF_CLEARANCE', `Changed security clearance of ${userName} to ${newRole.toUpperCase()}.`);
 
                     setFeedbackModal({ type: 'success', title: 'Clearance Updated', message: `Success! ${userName} clearance updated.` });
@@ -639,7 +666,10 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                                         'bg-gray-800 text-gray-400 border-gray-600'
                                                     }`}
                                                 >
-                                                    {ROLE_DEFINITIONS.filter(r => r.level < 4).map(role => (
+                                                    {ROLE_DEFINITIONS
+                                                        .filter(r => r.level < 4)
+                                                        .filter(r => getRoleLevel(userRole) >= r.level) // Filtre hiérarchique
+                                                        .map(role => (
                                                         <option key={role.id} value={role.id} className="bg-gray-800 text-white font-medium">{role.label}</option>
                                                     ))}
                                                 </select>
