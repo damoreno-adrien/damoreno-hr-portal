@@ -3,9 +3,12 @@ import { useState, useEffect } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { ALL_PERMISSION_KEYS } from '../config/permissions.config';
 
+const permissionCache = new Map();
+
 export default function usePermissions(db, userRole, userId) {
     const [permissions, setPermissions] = useState({});
     const [loadingPermissions, setLoadingPermissions] = useState(true);
+    const cacheKey = `${userRole}-${userId}`;
 
     useEffect(() => {
         if (!db || !userRole || !userId) {

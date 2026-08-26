@@ -9,7 +9,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
  * @param {String} actionType - Le type d'action (ex: 'UPDATE_SETTINGS', 'REVOKE_ACCESS')
  * @param {String} details - Une description lisible par un humain
  */
-export const logSystemAction = async (db, user, branchId, actionType, details) => {
+export const logSystemAction = async (db, user, branchId, actionType, details, metadata = {}) => {
     if (!db || !user) return;
 
     try {
@@ -17,9 +17,15 @@ export const logSystemAction = async (db, user, branchId, actionType, details) =
             timestamp: serverTimestamp(),
             userId: user.uid,
             userEmail: user.email || 'Unknown Email',
+            userRole: user.role || 'unknown',
             branchId: branchId || 'global',
             actionType: actionType,
-            details: details
+            details: details,
+            metadata: {
+                ipAddress: metadata.ipAddress || null,
+                userAgent: metadata.userAgent || null,
+                ...metadata
+            }
         });
     } catch (error) {
         // On loggue l'erreur dans la console, mais on ne fait pas planter l'application

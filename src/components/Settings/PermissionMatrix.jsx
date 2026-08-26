@@ -127,6 +127,9 @@ export function PermissionMatrix({ db }) {
                                                             ? 'bg-indigo-500 text-white shadow-[0_0_10px_rgba(99,102,241,0.5)]' 
                                                             : 'bg-gray-900 border border-gray-600 text-transparent'
                                                         } ${isSuperAdmin ? 'opacity-50 cursor-not-allowed' : 'hover:scale-110'}`}
+                                                        aria-label={`${isGranted ? 'Revoke' : 'Grant'} ${perm.label} for ${role}`}
+                                                        data-tooltip-id="perm-tooltip" 
+                                                        data-tooltip-content={`${perm.label}: ${perm.desc}`}
                                                     >
                                                         ✓
                                                     </button>
