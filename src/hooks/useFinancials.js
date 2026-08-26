@@ -1,6 +1,7 @@
 /* src/hooks/useFinancials.js */
 import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getDisplayName } from '../utils/staffUtils';
 
 export default function useFinancials(db, staffList, activeBranch, adminBranchIds, userRole, payPeriod, staffFilterId) {
     const [globalAdvances, setGlobalAdvances] = useState([]);
@@ -15,8 +16,6 @@ export default function useFinancials(db, staffList, activeBranch, adminBranchId
         message: '',
         onConfirm: null
     });
-
-    import { getDisplayName } from '../utils/staffUtils';
 
     // 1. FETCH GLOBAL
     useEffect(() => {
