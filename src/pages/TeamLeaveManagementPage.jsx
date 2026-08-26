@@ -14,6 +14,11 @@ import { LeaveTimeline } from '../components/LeaveManagement/LeaveTimeline';
 import * as dateUtils from '../utils/dateUtils';
 import { getDisplayName } from '../utils/staffUtils';
 
+// --- FIX: Import usePermissions so canApproveLeave (Permission Matrix / custom
+// overrides) can actually be enforced on the Approve/Reject buttons inside
+// LeaveRequestItem, instead of that permission key being entirely unused. ---
+import usePermissions from '../hooks/usePermissions';
+
 // --- IMPORTS DES MODALES ---
 import FeedbackModal from '../components/common/FeedbackModal';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -45,7 +50,7 @@ const DateRangeFilter = ({ currentFilter, setFilter }) => {
     );
 };
 
-const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, expandSignal, activeBranch }) => {
+const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, expandSignal, activeBranch, permissions }) => {
     const [isOpen, setIsOpen] = useState(false);
 
     useEffect(() => {
@@ -79,6 +84,7 @@ const StaffGroup = ({ group, userRole, onUpdateRequest, onDeleteRequest, onEditR
                             onEditRequest={onEditRequest} onMcStatusChange={onMcStatusChange}
                             allRequests={allRequests} companyConfig={companyConfig} staffList={staffList}
                             activeBranch={activeBranch} branches={companyConfig?.branches || []}
+                            permissions={permissions}
                         />
                     ))}
                 </div>
@@ -114,6 +120,10 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
     // --- STATES POUR LES MODALES ---
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
+
+    // --- FIX: Compile role-matrix + custom-override permissions for the current
+    // user so canApproveLeave can be enforced inside LeaveRequestItem. ---
+    const { permissions } = usePermissions(db, userRole, user?.uid || getAuth().currentUser?.uid);
 
     useEffect(() => {
         const uid = user?.uid || getAuth().currentUser?.uid;
@@ -480,6 +490,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                                     onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange}
                                     allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList}
                                     activeBranch={activeBranch} branches={companyConfig?.branches || []}
+                                    permissions={permissions}
                                 />
                             )) : (
                                 <p className="text-center py-10 text-gray-400">No {filter} requests found.</p>
@@ -493,6 +504,7 @@ export default function TeamLeaveManagementPage({ db, user, userRole, staffList,
                                 onEditRequest={openEditModal} onMcStatusChange={handleMcStatusChange}
                                 allRequests={allLeaveRequests} companyConfig={companyConfig} staffList={staffList}
                                 expandSignal={expandSignal} activeBranch={activeBranch}
+                                permissions={permissions}
                             />
                         )) : (
                             <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700">

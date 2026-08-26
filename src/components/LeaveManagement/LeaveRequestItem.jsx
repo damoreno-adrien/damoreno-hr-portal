@@ -6,9 +6,15 @@ import { calculateStaffLeaveBalances } from '../../utils/leaveCalculator';
 import { Briefcase, Trash2, AlertTriangle, Users, Banknote } from 'lucide-react';
 import StatusBadge from '../common/StatusBadge';
 
-// --- NEW: Added activeBranch and branches to props ---
-export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, activeBranch, branches = [] }) => {
+// --- FIX: Added `permissions` prop so the `canApproveLeave` key (defined in
+// permissions.config.js and toggleable in the Permission Matrix / per-user
+// overrides) actually controls the Approve/Reject buttons, instead of those
+// buttons being gated purely by a hardcoded role check. Edit/Delete remain
+// restricted to isFullManager since those are more destructive, structural
+// actions distinct from the "approve leave" permission.
+export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteRequest, onEditRequest, onMcStatusChange, allRequests, companyConfig, staffList, activeBranch, branches = [], permissions = {} }) => {
     const isFullManager = ['admin', 'manager', 'super_admin'].includes(userRole);
+    const canApproveOrReject = isFullManager || !!permissions.canApproveLeave;
 
     const conflicts = useMemo(() => {
         if (!allRequests || req.status !== 'pending' || req.leaveType === 'Cash Out Holiday Credits') return [];
@@ -126,7 +132,7 @@ export const LeaveRequestItem = ({ req, userRole, onUpdateRequest, onDeleteReque
                         </div>
                     )}
 
-                    {req.status === 'pending' && isFullManager && (
+                    {req.status === 'pending' && canApproveOrReject && (
                         <div className="flex gap-2 ml-4 pl-4 border-l border-gray-600">
                             <button onClick={() => onUpdateRequest(req.id, 'rejected')} className="px-4 py-2 text-sm font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white">Reject</button>
                             <button onClick={() => onUpdateRequest(req.id, 'approved')} className="px-4 py-2 text-sm font-bold rounded-lg bg-green-600 hover:bg-green-700 text-white">Approve</button>
