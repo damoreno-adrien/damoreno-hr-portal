@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import usePermissions from '../hooks/usePermissions';
 import { PayEstimateCard } from '../components/FinancialsDashboard/PayEstimateCard';
 import { SideCards } from '../components/FinancialsDashboard/SideCards';
 import Modal from '../components/common/Modal';
