@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import usePermissions from '../../hooks/usePermissions';
 
 export default function ApproveLoanDateModal({ isOpen, onClose, onApprove, loanId, db, user }) {
     const { permissions } = usePermissions(db, user?.role, user?.uid);
