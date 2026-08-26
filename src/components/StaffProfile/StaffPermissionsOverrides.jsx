@@ -45,6 +45,11 @@ export function StaffPermissionsOverrides({ db, staffId }) {
     }, [db, staffId]);
 
     const handleToggle = (key) => {
+      // Vérification hiérarchique
+      if (ROLE_HIERARCHY[staffProfile.role]?.level >= ROLE_HIERARCHY[userRole]?.level) {
+        setError("Vous ne pouvez pas modifier les permissions d'un rôle supérieur ou égal au vôtre");
+        return;
+      }
         setCustomOverrides(prev => {
             const newOverrides = { ...prev };
             const defaultVal = !!roleDefaults[key];

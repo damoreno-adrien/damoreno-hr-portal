@@ -42,6 +42,15 @@ export function PermissionMatrix({ db }) {
     }, [db]);
 
     const handleToggle = async (role, permissionKey, currentValue) => {
+      // Double vérification sécurité
+      if (role === 'super_admin' || !permissions.canManageUsers) {
+        setFeedbackModal({
+          type: 'error',
+          title: 'Action refusée',
+          message: "Vous n'avez pas les droits pour cette modification"
+        });
+        return;
+      }
         if (role === 'super_admin') {
             setFeedbackModal({ type: 'error', title: 'Action Blocked', message: "Super Admin permissions cannot be restricted." });
             return;

@@ -41,7 +41,23 @@ export const PERMISSION_CATEGORIES = [
 export const ALL_PERMISSION_KEYS = PERMISSION_CATEGORIES.flatMap(cat => cat.keys.map(p => p.key));
 
 // LE NOUVEAU REGISTRE DES RÔLES
-export const ROLE_DEFINITIONS = [
+export const ROLE_HIERARCHY = {
+  staff: { level: 1, canOverride: [] },
+  dept_manager: { level: 2, canOverride: ['staff'] },
+  manager: { level: 3, canOverride: ['staff', 'dept_manager'] },
+  admin: { level: 4, canOverride: ['staff', 'dept_manager', 'manager'] },
+  super_admin: { 
+    level: 5, 
+    canOverride: ['staff', 'dept_manager', 'manager', 'admin'],
+    immutable: true
+  }
+};
+
+export const ROLE_DEFINITIONS = Object.entries(ROLE_HIERARCHY).map(([id, config]) => ({
+  id,
+  label: id.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' '),
+  ...config
+}));
     { id: 'staff', label: 'Staff (No Admin Access)', level: 1 },
     { id: 'dept_manager', label: 'Department Manager', level: 2 },
     { id: 'manager', label: 'General Manager', level: 3 },
