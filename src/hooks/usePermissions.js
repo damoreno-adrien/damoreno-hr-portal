@@ -3,12 +3,18 @@ import { useState, useEffect } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { ALL_PERMISSION_KEYS } from '../config/permissions.config';
 
+// Module-level cache shared across all hook instances/components.
+// Key: "role-userId" -> compiled permissions object.
 const permissionCache = new Map();
 
 export default function usePermissions(db, userRole, userId) {
-    const [permissions, setPermissions] = useState({});
-    const [loadingPermissions, setLoadingPermissions] = useState(true);
     const cacheKey = `${userRole}-${userId}`;
+    const cached = permissionCache.get(cacheKey);
+
+    // Seed initial state from cache (if any) to avoid a loading flicker
+    // when this hook remounts (e.g., navigating between pages).
+    const [permissions, setPermissions] = useState(cached || {});
+    const [loadingPermissions, setLoadingPermissions] = useState(!cached);
 
     useEffect(() => {
         if (!db || !userRole || !userId) {
@@ -19,9 +25,17 @@ export default function usePermissions(db, userRole, userId) {
         if (userRole === 'super_admin') {
             const superAdminPerms = {};
             ALL_PERMISSION_KEYS.forEach(key => superAdminPerms[key] = true);
+            permissionCache.set(cacheKey, superAdminPerms);
             setPermissions(superAdminPerms);
             setLoadingPermissions(false);
             return;
+        }
+
+        // Show cached permissions immediately while fresh data loads in the background.
+        const cachedForKey = permissionCache.get(cacheKey);
+        if (cachedForKey) {
+            setPermissions(cachedForKey);
+            setLoadingPermissions(false);
         }
 
         let rolePerms = {};
@@ -31,7 +45,9 @@ export default function usePermissions(db, userRole, userId) {
 
         const compilePermissions = () => {
             if (isMatrixLoaded && isUserLoaded) {
-                setPermissions({ ...rolePerms, ...customPerms });
+                const compiled = { ...rolePerms, ...customPerms };
+                permissionCache.set(cacheKey, compiled);
+                setPermissions(compiled);
                 setLoadingPermissions(false);
             }
         };
@@ -49,7 +65,7 @@ export default function usePermissions(db, userRole, userId) {
         });
 
         return () => { unsubMatrix(); unsubUser(); };
-    }, [db, userRole, userId]);
+    }, [db, userRole, userId, cacheKey]);
 
     return { permissions, loadingPermissions };
 }

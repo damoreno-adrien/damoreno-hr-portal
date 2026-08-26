@@ -371,7 +371,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                 if (customPermsModal.perms[perm.key] === false) currentValue = 'block';
 
                                 return (
-                                    <div key={perm.key} className="flex items-center justify-between p-3 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-750 transition-colors">
+                                    <div key={perm.key} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-750 transition-colors">
                                         <div className="pr-4">
                                             <p className={`text-sm font-bold ${currentValue !== 'inherit' ? 'text-amber-400' : 'text-gray-200'}`}>{perm.label}</p>
                                             <p className="text-[10px] text-gray-500 mt-0.5">{perm.desc}</p>
@@ -511,9 +511,9 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                                 <div className="absolute top-2 right-2 w-2 h-2 bg-amber-500 rounded-full" title="Has custom permission overrides"></div>
                                             )}
                                             
-                                            <div className="flex items-start justify-between">
+                                            <div className="flex items-start justify-between gap-2 flex-wrap">
                                                 <div>
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <p className="text-sm font-bold text-white">{user.name || 'Unknown Name'}</p>
                                                         <span className={`border text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${user.role === 'super_admin' ? 'bg-purple-900/50 text-purple-400 border-purple-700/50' : 'bg-indigo-900/50 text-indigo-400 border-indigo-700/50'}`}>{ROLE_DEFINITIONS.find(r => r.id === user.role)?.label.split(' ')[0] || user.role}</span>
                                                     </div>
@@ -523,7 +523,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                                 </div>
                                                 
                                                 {userRole === 'super_admin' && (
-                                                    <div className="flex gap-1">
+                                                    <div className="flex gap-1 flex-wrap">
                                                         {user.role !== 'super_admin' && (
                                                             <button onClick={() => handleOpenCustomPerms(user)} className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-amber-500/10 rounded transition-colors" title="Manage Custom Permissions">
                                                                 <Key className="w-4 h-4" />
@@ -591,14 +591,14 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                         </button>
                     </div>
 
-                    <div className="bg-gray-900/50 rounded-xl border border-gray-700 overflow-hidden">
+                    <div className="bg-gray-900/50 rounded-xl border border-gray-700 overflow-x-auto custom-scrollbar">
                         <table className="min-w-full divide-y divide-gray-700">
                             <thead className="bg-gray-800 select-none">
                                 <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase cursor-pointer hover:text-white transition-colors group" onClick={() => handleSort('name')}>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase cursor-pointer hover:text-white transition-colors group whitespace-nowrap" onClick={() => handleSort('name')}>
                                         <div className="flex items-center gap-1">Team Member {sortConfig.key === 'name' ? (sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />) : <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />}</div>
                                     </th>
-                                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase cursor-pointer hover:text-white transition-colors group" onClick={() => handleSort('role')}>
+                                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase cursor-pointer hover:text-white transition-colors group whitespace-nowrap" onClick={() => handleSort('role')}>
                                         <div className="flex items-center justify-end gap-1">{sortConfig.key === 'role' ? (sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />) : <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />} Security Clearance</div>
                                     </th>
                                 </tr>
@@ -608,7 +608,7 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                     const roleLevel = getRoleLevel(user.role);
                                     return (
                                     <tr key={user.id} className="hover:bg-gray-800/50">
-                                        <td className="px-4 py-3">
+                                        <td className="px-4 py-3 whitespace-nowrap">
                                             <div className="flex items-center gap-2">
                                                 <p className="text-sm font-bold text-white">{user.name} {user.nickname && <span className="text-gray-400 font-normal">({user.nickname})</span>}</p>
                                                 {user.status !== 'active' && <span className="bg-red-900/30 text-red-400 border border-red-800/50 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">Archived</span>}
@@ -616,32 +616,34 @@ export const AccessControlSettings = ({ db, userRole, selectedBranchId, branches
                                             <p className="text-xs text-gray-400">{user.email || 'No email registered'}</p>
                                             <p className="text-[9px] text-gray-600 font-mono mt-0.5">UID: {user.id}</p>
                                         </td>
-                                        <td className="px-4 py-3 flex items-center justify-end gap-2">
-                                            {/* BOUTON D'EXCEPTION POUR LES MANAGERS/DEPT_MANAGERS */}
-                                            {roleLevel >= 2 && userRole === 'super_admin' && (
-                                                <button onClick={() => handleOpenCustomPerms(user)} className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-amber-500/10 rounded transition-colors relative" title="Manage Custom Permissions">
-                                                    <Key className="w-4 h-4" />
-                                                    {Object.keys(user.customPermissions || {}).some(k => user.customPermissions[k] !== undefined) && (
-                                                        <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
-                                                    )}
-                                                </button>
-                                            )}
-                                            
-                                            {/* MENU DÉROULANT DYNAMIQUE POUR LE STAFF (Niveau < 4) */}
-                                            <select
-                                                value={user.role || 'staff'}
-                                                onChange={(e) => handleRoleChange(user.id, e.target.value, user.name)}
-                                                disabled={isSaving}
-                                                className={`text-sm rounded-lg px-3 py-1.5 border outline-none font-medium text-right cursor-pointer ${
-                                                    roleLevel === 3 ? 'bg-amber-900/30 text-amber-400 border-amber-700/50' : 
-                                                    roleLevel === 2 ? 'bg-teal-900/30 text-teal-400 border-teal-700/50' : 
-                                                    'bg-gray-800 text-gray-400 border-gray-600'
-                                                }`}
-                                            >
-                                                {ROLE_DEFINITIONS.filter(r => r.level < 4).map(role => (
-                                                    <option key={role.id} value={role.id} className="bg-gray-800 text-white font-medium">{role.label}</option>
-                                                ))}
-                                            </select>
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                            <div className="flex items-center justify-end gap-2">
+                                                {/* BOUTON D'EXCEPTION POUR LES MANAGERS/DEPT_MANAGERS */}
+                                                {roleLevel >= 2 && userRole === 'super_admin' && (
+                                                    <button onClick={() => handleOpenCustomPerms(user)} className="p-1.5 text-gray-400 hover:text-amber-400 hover:bg-amber-500/10 rounded transition-colors relative" title="Manage Custom Permissions">
+                                                        <Key className="w-4 h-4" />
+                                                        {Object.keys(user.customPermissions || {}).some(k => user.customPermissions[k] !== undefined) && (
+                                                            <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+                                                        )}
+                                                    </button>
+                                                )}
+                                                
+                                                {/* MENU DÉROULANT DYNAMIQUE POUR LE STAFF (Niveau < 4) */}
+                                                <select
+                                                    value={user.role || 'staff'}
+                                                    onChange={(e) => handleRoleChange(user.id, e.target.value, user.name)}
+                                                    disabled={isSaving}
+                                                    className={`text-sm rounded-lg px-3 py-1.5 border outline-none font-medium text-right cursor-pointer ${
+                                                        roleLevel === 3 ? 'bg-amber-900/30 text-amber-400 border-amber-700/50' : 
+                                                        roleLevel === 2 ? 'bg-teal-900/30 text-teal-400 border-teal-700/50' : 
+                                                        'bg-gray-800 text-gray-400 border-gray-600'
+                                                    }`}
+                                                >
+                                                    {ROLE_DEFINITIONS.filter(r => r.level < 4).map(role => (
+                                                        <option key={role.id} value={role.id} className="bg-gray-800 text-white font-medium">{role.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
                                         </td>
                                     </tr>
                                 )})}
