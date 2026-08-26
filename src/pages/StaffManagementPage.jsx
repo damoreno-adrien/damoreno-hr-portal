@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import Modal from '../components/common/Modal';
+import { getCurrentJob, getDisplayName } from '../utils/staffUtils';
 import AddStaffForm from '../components/StaffProfile/AddStaffForm';
 import StaffProfileModal from '../components/StaffProfile/StaffProfileModal';
 import { Plus, Download } from 'lucide-react';
@@ -62,8 +63,6 @@ export default function StaffManagementPage({ auth, db, staffList, departments, 
     
     const handleViewStaff = (staff) => setSelectedStaff(staff);
     const closeProfileModal = () => setSelectedStaff(null);
-
-    import { getCurrentJob, getDisplayName } from '../utils/staffUtils';
 
     const availableBranches = useMemo(() => {
         if (userRole === 'super_admin') return companyConfig?.branches || [];
