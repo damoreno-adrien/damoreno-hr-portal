@@ -79,6 +79,13 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
                 value={staff.isSsoRegistered === false ? 'Not Enrolled' : 'Enrolled'}
                 className={staff.isSsoRegistered === false ? 'text-amber-500' : 'text-green-400'}
             />
+            {staff.isSsoRegistered !== false && (
+                <InfoRow
+                    label="SSO Allowance"
+                    value={staff.receivesSsoAllowance === false ? 'Paid by Staff (No Allowance)' : 'Covered by Company'}
+                    className={staff.receivesSsoAllowance === false ? 'text-gray-400' : 'text-indigo-400'}
+                />
+            )}
         </div>
     );
 };

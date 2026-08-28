@@ -120,6 +120,21 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                 />
                 <span className="text-sm font-bold text-white">Enrolled in Social Security (SSO)</span>
             </label>
+            {/* --- NOUVELLE CHECKBOX SSO ALLOWANCE --- */}
+            <label className={`flex items-center space-x-3 pl-8 ${formData.isSsoRegistered ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                <input
+                    id="receivesSsoAllowance"
+                    type="checkbox"
+                    checked={formData.receivesSsoAllowance ?? true}
+                    onChange={handleInputChange}
+                    disabled={!formData.isSsoRegistered}
+                    className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-indigo-500 focus:ring-indigo-500 disabled:bg-gray-800"
+                />
+                <div className="flex flex-col">
+                    <span className="text-sm font-medium text-gray-300">Company covers SSO (SSO Allowance)</span>
+                    <span className="text-xs text-gray-500">If checked, the SSO deduction is given back as an allowance.</span>
+                </div>
+            </label>
 
             <div className="border-t border-gray-700 pt-4">
                 <label className="block text-sm font-bold text-indigo-400 mb-1">Public Holiday Policy</label>

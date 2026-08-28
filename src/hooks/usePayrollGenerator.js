@@ -222,10 +222,21 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 const preSsoEarnings = safeBasePay + safeAttendanceBonus + safeOtherEarningsTotal + leavePayoutTotal + safeOvertimePay;
 
-                const ssoRate = (Number(companyConfig.ssoRate) || 5) / 100;
-                const ssoCap = Number(companyConfig.ssoCap) || 750;
-                const ssoDeduction = Math.min(Math.max(1650, preSsoEarnings) * ssoRate, ssoCap);
-                const ssoAllowance = ssoDeduction;
+                // --- MODIFICATION ICI : Calcul SSO et Allowance ---
+                let ssoDeduction = 0;
+                let ssoAllowance = 0;
+
+                if (staff.isSsoRegistered !== false && preSsoEarnings > 0) {
+                    const ssoRate = (Number(companyConfig.ssoRate) || 5) / 100;
+                    const ssoCap = Number(companyConfig.ssoCap) || 750;
+                    ssoDeduction = Math.min(Math.max(1650, preSsoEarnings) * ssoRate, ssoCap);
+
+                    if (staff.receivesSsoAllowance !== false) {
+                        ssoAllowance = ssoDeduction;
+                    } else {
+                        ssoAllowance = 0;
+                    }
+                }
 
                 const totalEarnings = preSsoEarnings + ssoAllowance;
                 const advanceDeduction = approvedAdvances.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
@@ -288,7 +299,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const unpaidAbsArr = [];
                 if (Number(stats.totalAbsencesCount) > 0) {
                     if (stats.unexcusedAbsenceDates && stats.unexcusedAbsenceDates.length > 0) {
-                        // On crée une ligne pour chaque date exacte
                         stats.unexcusedAbsenceDates.forEach(d => {
                             unpaidAbsArr.push({
                                 date: d,
@@ -297,7 +307,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                             });
                         });
                     } else {
-                        // Fallback de sécurité au cas où
                         unpaidAbsArr.push({
                             date: "Unexcused",
                             hours: stats.totalAbsencesCount * (currentJob.standardDayHours || 8),
@@ -350,7 +359,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
         const payPeriodDate = dateUtils.parseISODateString(`${payPeriod.year}-${String(payPeriod.month).padStart(2, '0')}-01`);
 
-        // Remplacement du window.confirm
         setConfirmState({
             isOpen: true,
             title: "Finalize Payroll",
@@ -397,7 +405,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
     return {
         payrollData, isLoading, isFinalizing, error, isMonthFullyFinalized,
         selectedForPayroll, totalSelectedNetPay, pendingAdvancesCount, pendingLoansCount,
-        feedbackModal, setFeedbackModal, confirmState, setConfirmState, // <-- Exposé au parent
+        feedbackModal, setFeedbackModal, confirmState, setConfirmState,
         handleGeneratePayroll, handleFinalizePayroll, handleSelectOne, handleSelectAll
     };
 }

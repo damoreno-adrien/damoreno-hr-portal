@@ -22,9 +22,9 @@ export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const payslipData = snapshot.docs.map(doc => ({ 
-                id: doc.id, 
+            const payslipData = snapshot.docs.map(doc => ({
                 ...doc.data(),
+                id: doc.id,
                 staffId: doc.data().staffId,
                 payPeriodMonth: doc.data().payPeriodMonth,
                 payPeriodYear: doc.data().payPeriodYear
@@ -64,9 +64,9 @@ export default function MyPayslipsPage({ db, user, staffProfile, companyConfig }
                         <p className="text-center py-10 text-gray-400">Loading payslip history...</p>
                     ) : payslips.length > 0 ? (
                         payslips.map((payslip, index) => (
-                            <button 
+                            <button
                                 key={payslip.id || `payslip-${payslip.payPeriodYear}-${payslip.payPeriodMonth}-${index}`}
-                                onClick={() => setSelectedPayslip(payslip)} 
+                                onClick={() => setSelectedPayslip(payslip)}
                                 className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-700 transition-colors"
                             >
                                 <div>

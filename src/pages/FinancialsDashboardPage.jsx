@@ -8,12 +8,11 @@ import { PayEstimateCard } from '../components/FinancialsDashboard/PayEstimateCa
 import { SideCards } from '../components/FinancialsDashboard/SideCards';
 import Modal from '../components/common/Modal';
 import PayslipDetailView from '../components/Payroll/PayslipDetailView';
-import RequestLoanModal from '../components/FinancialsDashboard/RequestLoanModal'; // <-- NOUVEL IMPORT
+import RequestLoanModal from '../components/FinancialsDashboard/RequestLoanModal';
 import { calculateMonthlyStats } from '../utils/attendanceCalculator';
 import * as dateUtils from '../utils/dateUtils';
 
-
-const getStaffCurrentJob = (staff) => { /* ... (reste inchangé) ... */
+const getStaffCurrentJob = (staff) => {
     if (!staff) return null;
     if (staff.baseSalary) return staff;
     if (!staff.jobHistory || staff.jobHistory.length === 0) return null;
@@ -25,45 +24,35 @@ const getStaffCurrentJob = (staff) => { /* ... (reste inchangé) ... */
 };
 
 export default function FinancialsDashboardPage({ db, user, companyConfig }) {
-    const { permissions, loadingPermissions } = usePermissions(db, user?.role, user?.uid);
-    
-    if (loadingPermissions) return (
-        <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500"></div>
-        </div>
-    );
+    // 1. Appel du hook personnalisé
+    const { loadingPermissions } = usePermissions(db, user?.role, user?.uid);
+
+    // 2. Déclaration de tous les états (useState)
     const [payEstimate, setPayEstimate] = useState(null);
     const [isLoadingEstimate, setIsLoadingEstimate] = useState(true);
     const [latestPayslipForModal, setLatestPayslipForModal] = useState(null);
-    
-    // CHANGEMENT ICI : On va stocker TOUS les prêts du staff
     const [staffLoans, setStaffLoans] = useState([]);
-    
-    // ÉTAT DE LA MODALE
     const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
 
-    // Fonction pour rafraichir les données après une demande
+    // 3. Déclaration de la fonction asynchrone (fetch)
     const fetchFinancialData = async () => {
         setIsLoadingEstimate(true);
         try {
             const profileSnap = await getDoc(doc(db, 'staff_profiles', user.uid));
             if (!profileSnap.exists()) return;
+            
             const rawProfile = { id: profileSnap.id, ...profileSnap.data() };
             const jobInfo = getStaffCurrentJob(rawProfile) || rawProfile;
             const baseSalary = parseFloat(jobInfo.baseSalary) || 0;
             const isBonusEligible = rawProfile.isAttendanceBonusEligible !== false;
 
-            // --- CHANGEMENT ICI : On récupère TOUS les prêts sans filtrer sur isActive ---
             const loansQ = query(collection(db, 'loans'), where('staffId', '==', user.uid));
             const loansSnap = await getDocs(loansQ);
             const allLoans = loansSnap.docs.map(d => ({id: d.id, ...d.data()}));
             setStaffLoans(allLoans);
 
-            // On filtre localement les prêts vraiment actifs pour le calcul de la paie
-            // C'EST ICI LA RETROCOMPATIBILITÉ !
             const activeLoansToDeduct = allLoans.filter(l => l.status === 'active' || (l.status === undefined && l.isActive === true));
 
-            // ... (Suite du fetch identique : payslipQ, advancesQ, stats) ...
             const payslipQ = query(collection(db, 'payslips'), where('staffId', '==', user.uid), orderBy('generatedAt', 'desc'), limit(1));
             const payslipSnap = await getDocs(payslipQ);
             const latestPayslip = !payslipSnap.empty ? payslipSnap.docs[0].data() : null;
@@ -101,19 +90,24 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
             const estimatedGross = baseSalaryEarned + otPay + actualBonusEarnings;
 
             let sso = 0, ssoAllowanceAmount = 0;
+            // 1. Déduction : Seulement si isSsoRegistered est true (ou indéfini par défaut)
             if (rawProfile.isSsoRegistered !== false && estimatedGross > 0) {
                 const ssoRate = (companyConfig.financialRules?.ssoRate || 5) / 100;
                 const ssoMax = Number(companyConfig.financialRules?.ssoMaxContribution) || 875;
                 sso = Math.min(Math.max(1650, estimatedGross) * ssoRate, ssoMax);
-                ssoAllowanceAmount = sso;
+                
+                // 2. Allowance : Seulement si receivesSsoAllowance est true (ou indéfini par défaut)
+                if (rawProfile.receivesSsoAllowance !== false) {
+                    ssoAllowanceAmount = sso;
+                } else {
+                    ssoAllowanceAmount = 0;
+                }
             }
 
             const absenceDeduction = (stats.totalAbsencesCount || 0) * dailyRate;
             const lateDeduction = (stats.totalLateMinutes || 0) * minuteRate;
             
-            // --- CHANGEMENT ICI : On utilise activeLoansToDeduct ---
             const loanDeduction = activeLoansToDeduct.reduce((sum, loan) => sum + (parseFloat(loan.monthlyRepayment) || parseFloat(loan.monthlyInstallment) || 0), 0);
-            
             const advanceDeduction = monthAdvances.filter(a => a.status === 'approved' || a.status === 'paid').reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
 
             const totalEarnings = estimatedGross + ssoAllowanceAmount;
@@ -135,11 +129,12 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
         }
     };
 
+    // 4. Déclaration du useEffect
     useEffect(() => {
         if (db && user && companyConfig) fetchFinancialData();
     }, [db, user, companyConfig]);
 
-    const handleViewLatestPayslip = () => { /* ...inchangé... */
+    const handleViewLatestPayslip = () => {
         if (payEstimate?.latestPayslip) {
             setLatestPayslipForModal({ 
                 details: payEstimate.latestPayslip, 
@@ -147,8 +142,17 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
             });
         }
     };
+    
     const closeModal = () => setLatestPayslipForModal(null);
 
+    // 5. Retours anticipés conditionnels (DOIVENT ÊTRE PLACÉS APRÈS LES HOOKS)
+    if (loadingPermissions) return (
+        <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500"></div>
+        </div>
+    );
+
+    // 6. Rendu du composant
     return (
         <div>
             {latestPayslipForModal && (
@@ -157,14 +161,13 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                 </Modal>
             )}
 
-            {/* MODALE DE DEMANDE DE PRÊT */}
             <RequestLoanModal 
                 isOpen={isLoanModalOpen} 
                 onClose={() => setIsLoanModalOpen(false)} 
                 db={db} 
                 user={user} 
                 onSuccess={fetchFinancialData} 
-                staffBaseSalary={payEstimate?.contractDetails?.baseSalary || 0} // <-- LE SALAIRE EST PASSÉ ICI !
+                staffBaseSalary={payEstimate?.contractDetails?.baseSalary || 0} 
             />
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Financials</h2>
@@ -178,8 +181,8 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
                     payEstimate={payEstimate}
                     isLoading={isLoadingEstimate}
                     onViewLatestPayslip={handleViewLatestPayslip}
-                    loans={staffLoans} // On passe TOUS les prêts à SideCards
-                    onOpenLoanModal={() => setIsLoanModalOpen(true)} // On passe la fonction pour ouvrir la modale
+                    loans={staffLoans} 
+                    onOpenLoanModal={() => setIsLoanModalOpen(true)} 
                 />
             </div>
         </div>

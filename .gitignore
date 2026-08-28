@@ -83,3 +83,4 @@ scan_permissions.cjs
 architecture_map.md
 .gitignore
 generate_architecture_map.cjs
+.aider*
