@@ -104,6 +104,10 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
                 case 'bonusStreak': return String(staff.bonusStreak || 0);
                 case 'emergencyContactName': return staff.emergencyContactName || 'N/A';
                 case 'emergencyContactPhone': return staff.emergencyContactPhone || 'N/A';
+                case 'isSsoRegistered': return staff.isSsoRegistered !== false ? 'Yes' : 'No';
+                case 'receivesSsoAllowance': return staff.receivesSsoAllowance !== false ? 'Yes' : 'No';
+                case 'idType': return staff.idType || 'N/A';
+                case 'idNumber': return staff.idNumber || 'N/A';
                 default: return 'N/A';
             }
         });
