@@ -45,18 +45,35 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                     <select
                         id="paymentMethod"
                         value={formData.paymentMethod || 'bank_transfer'}
-                        onChange={handleInputChange} // Utilise la prop globale
+                        onChange={handleInputChange}
                         className="w-full p-2.5 bg-gray-900 border border-gray-600 rounded-lg text-white"
                     >
                         <option value="bank_transfer">Bank Transfer</option>
                         <option value="cash">Cash Payment</option>
                     </select>
                 </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Bank Name</label>
+                    <select
+                        id="bankName"
+                        value={formData.bankName || ''}
+                        onChange={handleInputChange}
+                        className="w-full p-2.5 bg-gray-900 border border-gray-600 rounded-lg text-white"
+                    >
+                        <option value="">Select Bank...</option>
+                        <option value="Kasikorn">Kasikorn</option>
+                        <option value="SCB">SCB</option>
+                        <option value="Bangkok Bank">Bangkok Bank</option>
+                        <option value="Krungthai">Krungthai</option>
+                        <option value="Krungsri">Krungsri</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
                 <div className="md:col-span-2">
-                    <label className="text-sm text-gray-400">Bank Account</label>
+                    <label className="text-sm text-gray-400">Account Number</label>
                     <input
-                        id="bankAccount"
-                        value={formData.bankAccount || ''}
+                        id="bankAccountNumber"
+                        value={formData.bankAccountNumber || ''}
                         onChange={handleInputChange}
                         className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"
                     />

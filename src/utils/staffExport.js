@@ -88,6 +88,7 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
         return selectedFields.map(field => {
             switch (field.id) {
                 case 'id': return staff.id || 'N/A';
+                case 'branch': return staff.branchId || 'N/A';
                 case 'name': return staff.nickname ? `${staff.nickname} (${staff.firstName} ${staff.lastName})` : `${staff.firstName} ${staff.lastName}`;
                 case 'nickname': return staff.nickname || 'N/A';
                 case 'department': return job?.department || 'Unassigned';

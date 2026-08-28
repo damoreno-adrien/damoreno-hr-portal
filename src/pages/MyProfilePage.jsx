@@ -22,6 +22,11 @@ export default function MyProfilePage({ staffProfile }) {
     const currentJob = getCurrentJob(staffProfile);
     const displayName = staffProfile.firstName ? `${staffProfile.firstName} ${staffProfile.lastName}` : staffProfile.fullName;
 
+    // --- Bank details: prefer new split fields, fallback to legacy combined field ---
+    const bankAccountDisplay = staffProfile.bankName && staffProfile.bankAccountNumber
+        ? `${staffProfile.bankName} - ${staffProfile.bankAccountNumber}`
+        : (staffProfile.bankAccount || '-');
+
     // --- NEW: Expiring Documents Logic ---
     const visibleDocs = (staffProfile.documents || []).filter(doc => doc.isVisibleToStaff !== false);
     const expiringDocs = visibleDocs.filter(doc => {
@@ -64,7 +69,7 @@ export default function MyProfilePage({ staffProfile }) {
                         <InfoRow label="Email Address" value={staffProfile.email} />
                         <InfoRow label="Phone Number" value={staffProfile.phoneNumber} />
                         <InfoRow label="Birthdate" value={dateUtils.formatDisplayDate(staffProfile.birthdate)} />
-                        <div className="md:col-span-2"><InfoRow label="Bank Account" value={staffProfile.bankAccount} /></div>
+                        <div className="md:col-span-2"><InfoRow label="Bank Account" value={bankAccountDisplay} /></div>
                         <div className="md:col-span-2"><InfoRow label="Address" value={staffProfile.address} /></div>
                         <InfoRow label="Emergency Contact Name" value={staffProfile.emergencyContactName} />
                         <InfoRow label="Emergency Contact Phone" value={staffProfile.emergencyContactPhone} />

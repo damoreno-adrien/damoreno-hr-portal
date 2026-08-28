@@ -2,9 +2,9 @@ import React from 'react';
 import * as dateUtils from '../../utils/dateUtils';
 
 const InfoRow = ({ label, value, className = '' }) => (
-    <div className={className}>
-        <p className="text-sm text-gray-400">{label}</p>
-        <p className="text-white text-lg">{value || '-'}</p>
+    <div className={`select-text ${className}`}>
+        <p className="text-sm text-gray-400 select-text">{label}</p>
+        <p className="text-white text-lg select-text">{value || '-'}</p>
     </div>
 );
 
@@ -31,6 +31,11 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
 
     // Find friendly branch name
     const branchName = branches.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unassigned';
+
+    // --- Bank details: prefer new split fields, fallback to legacy combined field ---
+    const bankAccountDisplay = staff.bankName && staff.bankAccountNumber
+        ? `${staff.bankName} - ${staff.bankAccountNumber}`
+        : (staff.bankAccount || '-');
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
@@ -59,7 +64,7 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
                 value={staff.paymentMethod === 'cash' ? 'Cash Payment' : 'Bank Transfer'}
             />
             <div className="md:col-span-2">
-                <InfoRow label="Bank Account" value={staff.bankAccount} />
+                <InfoRow label="Bank Account" value={bankAccountDisplay} />
             </div>
 
             <div className="md:col-span-2">

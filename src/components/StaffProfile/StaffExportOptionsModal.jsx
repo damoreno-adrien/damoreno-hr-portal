@@ -5,6 +5,7 @@ import { generateCustomStaffExport } from '../../utils/staffExport';
 
 const MASTER_DICTIONARY = [
     { id: 'id', label: 'Document ID (UID)', category: 'Technical', mandatory: false },
+    { id: 'branch', label: 'Branch', category: 'Job', mandatory: false },
     { id: 'name', label: 'Full Name', category: 'Personal', mandatory: true },
     { id: 'nickname', label: 'Nickname', category: 'Personal', mandatory: false },
     { id: 'department', label: 'Department', category: 'Job', mandatory: true },
@@ -23,8 +24,8 @@ const MASTER_DICTIONARY = [
     { id: 'emergencyContactPhone', label: 'Emergency Contact Phone', category: 'Emergency', mandatory: false },
     { id: 'isSsoRegistered', label: 'SSO Enrolled', category: 'Compliance', mandatory: false },
     { id: 'receivesSsoAllowance', label: 'SSO Allowance', category: 'Compliance', mandatory: false },
-    { id: 'idType', label: 'ID Document Type', category: 'Personal', mandatory: false },
-    { id: 'idNumber', label: 'ID Document Number', category: 'Personal', mandatory: false }
+    { id: 'idType', label: 'ID Type', category: 'Personal', mandatory: false },
+    { id: 'idNumber', label: 'ID Number', category: 'Personal', mandatory: false }
 ];
 
 export default function StaffExportOptionsModal({ 

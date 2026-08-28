@@ -11,7 +11,7 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield } from 'lucide-react';
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield, Printer } from 'lucide-react';
 import { StaffPermissionsOverrides } from './StaffPermissionsOverrides';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
@@ -38,7 +38,10 @@ const getInitialFormData = (staff) => {
     const formattedBirthdate = staff.birthdate ? dateUtils.formatISODate(dateUtils.fromFirestore(staff.birthdate)) : '';
     let initialData = {
         email: staff.email || '', phoneNumber: staff.phoneNumber || '', birthdate: formattedBirthdate || '',
-        startDate: formattedStartDate || '', bankAccount: staff.bankAccount || '', address: staff.address || '',
+        startDate: formattedStartDate || '',
+        bankName: staff.bankName || '',
+        bankAccountNumber: staff.bankAccountNumber || '',
+        address: staff.address || '',
         emergencyContactName: staff.emergencyContactName || '', emergencyContactPhone: staff.emergencyContactPhone || '',
         isSsoRegistered: staff.isSsoRegistered ?? true,
         receivesSsoAllowance: staff.receivesSsoAllowance ?? true,
@@ -276,7 +279,8 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             phoneNumber: formData.phoneNumber || null,
             birthdate: dateUtils.parseISODateString(formData.birthdate) ? formData.birthdate : null,
             startDate: dateUtils.parseISODateString(formData.startDate) ? formData.startDate : null,
-            bankAccount: formData.bankAccount || null,
+            bankName: formData.bankName || null,
+            bankAccountNumber: formData.bankAccountNumber || null,
             paymentMethod: formData.paymentMethod || null,
             address: formData.address || null,
             emergencyContactName: formData.emergencyContactName || null,
@@ -751,7 +755,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             )}
 
             <div className="border-b border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
-                <nav className="-mb-px flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-1 w-full" aria-label="Tabs">
+                <nav className="-mb-px flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-1" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>Profile Details</button>
                     <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
@@ -769,6 +773,15 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     )}
                     {isFullManager && <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>Settings & Stats</button>}
                 </nav>
+
+                <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg transition-colors shrink-0 mb-1 whitespace-nowrap"
+                    title="Export this profile view to PDF using your browser's print dialog"
+                >
+                    <Printer className="h-3.5 w-3.5" /> Export Profile to PDF
+                </button>
             </div>
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}

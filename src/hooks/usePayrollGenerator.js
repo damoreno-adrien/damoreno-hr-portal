@@ -222,7 +222,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 const preSsoEarnings = safeBasePay + safeAttendanceBonus + safeOtherEarningsTotal + leavePayoutTotal + safeOvertimePay;
 
-                // --- MODIFICATION ICI : Calcul SSO et Allowance ---
+                // --- SSO : Calcul et Allowance (NE PAS TOUCHER À CETTE LOGIQUE) ---
                 let ssoDeduction = 0;
                 let ssoAllowance = 0;
 
@@ -320,7 +320,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : (staff.fullName || 'Staff'), displayName,
                     position: currentJob.position || 'Staff', payType: currentJob.payType,
                     paymentMethod: staff.paymentMethod || 'bank_transfer',
-                    bankAccount: staff.bankAccount || '-',
+                    bankAccount: (staff.bankName && staff.bankAccountNumber) ? `${staff.bankName} - ${staff.bankAccountNumber}` : (staff.bankAccount || '-'),
                     idNumber: staff.idNumber || '-',
                     idType: staff.idType || 'None',
                     totalEarnings, totalDeductions, netPay, bonusInfo, appliedLoans,
