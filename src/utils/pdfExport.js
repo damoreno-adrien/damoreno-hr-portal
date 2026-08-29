@@ -405,11 +405,11 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 d.name || 'Untitled Document',
                 d.uploadedAt ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(d.uploadedAt)) : 'N/A',
                 d.expiryDate ? dateUtils.formatDisplayDate(new Date(d.expiryDate)) : 'N/A',
-                d.url || 'N/A'
+                d.url ? 'View Document' : 'N/A'
             ]);
 
             autoTable(docPDF, {
-                head: [['Document Name', 'Uploaded', 'Expires', 'Link (Click to Open)']],
+                head: [['Document Name', 'Uploaded', 'Expires', 'Link']],
                 body: docsBody,
                 startY: currentY,
                 theme: 'grid',
@@ -417,7 +417,8 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 styles: { font: 'Sarabun', fontSize: 8 },
                 columnStyles: { 3: { textColor: [37, 99, 235] } },
                 didDrawCell: (data) => {
-                    // Make the entire "Link" cell clickable, opening the raw Firebase Storage URL.
+                    // Make the entire "Link" cell clickable, opening the raw Firebase Storage URL
+                    // without ever printing the raw URL text in the PDF itself.
                     if (data.section === 'body' && data.column.index === 3) {
                         const rawUrl = documents[data.row.index]?.url;
                         if (rawUrl) {
