@@ -129,7 +129,7 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
         <div className="space-y-6 animate-fadeIn">
             <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
 
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center"><History className="mr-2 text-indigo-400" /> Lifetime Punctuality & HR Stats</h3>
+            <h3 className="text-xl font-bold text-white mb-4 flex items-center"><History className="mr-2 text-indigo-400" /> Lifetime Punctuality &amp; HR Stats</h3>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gray-800 border border-gray-700 p-4 rounded-xl shadow-lg">
@@ -757,7 +757,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             <div className="border-b border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
                 <nav className="-mb-px flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-1" aria-label="Tabs">
                     <button onClick={() => setActiveTab('details')} className={getTabClasses('details')}>Profile Details</button>
-                    <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job & Salary</button>
+                    <button onClick={() => setActiveTab('job')} className={getTabClasses('job')}>Job &amp; Salary</button>
                     <button onClick={() => setActiveTab('documents')} className={getTabClasses('documents')}>Documents</button>
 
                     {isFullManager && (
@@ -771,7 +771,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                             <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> HR Forms</span>
                         </button>
                     )}
-                    {isFullManager && <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>Settings & Stats</button>}
+                    {isFullManager && <button onClick={() => setActiveTab('settings')} className={getTabClasses('settings')}>Settings &amp; Stats</button>}
                 </nav>
 
                 <button
@@ -800,13 +800,13 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     </div>
 
                     <div>
-                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Employment & Legal</h4>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Employment &amp; Legal</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <button onClick={() => handleGenerate('contract')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-indigo-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
                                 <div className="bg-indigo-900/50 p-3 rounded-lg mr-4 group-hover:bg-indigo-600 transition-colors">
                                     {isGenerating ? <Loader2 className="h-6 w-6 text-indigo-300 animate-spin" /> : <FileBadge className="h-6 w-6 text-indigo-300 group-hover:text-white transition-colors" />}
                                 </div>
-                                <div><h4 className="text-white font-medium">Main Employment Contract</h4><p className="text-xs text-gray-400 mt-1">Standard bilingual contract & rules</p></div>
+                                <div><h4 className="text-white font-medium">Main Employment Contract</h4><p className="text-xs text-gray-400 mt-1">Standard bilingual contract &amp; rules</p></div>
                             </button>
                             <button onClick={() => handleGenerate('certificate')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-blue-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
                                 <div className="bg-blue-900/50 p-3 rounded-lg mr-4 group-hover:bg-blue-600 transition-colors"><FileText className="h-6 w-6 text-blue-300 group-hover:text-white transition-colors" /></div>
@@ -818,13 +818,13 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                             </button>
                             <button onClick={() => triggerDocumentForm('promotion')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-yellow-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
                                 <div className="bg-yellow-900/50 p-3 rounded-lg mr-4 group-hover:bg-yellow-600 transition-colors"><FileBadge className="h-6 w-6 text-yellow-300 group-hover:text-white transition-colors" /></div>
-                                <div><h4 className="text-white font-medium">Promotion Addendum</h4><p className="text-xs text-gray-400 mt-1">For new job titles & responsibilities</p></div>
+                                <div><h4 className="text-white font-medium">Promotion Addendum</h4><p className="text-xs text-gray-400 mt-1">For new job titles &amp; responsibilities</p></div>
                             </button>
                         </div>
                     </div>
 
                     <div>
-                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Operations & Requests</h4>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Operations &amp; Requests</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <button onClick={() => triggerDocumentForm('leave')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
                                 <div className="bg-green-900/50 p-3 rounded-lg mr-4 group-hover:bg-green-600 transition-colors"><PlaneTakeoff className="h-6 w-6 text-green-300 group-hover:text-white transition-colors" /></div>
@@ -838,7 +838,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     </div>
 
                     <div>
-                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Performance & Offboarding</h4>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-700 pb-2">Performance &amp; Offboarding</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <button onClick={() => triggerDocumentForm('warning')} disabled={isGenerating} className="flex items-center p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-amber-500 hover:bg-gray-700 transition-all text-left group disabled:opacity-50">
                                 <div className="bg-amber-900/50 p-3 rounded-lg mr-4 group-hover:bg-amber-600 transition-colors"><ShieldAlert className="h-6 w-6 text-amber-300 group-hover:text-white transition-colors" /></div>

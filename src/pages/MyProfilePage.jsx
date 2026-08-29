@@ -62,7 +62,7 @@ export default function MyProfilePage({ staffProfile }) {
             <div className="space-y-8">
                 {/* Personal & Contact Information Card */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
-                    <h3 className="text-xl font-semibold text-white mb-6 border-b border-gray-700 pb-4">Personal & Contact Information</h3>
+                    <h3 className="text-xl font-semibold text-white mb-6 border-b border-gray-700 pb-4">Personal &amp; Contact Information</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                         <InfoRow label="Legal Name" value={displayName} />
                         <InfoRow label="Nickname" value={staffProfile.nickname} />
