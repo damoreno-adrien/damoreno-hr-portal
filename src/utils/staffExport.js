@@ -2,6 +2,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as dateUtils from './dateUtils';
+import { THAI_FONT_BASE64 } from './thaiFont.js';
 
 const getStaffCurrentJob = (staff) => {
     if (!staff || !staff.jobHistory || staff.jobHistory.length === 0) return null;
@@ -103,6 +104,7 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
                 case 'bankName': return staff.bankName || 'N/A';
                 case 'bankAccountNumber': return staff.bankAccountNumber || 'N/A';
                 case 'bonusStreak': return String(staff.bonusStreak || 0);
+                case 'isAttendanceBonusEligible': return staff.isAttendanceBonusEligible !== false ? 'Yes' : 'No';
                 case 'emergencyContactName': return staff.emergencyContactName || 'N/A';
                 case 'emergencyContactPhone': return staff.emergencyContactPhone || 'N/A';
                 case 'isSsoRegistered': return staff.isSsoRegistered !== false ? 'Yes' : 'No';
@@ -131,7 +133,10 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
     } 
     else if (format === 'pdf') {
         const doc = new jsPDF('landscape');
-        
+        doc.addFileToVFS('Sarabun-Regular.ttf', THAI_FONT_BASE64);
+        doc.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+        doc.setFont('Sarabun');
+
         doc.setFontSize(14);
         doc.text(`Staff Custom Report - ${branchName}`, 14, 15);
         doc.setFontSize(9);
@@ -143,7 +148,7 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
             body: dataRows,
             theme: 'grid',
             headStyles: { fillColor: [79, 70, 229], fontSize: 8 },
-            styles: { fontSize: 7, cellPadding: 2 },
+            styles: { font: 'Sarabun', fontSize: 7, cellPadding: 2 },
             alternateRowStyles: { fillColor: [250, 250, 250] },
         });
 

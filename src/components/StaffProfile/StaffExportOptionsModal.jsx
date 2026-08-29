@@ -20,6 +20,7 @@ const MASTER_DICTIONARY = [
     { id: 'bankName', label: 'Bank Name', category: 'Financial', mandatory: false },
     { id: 'bankAccountNumber', label: 'Bank Account Number', category: 'Financial', mandatory: false },
     { id: 'bonusStreak', label: 'Bonus Streak', category: 'Performance', mandatory: false },
+    { id: 'isAttendanceBonusEligible', label: 'Bonus Eligible', category: 'HR', mandatory: false },
     { id: 'emergencyContactName', label: 'Emergency Contact Name', category: 'Emergency', mandatory: false },
     { id: 'emergencyContactPhone', label: 'Emergency Contact Phone', category: 'Emergency', mandatory: false },
     { id: 'isSsoRegistered', label: 'SSO Enrolled', category: 'Compliance', mandatory: false },
