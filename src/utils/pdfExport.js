@@ -184,28 +184,26 @@ export const generatePayslipsPDF = async (payslipsArray, companyConfig, payPerio
             startY: 35, theme: 'plain', styles: { font: 'Sarabun', fontSize: 10 }
         });
 
-        // 6. CALCULS
+        // 6. CALCULS (Rendu conditionnel : on masque les lignes à 0)
         const hasOvertime = details.earnings?.overtimePay > 0;
         const hasLeavePayout = details.earnings?.leavePayout > 0 && details.earnings.leavePayoutDetails;
         const absenceSummary = formatHours(details.deductions?.totalAbsenceHours);
 
         let earningsBody = [
             ['Base Pay', formatCurrency(details.earnings?.basePay)],
-            ['Attendance Bonus', formatCurrency(details.earnings?.attendanceBonus)],
-            ['Social Security Allowance', formatCurrency(details.earnings?.ssoAllowance)],
-            ...(details.earnings?.others || []).map(e => [e.description, formatCurrency(e.amount)])
         ];
+        if (hasLeavePayout) earningsBody.push(['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
+        if (hasOvertime) earningsBody.push(['Approved Overtime', formatCurrency(details.earnings.overtimePay)]);
+        if (details.earnings?.attendanceBonus > 0) earningsBody.push(['Attendance Bonus', formatCurrency(details.earnings.attendanceBonus)]);
+        if (details.earnings?.ssoAllowance > 0) earningsBody.push(['Social Security Allowance', formatCurrency(details.earnings.ssoAllowance)]);
+        earningsBody.push(...(details.earnings?.others || []).map(e => [e.description, formatCurrency(e.amount)]));
 
-        if (hasOvertime) earningsBody.splice(1, 0, ['Approved Overtime', formatCurrency(details.earnings.overtimePay)]);
-        if (hasLeavePayout) earningsBody.splice(1, 0, ['Leave Payout', formatCurrency(details.earnings.leavePayout)]);
-
-        const deductionsBody = [
-            [`Absences ${absenceSummary}`, formatCurrency(details.deductions?.absences)],
-            ['Social Security', formatCurrency(details.deductions?.sso)],
-            ['Salary Advance', formatCurrency(details.deductions?.advance)],
-            ['Loan Repayment', formatCurrency(details.deductions?.loan)],
-            ...(details.deductions?.others || []).map(d => [d.description, formatCurrency(d.amount)])
-        ];
+        const deductionsBody = [];
+        if (details.deductions?.absences > 0) deductionsBody.push([`Absences ${absenceSummary}`, formatCurrency(details.deductions.absences)]);
+        if (details.deductions?.sso > 0) deductionsBody.push(['Social Security', formatCurrency(details.deductions.sso)]);
+        if (details.deductions?.advance > 0) deductionsBody.push(['Salary Advance', formatCurrency(details.deductions.advance)]);
+        if (details.deductions?.loan > 0) deductionsBody.push(['Loan Repayment', formatCurrency(details.deductions.loan)]);
+        deductionsBody.push(...(details.deductions?.others || []).map(d => [d.description, formatCurrency(d.amount)]));
 
         // 7. RENDU TABLEAUX
         autoTable(docPDF, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' }, styles: { font: 'Sarabun' } });

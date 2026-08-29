@@ -28,9 +28,15 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
     const actualProfile = staffList.find(s => s.id === details.staffId || s.id === details.id);
 
     const staffName = details.name || details.staffName || actualProfile?.nickname || 'Unknown Staff';
-    const hasAbsences = details.deductions?.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
+    const hasAbsences = details.deductions?.absences > 0;
+    const hasAbsenceDetails = hasAbsences && details.deductions?.unpaidAbsences && details.deductions.unpaidAbsences.length > 0;
     const hasLeavePayout = details.earnings?.leavePayout > 0 && details.earnings.leavePayoutDetails;
     const hasOvertime = details.earnings?.overtimePay > 0;
+    const hasAttendanceBonus = details.earnings?.attendanceBonus > 0;
+    const hasSsoAllowance = details.earnings?.ssoAllowance > 0;
+    const hasSsoDeduction = details.deductions?.sso > 0;
+    const hasAdvance = details.deductions?.advance > 0;
+    const hasLoan = details.deductions?.loan > 0;
     const absenceSummary = formatHours(details.deductions?.totalAbsenceHours);
 
     const handleGenerateDocxReceipt = async () => {
@@ -97,9 +103,9 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
                 {/* SECTION EARNINGS */}
-                <div>
+                <div className="flex flex-col h-full">
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Earnings</h4>
-                    <div className="space-y-1 text-sm">
+                    <div className="space-y-1 text-sm flex-grow">
                         <div className="flex justify-between"><p>Base Pay:</p> <p>{formatCurrency(details.earnings?.basePay)}</p></div>
                         {hasOvertime && <div className="flex justify-between text-green-400"><p>Approved Overtime:</p><p>{formatCurrency(details.earnings.overtimePay)}</p></div>}
                         {hasLeavePayout && (
@@ -121,35 +127,37 @@ export default function PayslipDetailView({ details, companyConfig, payPeriod, s
                                 )}
                             </div>
                         )}
-                        <div className="flex justify-between"><p>Attendance Bonus:</p> <p>{formatCurrency(details.earnings?.attendanceBonus)}</p></div>
-                        <div className="flex justify-between"><p>SSO Allowance:</p> <p>{formatCurrency(details.earnings?.ssoAllowance)}</p></div>
+                        {hasAttendanceBonus && <div className="flex justify-between"><p>Attendance Bonus:</p> <p>{formatCurrency(details.earnings.attendanceBonus)}</p></div>}
+                        {hasSsoAllowance && <div className="flex justify-between"><p>SSO Allowance:</p> <p>{formatCurrency(details.earnings.ssoAllowance)}</p></div>}
                         {(details.earnings?.others || []).map((e, i) => <div key={i} className="flex justify-between"><p>{e.description}:</p> <p>{formatCurrency(e.amount)}</p></div>)}
                     </div>
                     <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-gray-500"><p>Total Earnings:</p> <p>{formatCurrency(details.totalEarnings)}</p></div>
                 </div>
 
                 {/* SECTION DEDUCTIONS */}
-                <div>
+                <div className="flex flex-col h-full">
                     <h4 className="font-bold text-lg mb-2 border-b border-gray-600 pb-1">Deductions</h4>
-                    <div className="space-y-1 text-sm">
-                        <div className="flex justify-between relative">
-                            <div className="flex items-center gap-2">
-                                <p>Absences {absenceSummary}:</p>
-                                {hasAbsences && <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white"><Info className="h-4 w-4" /></button>}
-                            </div>
-                            <p>{formatCurrency(details.deductions?.absences)}</p>
-                            {showAbsenceTooltip && (
-                                <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
-                                    <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
-                                    <ul className="list-disc list-inside text-xs text-gray-300">
-                                        {details.deductions.unpaidAbsences.map(abs => <li key={abs.date}>{dateUtils.formatDisplayDate(abs.date)} <span className="text-gray-400">{formatHours(abs.hours)}</span></li>)}
-                                    </ul>
+                    <div className="space-y-1 text-sm flex-grow">
+                        {hasAbsences && (
+                            <div className="flex justify-between relative">
+                                <div className="flex items-center gap-2">
+                                    <p>Absences {absenceSummary}:</p>
+                                    {hasAbsenceDetails && <button onMouseEnter={() => setShowAbsenceTooltip(true)} onMouseLeave={() => setShowAbsenceTooltip(false)} className="text-gray-400 hover:text-white"><Info className="h-4 w-4" /></button>}
                                 </div>
-                            )}
-                        </div>
-                        <div className="flex justify-between"><p>Social Security:</p> <p>{formatCurrency(details.deductions?.sso)}</p></div>
-                        <div className="flex justify-between"><p>Salary Advance:</p> <p>{formatCurrency(details.deductions?.advance)}</p></div>
-                        <div className="flex justify-between"><p>Loan Repayment:</p> <p>{formatCurrency(details.deductions?.loan)}</p></div>
+                                <p>{formatCurrency(details.deductions?.absences)}</p>
+                                {showAbsenceTooltip && (
+                                    <div className="absolute top-6 left-0 z-10 bg-gray-900 border border-gray-600 rounded-lg shadow-lg p-3 w-48">
+                                        <p className="font-bold text-xs mb-2">Unpaid Absence Dates</p>
+                                        <ul className="list-disc list-inside text-xs text-gray-300">
+                                            {details.deductions.unpaidAbsences.map(abs => <li key={abs.date}>{dateUtils.formatDisplayDate(abs.date)} <span className="text-gray-400">{formatHours(abs.hours)}</span></li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {hasSsoDeduction && <div className="flex justify-between"><p>Social Security:</p> <p>{formatCurrency(details.deductions.sso)}</p></div>}
+                        {hasAdvance && <div className="flex justify-between"><p>Salary Advance:</p> <p>{formatCurrency(details.deductions.advance)}</p></div>}
+                        {hasLoan && <div className="flex justify-between"><p>Loan Repayment:</p> <p>{formatCurrency(details.deductions.loan)}</p></div>}
                         {(details.deductions?.others || []).map((d, i) => <div key={i} className="flex justify-between"><p>{d.description}:</p> <p>{formatCurrency(d.amount)}</p></div>)}
                     </div>
                     <div className="flex justify-between font-bold text-base mt-2 pt-2 border-t border-gray-500"><p>Total Deductions:</p> <p>{formatCurrency(details.totalDeductions)}</p></div>
