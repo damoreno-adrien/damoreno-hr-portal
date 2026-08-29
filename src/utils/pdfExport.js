@@ -2,6 +2,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as dateUtils from './dateUtils';
+import { THAI_FONT_BASE64 } from './thaiFont.js';
 
 const formatCurrency = (num) => num ? num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
@@ -19,6 +20,10 @@ const months = ["January", "February", "March", "April", "May", "June", "July", 
 // ============================================================================
 export const exportFinancialsPDF = ({ activeTab, displayedMonthlyTransactions, payPeriod, months, activeBranch, companyConfig }) => {
     const doc = new jsPDF();
+    doc.addFileToVFS('Sarabun-Regular.ttf', THAI_FONT_BASE64);
+    doc.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+    doc.setFont('Sarabun');
+
     const periodStr = `${months[payPeriod.month - 1]} ${payPeriod.year}`;
 
     let reportTitle = `Financial Records - ${periodStr}`;
@@ -76,7 +81,7 @@ export const exportFinancialsPDF = ({ activeTab, displayedMonthlyTransactions, p
         startY: 25,
         theme: 'striped',
         headStyles: { fillColor: [79, 70, 229] },
-        styles: { fontSize: 9 },
+        styles: { font: 'Sarabun', fontSize: 9 },
         columnStyles: isLoans
             ? { 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' }, 5: { halign: 'center', textColor: [34, 197, 94] } }
             : { 3: { halign: 'right', fontStyle: 'bold' } }
@@ -92,6 +97,10 @@ export const generatePayslipsPDF = async (payslipsArray, companyConfig, payPerio
     if (!payslipsArray || payslipsArray.length === 0) return;
 
     const docPDF = new jsPDF();
+    docPDF.addFileToVFS('Sarabun-Regular.ttf', THAI_FONT_BASE64);
+    docPDF.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+    docPDF.setFont('Sarabun');
+
     const logoCache = {}; 
 
     for (let i = 0; i < payslipsArray.length; i++) {
@@ -172,7 +181,7 @@ export const generatePayslipsPDF = async (payslipsArray, companyConfig, payPerio
                 [{ content: 'Position:', styles: { fontStyle: 'bold' } }, details.position || details.payType || '[Position Missing]'],
                 [{ content: 'Payment Method:', styles: { fontStyle: 'bold' } }, details.paymentMethod === 'cash' ? 'Cash' : 'Bank Transfer']
             ],
-            startY: 35, theme: 'plain', styles: { fontSize: 10 }
+            startY: 35, theme: 'plain', styles: { font: 'Sarabun', fontSize: 10 }
         });
 
         // 6. CALCULS
@@ -199,8 +208,8 @@ export const generatePayslipsPDF = async (payslipsArray, companyConfig, payPerio
         ];
 
         // 7. RENDU TABLEAUX
-        autoTable(docPDF, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
-        autoTable(docPDF, { head: [['Deductions', 'Amount (THB)']], body: deductionsBody, foot: [['Total Deductions', formatCurrency(details.totalDeductions)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' } });
+        autoTable(docPDF, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' }, styles: { font: 'Sarabun' } });
+        autoTable(docPDF, { head: [['Deductions', 'Amount (THB)']], body: deductionsBody, foot: [['Total Deductions', formatCurrency(details.totalDeductions)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' }, styles: { font: 'Sarabun' } });
 
         // 8. FOOTER
         docPDF.setFontSize(14); docPDF.setFont('helvetica', 'bold');
@@ -234,6 +243,10 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
     if (!staff) return;
 
     const docPDF = new jsPDF();
+    docPDF.addFileToVFS('Sarabun-Regular.ttf', THAI_FONT_BASE64);
+    docPDF.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+    docPDF.setFont('Sarabun');
+
     const pageWidth = docPDF.internal.pageSize.getWidth();
 
     const staffBranchId = staff.branchId;
@@ -319,7 +332,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
             ],
             startY: currentY,
             theme: 'plain',
-            styles: { fontSize: 10 },
+            styles: { font: 'Sarabun', fontSize: 10 },
             columnStyles: { 0: { cellWidth: 45 } }
         });
 
@@ -345,7 +358,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
             ],
             startY: currentY,
             theme: 'plain',
-            styles: { fontSize: 10 },
+            styles: { font: 'Sarabun', fontSize: 10 },
             columnStyles: { 0: { cellWidth: 45 } }
         });
 
@@ -369,7 +382,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
             ],
             startY: currentY,
             theme: 'plain',
-            styles: { fontSize: 10 },
+            styles: { font: 'Sarabun', fontSize: 10 },
             columnStyles: { 0: { cellWidth: 45 } }
         });
 
@@ -401,7 +414,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 startY: currentY,
                 theme: 'grid',
                 headStyles: { fillColor: [79, 70, 229] },
-                styles: { fontSize: 8 },
+                styles: { font: 'Sarabun', fontSize: 8 },
                 columnStyles: { 3: { textColor: [37, 99, 235] } },
                 didDrawCell: (data) => {
                     // Make the entire "Link" cell clickable, opening the raw Firebase Storage URL.
