@@ -210,3 +210,217 @@ export const generatePayslipsPDF = async (payslipsArray, companyConfig, payPerio
 
     docPDF.save(defaultFileName);
 };
+
+// ============================================================================
+// 3. EXPORT INDIVIDUEL DU PROFIL STAFF (RAPPORT PDF SUR MESURE)
+// ============================================================================
+const formatPayRateForExport = (job) => {
+    if (!job) return 'N/A';
+
+    if (job.payType === 'Hourly') {
+        const r = job.hourlyRate || job.rate;
+        return typeof r === 'number' ? `${r.toLocaleString()} THB / hr` : 'N/A';
+    }
+
+    const salary = job.baseSalary || job.rate;
+    const hours = job.standardDayHours || 8;
+
+    return typeof salary === 'number'
+        ? `${salary.toLocaleString()} THB / mo (${hours}h/day)`
+        : 'N/A';
+};
+
+export const exportIndividualStaffProfile = async ({ staff, companyConfig, options = {} }) => {
+    if (!staff) return;
+
+    const docPDF = new jsPDF();
+    const pageWidth = docPDF.internal.pageSize.getWidth();
+
+    const staffBranchId = staff.branchId;
+    const branchSpecificConfig = (staffBranchId && companyConfig?.branchSettings?.[staffBranchId])
+        ? companyConfig.branchSettings[staffBranchId]
+        : companyConfig;
+
+    const cLogo = branchSpecificConfig?.companyLogoUrl || companyConfig?.companyLogoUrl || null;
+
+    // --- Logo (top-right, mirrors payslip PDF behavior) ---
+    if (cLogo) {
+        try {
+            const response = await fetch(cLogo);
+            const blob = await response.blob();
+            const reader = new FileReader();
+            const base64Logo = await new Promise((resolve, reject) => {
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+            const img = new Image();
+            img.src = base64Logo;
+            await new Promise(resolve => { img.onload = resolve; });
+            const pdfLogoWidth = 28;
+            const pdfLogoHeight = (img.height * pdfLogoWidth) / img.width;
+            docPDF.addImage(base64Logo, 'PNG', pageWidth - pdfLogoWidth - 14, 10, pdfLogoWidth, pdfLogoHeight);
+        } catch (error) {
+            console.error("Logo fetch error (Staff Profile Export):", error);
+        }
+    }
+
+    // --- Header ---
+    const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : (staff.fullName || 'Staff Member');
+
+    docPDF.setFontSize(18);
+    docPDF.setFont('helvetica', 'bold');
+    docPDF.text("Staff Profile Report", 14, 20);
+
+    docPDF.setFontSize(11);
+    docPDF.setFont('helvetica', 'normal');
+    docPDF.text(displayName, 14, 28);
+
+    docPDF.setFontSize(9);
+    docPDF.setTextColor(120, 120, 120);
+    docPDF.text(`Generated on: ${dateUtils.formatCustom(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 34);
+    docPDF.setTextColor(0, 0, 0);
+
+    let currentY = 42;
+
+    const currentJob = [...(staff.jobHistory || [])].sort((a, b) => {
+        return new Date(b.startDate || 0) - new Date(a.startDate || 0);
+    })[0] || {};
+
+    // --- Section: Personal Information ---
+    if (options.includePersonal) {
+        const bankDisplay = (staff.bankName && staff.bankAccountNumber)
+            ? `${staff.bankName} - ${staff.bankAccountNumber}`
+            : (staff.bankAccount || 'N/A');
+
+        const ssoStatus = staff.isSsoRegistered !== false ? 'Enrolled' : 'Not Enrolled';
+        const ssoAllowanceStatus = staff.isSsoRegistered !== false
+            ? (staff.receivesSsoAllowance !== false ? 'Covered by Company' : 'Paid by Staff')
+            : 'N/A';
+
+        docPDF.setFontSize(12);
+        docPDF.setFont('helvetica', 'bold');
+        docPDF.text('Personal Information', 14, currentY);
+        currentY += 4;
+
+        autoTable(docPDF, {
+            body: [
+                [{ content: 'Legal Name:', styles: { fontStyle: 'bold' } }, displayName],
+                [{ content: 'Nickname:', styles: { fontStyle: 'bold' } }, staff.nickname || 'N/A'],
+                [{ content: 'Email:', styles: { fontStyle: 'bold' } }, staff.email || 'N/A'],
+                [{ content: 'Phone Number:', styles: { fontStyle: 'bold' } }, staff.phoneNumber || 'N/A'],
+                [{ content: 'Birthdate:', styles: { fontStyle: 'bold' } }, staff.birthdate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(staff.birthdate)) : 'N/A'],
+                [{ content: 'Address:', styles: { fontStyle: 'bold' } }, staff.address || 'N/A'],
+                [{ content: 'Emergency Contact:', styles: { fontStyle: 'bold' } }, `${staff.emergencyContactName || 'N/A'} (${staff.emergencyContactPhone || 'N/A'})`],
+                [{ content: 'Bank Account:', styles: { fontStyle: 'bold' } }, bankDisplay],
+                [{ content: 'ID Document:', styles: { fontStyle: 'bold' } }, `${(staff.idType && staff.idType !== 'None') ? staff.idType : 'N/A'} - ${staff.idNumber || 'N/A'}`],
+                [{ content: 'SSO Status:', styles: { fontStyle: 'bold' } }, ssoStatus],
+                [{ content: 'SSO Allowance:', styles: { fontStyle: 'bold' } }, ssoAllowanceStatus],
+            ],
+            startY: currentY,
+            theme: 'plain',
+            styles: { fontSize: 10 },
+            columnStyles: { 0: { cellWidth: 45 } }
+        });
+
+        currentY = docPDF.lastAutoTable.finalY + 8;
+    }
+
+    // --- Section: Job & Financials ---
+    if (options.includeJob) {
+        if (currentY > 260) { docPDF.addPage(); currentY = 20; }
+
+        docPDF.setFontSize(12);
+        docPDF.setFont('helvetica', 'bold');
+        docPDF.text('Job & Financials', 14, currentY);
+        currentY += 4;
+
+        autoTable(docPDF, {
+            body: [
+                [{ content: 'Department:', styles: { fontStyle: 'bold' } }, currentJob.department || 'N/A'],
+                [{ content: 'Position:', styles: { fontStyle: 'bold' } }, currentJob.position || 'N/A'],
+                [{ content: 'Start Date:', styles: { fontStyle: 'bold' } }, staff.startDate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(staff.startDate)) : 'N/A'],
+                [{ content: 'Pay Type:', styles: { fontStyle: 'bold' } }, currentJob.payType || 'N/A'],
+                [{ content: 'Pay Rate:', styles: { fontStyle: 'bold' } }, formatPayRateForExport(currentJob)],
+            ],
+            startY: currentY,
+            theme: 'plain',
+            styles: { fontSize: 10 },
+            columnStyles: { 0: { cellWidth: 45 } }
+        });
+
+        currentY = docPDF.lastAutoTable.finalY + 8;
+    }
+
+    // --- Section: HR Settings ---
+    if (options.includeHR) {
+        if (currentY > 260) { docPDF.addPage(); currentY = 20; }
+
+        docPDF.setFontSize(12);
+        docPDF.setFont('helvetica', 'bold');
+        docPDF.text('HR Settings', 14, currentY);
+        currentY += 4;
+
+        autoTable(docPDF, {
+            body: [
+                [{ content: 'Status:', styles: { fontStyle: 'bold' } }, (staff.status === 'inactive' || staff.status === 'archived') ? 'Inactive' : 'Active'],
+                [{ content: 'Bonus Streak:', styles: { fontStyle: 'bold' } }, `${staff.bonusStreak || 0} months`],
+                [{ content: 'Holiday Policy:', styles: { fontStyle: 'bold' } }, staff.holidayPolicy === 'paid' ? 'Paid (Cash payout)' : 'In Lieu (Substitute days off)'],
+            ],
+            startY: currentY,
+            theme: 'plain',
+            styles: { fontSize: 10 },
+            columnStyles: { 0: { cellWidth: 45 } }
+        });
+
+        currentY = docPDF.lastAutoTable.finalY + 8;
+    }
+
+    // --- Section: Appendix - Official Documents ---
+    if (options.includeDocuments) {
+        const documents = staff.documents || [];
+
+        if (documents.length > 0) {
+            if (currentY > 250) { docPDF.addPage(); currentY = 20; }
+
+            docPDF.setFontSize(12);
+            docPDF.setFont('helvetica', 'bold');
+            docPDF.text('Appendix: Official Documents', 14, currentY);
+            currentY += 4;
+
+            const docsBody = documents.map(d => [
+                d.name || 'Untitled Document',
+                d.uploadedAt ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(d.uploadedAt)) : 'N/A',
+                d.expiryDate ? dateUtils.formatDisplayDate(new Date(d.expiryDate)) : 'N/A',
+                d.url || 'N/A'
+            ]);
+
+            autoTable(docPDF, {
+                head: [['Document Name', 'Uploaded', 'Expires', 'Link (Click to Open)']],
+                body: docsBody,
+                startY: currentY,
+                theme: 'grid',
+                headStyles: { fillColor: [79, 70, 229] },
+                styles: { fontSize: 8 },
+                columnStyles: { 3: { textColor: [37, 99, 235] } },
+                didDrawCell: (data) => {
+                    // Make the entire "Link" cell clickable, opening the raw Firebase Storage URL.
+                    if (data.section === 'body' && data.column.index === 3) {
+                        const rawUrl = documents[data.row.index]?.url;
+                        if (rawUrl) {
+                            docPDF.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: rawUrl });
+                        }
+                    }
+                }
+            });
+
+            currentY = docPDF.lastAutoTable.finalY + 10;
+        }
+    }
+
+    const safeFirstName = (staff.firstName || 'Staff').replace(/\s+/g, '_');
+    const safeLastName = (staff.lastName || '').replace(/\s+/g, '_');
+    const fileName = `Staff_Profile_${safeFirstName}_${safeLastName}.pdf`;
+
+    docPDF.save(fileName);
+};

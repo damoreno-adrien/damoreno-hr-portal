@@ -11,7 +11,8 @@ import { JobHistoryManager } from './JobHistoryManager';
 import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield, Printer } from 'lucide-react';
+import StaffProfileExportModal from './StaffProfileExportModal.jsx';
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield } from 'lucide-react';
 import { StaffPermissionsOverrides } from './StaffPermissionsOverrides';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
@@ -226,6 +227,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     // --- MODALES ETATS ---
     const [feedbackModal, setFeedbackModal] = useState(null);
@@ -714,6 +716,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
             <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} confirmText={confirmState.confirmText || "Confirm"} cancelText={confirmState.cancelText || "Cancel"} isDestructive={confirmState.isDestructive} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} />
             <PromptModal isOpen={promptState.isOpen} title={promptState.title} message={promptState.message} placeholder={promptState.placeholder} type={promptState.type} onConfirm={promptState.onConfirm} onCancel={promptState.onCancel} />
+            <StaffProfileExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} staff={staff} companyConfig={companyConfig} />
 
             {isOffboardingModalOpen && (
                 <OffboardingModal
@@ -776,11 +779,11 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
                 <button
                     type="button"
-                    onClick={() => window.print()}
+                    onClick={() => setIsExportModalOpen(true)}
                     className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg transition-colors shrink-0 mb-1 whitespace-nowrap"
-                    title="Export this profile view to PDF using your browser's print dialog"
+                    title="Generate a downloadable PDF report of this staff profile"
                 >
-                    <Printer className="h-3.5 w-3.5" /> Export Profile to PDF
+                    <Download className="h-3.5 w-3.5" /> Export Profile to PDF
                 </button>
             </div>
 
