@@ -3,7 +3,7 @@ import { doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import usePermissions from '../../hooks/usePermissions';
 import { PERMISSION_CATEGORIES } from '../../config/permissions.config';
-import { Loader2, Shield, Save, AlertCircle } from 'lucide-react';
+import { Loader2, Shield, Save, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 
 export function StaffPermissionsOverrides({ db, staffId, userRole, staffProfile }) {
     const { permissions } = usePermissions(db, userRole, getAuth().currentUser?.uid);
@@ -14,6 +14,7 @@ export function StaffPermissionsOverrides({ db, staffId, userRole, staffProfile 
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
+    const [isOpen, setIsOpen] = useState(false);
 
     useEffect(() => {
         const fetchPermissions = async () => {
@@ -108,69 +109,78 @@ export function StaffPermissionsOverrides({ db, staffId, userRole, staffProfile 
 
     return (
         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-700 pb-4">
+            <div
+                onClick={() => setIsOpen(prev => !prev)}
+                className="flex items-center justify-between border-b border-gray-700 pb-4 cursor-pointer select-none"
+            >
                 <div>
                     <h4 className="text-base font-semibold text-white flex items-center gap-2">
                         <Shield className="h-5 w-5 text-indigo-400" />
-                        Custom Access Overrides
+                        Manage Custom Clearances
                     </h4>
                     <p className="text-sm text-gray-400 mt-1">
                         Base role: <span className="font-bold text-gray-300">{targetRole.toUpperCase()}</span>. 
                         Modify specific permissions for this user.
                     </p>
                 </div>
-                <button 
-                    onClick={handleSave} 
-                    disabled={saving}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
-                >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Save Overrides
-                </button>
+                <div className="flex items-center gap-3 shrink-0">
+                    <button 
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleSave(); }} 
+                        disabled={saving}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50 text-sm font-medium"
+                    >
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        Save Overrides
+                    </button>
+                    {isOpen ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+                </div>
             </div>
 
             {error && <div className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md flex items-center gap-2"><AlertCircle className="h-4 w-4" />{error}</div>}
             {success && <div className="text-green-400 text-sm bg-green-900/30 p-3 rounded-md">Permissions successfully updated.</div>}
 
-            <div className="space-y-6 mt-4">
-                {PERMISSION_CATEGORIES.map((category) => (
-                    <div key={category.name} className="space-y-3">
-                        <h5 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <category.icon className="h-4 w-4" /> {category.name}
-                        </h5>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {category.keys.map((perm) => {
-                                const defaultVal = !!roleDefaults[perm.key];
-                                const hasOverride = customOverrides[perm.key] !== undefined;
-                                const finalVal = hasOverride ? customOverrides[perm.key] : defaultVal;
+            <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="space-y-6">
+                    {PERMISSION_CATEGORIES.map((category) => (
+                        <div key={category.name} className="space-y-3">
+                            <h5 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                <category.icon className="h-4 w-4" /> {category.name}
+                            </h5>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {category.keys.map((perm) => {
+                                    const defaultVal = !!roleDefaults[perm.key];
+                                    const hasOverride = customOverrides[perm.key] !== undefined;
+                                    const finalVal = hasOverride ? customOverrides[perm.key] : defaultVal;
 
-                                return (
-                                    <div key={perm.key} className={`flex flex-col p-3 rounded-lg border ${hasOverride ? 'bg-indigo-900/20 border-indigo-700/50' : 'bg-gray-900/50 border-gray-700'} transition-colors`}>
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-sm font-medium text-gray-200 cursor-pointer flex-1">
-                                                {perm.label}
-                                            </label>
-                                            <input
-                                                type="checkbox"
-                                                checked={finalVal}
-                                                onChange={() => handleToggle(perm.key)}
-                                                className="h-4 w-4 rounded border-gray-600 text-indigo-600 focus:ring-indigo-500 bg-gray-700 cursor-pointer"
-                                            />
+                                    return (
+                                        <div key={perm.key} className={`flex flex-col p-3 rounded-lg border ${hasOverride ? 'bg-indigo-900/20 border-indigo-700/50' : 'bg-gray-900/50 border-gray-700'} transition-colors`}>
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-sm font-medium text-gray-200 cursor-pointer flex-1">
+                                                    {perm.label}
+                                                </label>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={finalVal}
+                                                    onChange={() => handleToggle(perm.key)}
+                                                    className="h-4 w-4 rounded border-gray-600 text-indigo-600 focus:ring-indigo-500 bg-gray-700 cursor-pointer"
+                                                />
+                                            </div>
+                                            <div className="flex justify-between items-center mt-1">
+                                                <span className="text-xs text-gray-500">{perm.desc}</span>
+                                                {hasOverride && (
+                                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${finalVal ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>
+                                                        OVERRIDDEN
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="flex justify-between items-center mt-1">
-                                            <span className="text-xs text-gray-500">{perm.desc}</span>
-                                            {hasOverride && (
-                                                <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${finalVal ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>
-                                                    OVERRIDDEN
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
         </div>
     );

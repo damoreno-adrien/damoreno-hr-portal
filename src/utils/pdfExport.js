@@ -353,6 +353,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 [{ content: 'Department:', styles: { fontStyle: 'bold' } }, currentJob.department || 'N/A'],
                 [{ content: 'Position:', styles: { fontStyle: 'bold' } }, currentJob.position || 'N/A'],
                 [{ content: 'Start Date:', styles: { fontStyle: 'bold' } }, staff.startDate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(staff.startDate)) : 'N/A'],
+                [{ content: 'Seniority:', styles: { fontStyle: 'bold' } }, dateUtils.formatSeniority(staff.startDate, staff.endDate) || 'N/A'],
                 [{ content: 'Pay Type:', styles: { fontStyle: 'bold' } }, currentJob.payType || 'N/A'],
                 [{ content: 'Pay Rate:', styles: { fontStyle: 'bold' } }, formatPayRateForExport(currentJob)],
             ],
@@ -363,6 +364,36 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
         });
 
         currentY = docPDF.lastAutoTable.finalY + 8;
+
+        // --- Job & Salary History (only if more than one entry exists) ---
+        if (staff.jobHistory && staff.jobHistory.length > 1) {
+            if (currentY > 250) { docPDF.addPage(); currentY = 20; }
+
+            docPDF.setFontSize(12);
+            docPDF.setFont('helvetica', 'bold');
+            docPDF.text('Job & Salary History', 14, currentY);
+            currentY += 4;
+
+            const sortedHistory = [...staff.jobHistory].sort((a, b) => new Date(b.startDate || 0) - new Date(a.startDate || 0));
+
+            const historyBody = sortedHistory.map(job => [
+                job.startDate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(job.startDate)) : 'N/A',
+                job.department || 'N/A',
+                job.position || 'N/A',
+                formatPayRateForExport(job)
+            ]);
+
+            autoTable(docPDF, {
+                head: [['Start Date', 'Department', 'Position', 'Pay Rate']],
+                body: historyBody,
+                startY: currentY,
+                theme: 'grid',
+                headStyles: { fillColor: [79, 70, 229] },
+                styles: { font: 'Sarabun', fontSize: 8 },
+            });
+
+            currentY = docPDF.lastAutoTable.finalY + 10;
+        }
     }
 
     // --- Section: HR Settings ---
@@ -374,12 +405,19 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
         docPDF.text('HR Settings', 14, currentY);
         currentY += 4;
 
+        const hrBody = [
+            [{ content: 'Status:', styles: { fontStyle: 'bold' } }, (staff.status === 'inactive' || staff.status === 'archived') ? 'Inactive' : 'Active'],
+        ];
+
+        // Bonus Streak: only show if the staff member is actually eligible for the attendance bonus.
+        if (staff.isAttendanceBonusEligible !== false) {
+            hrBody.push([{ content: 'Bonus Streak:', styles: { fontStyle: 'bold' } }, `${staff.bonusStreak || 0} months`]);
+        }
+
+        hrBody.push([{ content: 'Holiday Policy:', styles: { fontStyle: 'bold' } }, staff.holidayPolicy === 'paid' ? 'Paid (Cash payout)' : 'In Lieu (Substitute days off)']);
+
         autoTable(docPDF, {
-            body: [
-                [{ content: 'Status:', styles: { fontStyle: 'bold' } }, (staff.status === 'inactive' || staff.status === 'archived') ? 'Inactive' : 'Active'],
-                [{ content: 'Bonus Streak:', styles: { fontStyle: 'bold' } }, `${staff.bonusStreak || 0} months`],
-                [{ content: 'Holiday Policy:', styles: { fontStyle: 'bold' } }, staff.holidayPolicy === 'paid' ? 'Paid (Cash payout)' : 'In Lieu (Substitute days off)'],
-            ],
+            body: hrBody,
             startY: currentY,
             theme: 'plain',
             styles: { font: 'Sarabun', fontSize: 10 },
@@ -387,6 +425,29 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
         });
 
         currentY = docPDF.lastAutoTable.finalY + 8;
+
+        // --- Offboarding Details (only if staff is inactive/archived) ---
+        if (staff.status === 'archived' || staff.status === 'inactive') {
+            if (currentY > 260) { docPDF.addPage(); currentY = 20; }
+
+            docPDF.setFontSize(12);
+            docPDF.setFont('helvetica', 'bold');
+            docPDF.text('Offboarding Details', 14, currentY);
+            currentY += 4;
+
+            autoTable(docPDF, {
+                body: [
+                    [{ content: 'Last Day of Employment:', styles: { fontStyle: 'bold' } }, staff.endDate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(staff.endDate)) : 'N/A'],
+                    [{ content: 'Termination Type:', styles: { fontStyle: 'bold' } }, staff.offboardingSettings?.terminationType || 'N/A'],
+                ],
+                startY: currentY,
+                theme: 'plain',
+                styles: { font: 'Sarabun', fontSize: 10 },
+                columnStyles: { 0: { cellWidth: 55 } }
+            });
+
+            currentY = docPDF.lastAutoTable.finalY + 8;
+        }
     }
 
     // --- Section: Appendix - Official Documents ---

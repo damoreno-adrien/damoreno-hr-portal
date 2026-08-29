@@ -12,7 +12,7 @@ import { DocumentManager } from './DocumentManager';
 import { ProfileActionButtons } from './ProfileActionButtons';
 import OffboardingModal from '../ManageStaff/OffboardingModal.jsx';
 import StaffProfileExportModal from './StaffProfileExportModal.jsx';
-import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield } from 'lucide-react';
+import { Archive, UserCheck, Trash, Key, FileText, Loader2, FileBadge, PlaneTakeoff, ShieldAlert, Shirt, LogOut, History, Clock, AlertOctagon, CheckCircle, XCircle, RotateCcw, Download, EyeOff, Eye, Shield, ChevronDown, ChevronUp } from 'lucide-react';
 import { StaffPermissionsOverrides } from './StaffPermissionsOverrides';
 import * as dateUtils from '../../utils/dateUtils.js';
 import { generateDocument, translateNumber } from '../../utils/documentGenerator';
@@ -228,6 +228,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [isOffboardingModalOpen, setIsOffboardingModalOpen] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+    // --- ACCORDIONS ETATS (Settings & Stats tab) ---
+    const [isBonusSectionOpen, setIsBonusSectionOpen] = useState(false);
+    const [isCriticalActionsOpen, setIsCriticalActionsOpen] = useState(false);
 
     // --- MODALES ETATS ---
     const [feedbackModal, setFeedbackModal] = useState(null);
@@ -899,7 +903,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {activeTab === 'settings' && isFullManager && (
                 <div className="space-y-6">
-                    {/* Permissions Overrides Section */}
+                    {/* Permissions Overrides Section (already collapsible internally) */}
                     {permissions.canManageUsers && (
                         <StaffPermissionsOverrides 
                             db={db} 
@@ -909,21 +913,31 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         />
                     )}
 
+                    {/* --- Bonus Management (Collapsible) --- */}
                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                        <h4 className="text-base font-semibold text-white">Bonus Management</h4>
-                        <div className="mt-4 space-y-4">
-                            <div>
-                                <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
-                                <div className="mt-2 flex items-center space-x-4">
-                                    <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
-                                    <input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" min="0" />
-                                    <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
+                        <button
+                            type="button"
+                            onClick={() => setIsBonusSectionOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between focus:outline-none select-none"
+                        >
+                            <h4 className="text-base font-semibold text-white">Bonus Management</h4>
+                            {isBonusSectionOpen ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+                        </button>
+                        <div className={`transition-all duration-300 overflow-hidden ${isBonusSectionOpen ? 'max-h-[500px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-sm text-gray-400">Manually set the attendance bonus streak.</p>
+                                    <div className="mt-2 flex items-center space-x-4">
+                                        <p className="text-sm">Current Streak: <span className="font-bold text-amber-400">{staff.bonusStreak || 0} months</span></p>
+                                        <input type="number" value={bonusStreak} onChange={(e) => setBonusStreak(e.target.value)} className="w-24 bg-gray-700 rounded-md p-1 text-white" min="0" />
+                                        <button onClick={handleSetBonusStreak} disabled={isSaving} className="px-4 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-sm text-white disabled:opacity-50">Set Streak</button>
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="border-t border-gray-700 mt-4 pt-4">
-                                <div className="flex items-center justify-between">
-                                    <div><h5 className="font-medium text-white">Attendance Bonus</h5><p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p></div>
-                                    <input type="checkbox" id="bonus-eligible-toggle" role="switch" checked={isBonusEligible} onChange={handleToggleBonusEligibility} disabled={isSaving} className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
+                                <div className="border-t border-gray-700 mt-4 pt-4">
+                                    <div className="flex items-center justify-between">
+                                        <div><h5 className="font-medium text-white">Attendance Bonus</h5><p className="text-sm text-gray-400">Is this staff member eligible for the attendance bonus?</p></div>
+                                        <input type="checkbox" id="bonus-eligible-toggle" role="switch" checked={isBonusEligible} onChange={handleToggleBonusEligibility} disabled={isSaving} className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-amber-600 focus:ring-amber-500" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -938,44 +952,54 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     </div>
 
 
-                    {/* --- CRITICAL STAFF ACTIONS : Gérées par le hook usePermissions --- */}
+                    {/* --- CRITICAL STAFF ACTIONS (Collapsible) : Gérées par le hook usePermissions --- */}
                     {(permissions.canOffboardStaff || permissions.canResetPassword || userRole === 'super_admin') && (
-                        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-4">
-                            <h4 className="text-base font-semibold text-white">Critical Staff Actions</h4>
+                        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <button
+                                type="button"
+                                onClick={() => setIsCriticalActionsOpen(prev => !prev)}
+                                className="w-full flex items-center justify-between focus:outline-none select-none"
+                            >
+                                <h4 className="text-base font-semibold text-white">Critical Staff Actions</h4>
+                                {isCriticalActionsOpen ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+                            </button>
+                            <div className={`transition-all duration-300 overflow-hidden ${isCriticalActionsOpen ? 'max-h-[600px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
+                                <div className="space-y-4">
+                                    {/* OFFBOARDING / REACTIVATION */}
+                                    {permissions.canOffboardStaff && (
+                                        <div>
+                                            {isCurrentlyWorking ? (
+                                                <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff">
+                                                    <Archive className="h-4 w-4 mr-2" /> Archive Staff Member
+                                                </button>
+                                            ) : (
+                                                <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff">
+                                                    <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
 
-                            {/* OFFBOARDING / REACTIVATION */}
-                            {permissions.canOffboardStaff && (
-                                <div>
-                                    {isCurrentlyWorking ? (
-                                        <button onClick={() => setIsOffboardingModalOpen(true)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 text-sm text-white disabled:opacity-50" title="Archive staff">
-                                            <Archive className="h-4 w-4 mr-2" /> Archive Staff Member
-                                        </button>
-                                    ) : (
-                                        <button onClick={handleReactivateStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-sm text-white disabled:opacity-50" title="Reactivate staff">
-                                            <UserCheck className="h-4 w-4 mr-2" /> Set Staff Member to Active
-                                        </button>
+                                    {/* RESET PASSWORD */}
+                                    {permissions.canResetPassword && (
+                                        <div>
+                                            <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password">
+                                                <Key className="h-4 w-4 mr-2" /> Reset Password
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* DELETE PERMANENTLY : Toujours bloqué en dur pour le Super Admin uniquement */}
+                                    {!isCurrentlyWorking && userRole === 'super_admin' && (
+                                        <div className="pt-4 border-t border-gray-700">
+                                            <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently">
+                                                <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently
+                                            </button>
+                                            <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
+                                        </div>
                                     )}
                                 </div>
-                            )}
-
-                            {/* RESET PASSWORD */}
-                            {permissions.canResetPassword && (
-                                <div>
-                                    <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password">
-                                        <Key className="h-4 w-4 mr-2" /> Reset Password
-                                    </button>
-                                </div>
-                            )}
-
-                            {/* DELETE PERMANENTLY : Toujours bloqué en dur pour le Super Admin uniquement */}
-                            {!isCurrentlyWorking && userRole === 'super_admin' && (
-                                <div className="pt-4 border-t border-gray-700">
-                                    <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently">
-                                        <Trash className="h-4 w-4 mr-2" /> Delete Staff Permanently
-                                    </button>
-                                    <p className="text-xs text-red-400 mt-2">Warning: Deletion erases all data (attendance, pay, etc.) and cannot be undone.</p>
-                                </div>
-                            )}
+                            </div>
                         </div>
                     )}
                 </div>
