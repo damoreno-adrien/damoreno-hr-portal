@@ -332,7 +332,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
             ],
             startY: currentY,
             theme: 'plain',
-            styles: { font: 'Sarabun', fontSize: 10 },
+            styles: { font: 'Sarabun', fontSize: 10, cellPadding: 1.5, minCellHeight: 6 },
             columnStyles: { 0: { cellWidth: 45 } }
         });
 
@@ -359,7 +359,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
             ],
             startY: currentY,
             theme: 'plain',
-            styles: { font: 'Sarabun', fontSize: 10 },
+            styles: { font: 'Sarabun', fontSize: 10, cellPadding: 1.5, minCellHeight: 6 },
             columnStyles: { 0: { cellWidth: 45 } }
         });
 
@@ -389,7 +389,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 startY: currentY,
                 theme: 'grid',
                 headStyles: { fillColor: [79, 70, 229] },
-                styles: { font: 'Sarabun', fontSize: 8 },
+                styles: { font: 'Sarabun', fontSize: 8, cellPadding: 1.5, minCellHeight: 6 },
             });
 
             currentY = docPDF.lastAutoTable.finalY + 10;
@@ -420,7 +420,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
             body: hrBody,
             startY: currentY,
             theme: 'plain',
-            styles: { font: 'Sarabun', fontSize: 10 },
+            styles: { font: 'Sarabun', fontSize: 10, cellPadding: 1.5, minCellHeight: 6 },
             columnStyles: { 0: { cellWidth: 45 } }
         });
 
@@ -442,7 +442,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 ],
                 startY: currentY,
                 theme: 'plain',
-                styles: { font: 'Sarabun', fontSize: 10 },
+                styles: { font: 'Sarabun', fontSize: 10, cellPadding: 1.5, minCellHeight: 6 },
                 columnStyles: { 0: { cellWidth: 55 } }
             });
 
@@ -475,7 +475,7 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
                 startY: currentY,
                 theme: 'grid',
                 headStyles: { fillColor: [79, 70, 229] },
-                styles: { font: 'Sarabun', fontSize: 8 },
+                styles: { font: 'Sarabun', fontSize: 8, cellPadding: 1.5, minCellHeight: 6 },
                 columnStyles: { 3: { textColor: [37, 99, 235] } },
                 didDrawCell: (data) => {
                     // Make the entire "Link" cell clickable, opening the raw Firebase Storage URL
