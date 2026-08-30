@@ -206,8 +206,34 @@ export const generatePayslipsPDF = async (payslipsArray, companyConfig, payPerio
         deductionsBody.push(...(details.deductions?.others || []).map(d => [d.description, formatCurrency(d.amount)]));
 
         // 7. RENDU TABLEAUX
-        autoTable(docPDF, { head: [['Earnings', 'Amount (THB)']], body: earningsBody, foot: [['Total Earnings', formatCurrency(details.totalEarnings)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' }, styles: { font: 'Sarabun' } });
-        autoTable(docPDF, { head: [['Deductions', 'Amount (THB)']], body: deductionsBody, foot: [['Total Deductions', formatCurrency(details.totalDeductions)]], startY: docPDF.lastAutoTable.finalY + 2, theme: 'grid', headStyles: { fillColor: [23, 23, 23] }, footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' }, styles: { font: 'Sarabun' } });
+        autoTable(docPDF, {
+            head: [['Earnings', 'Amount (THB)']],
+            body: earningsBody,
+            foot: [['Total Earnings', formatCurrency(details.totalEarnings)]],
+            startY: docPDF.lastAutoTable.finalY + 2,
+            theme: 'grid',
+            headStyles: { fillColor: [23, 23, 23], halign: 'left' },
+            footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' },
+            styles: { font: 'Sarabun' },
+            columnStyles: {
+                0: { cellWidth: 120 },
+                1: { cellWidth: 60, halign: 'right' }
+            }
+        });
+        autoTable(docPDF, {
+            head: [['Deductions', 'Amount (THB)']],
+            body: deductionsBody,
+            foot: [['Total Deductions', formatCurrency(details.totalDeductions)]],
+            startY: docPDF.lastAutoTable.finalY + 2,
+            theme: 'grid',
+            headStyles: { fillColor: [23, 23, 23], halign: 'left' },
+            footStyles: { fillColor: [41, 41, 41], fontStyle: 'bold' },
+            styles: { font: 'Sarabun' },
+            columnStyles: {
+                0: { cellWidth: 120 },
+                1: { cellWidth: 60, halign: 'right' }
+            }
+        });
 
         // 8. FOOTER
         docPDF.setFontSize(14); docPDF.setFont('helvetica', 'bold');
