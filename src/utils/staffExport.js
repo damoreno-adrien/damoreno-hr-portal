@@ -28,8 +28,9 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
         
         // Filtre de statut
         if (filters.status !== 'All') {
-            if (filters.status === 'Active' && staff.status === 'inactive') return false;
-            if (filters.status === 'Inactive' && staff.status !== 'inactive') return false;
+            const isInactiveOrArchived = staff.status === 'inactive' || staff.status === 'archived';
+            if (filters.status === 'Active' && isInactiveOrArchived) return false;
+            if (filters.status === 'Inactive' && !isInactiveOrArchived) return false;
         }
         
         // Filtre de département
@@ -94,7 +95,7 @@ export const generateCustomStaffExport = ({ staffList, filters, sortConfig, sele
                 case 'nickname': return staff.nickname || 'N/A';
                 case 'department': return job?.department || 'Unassigned';
                 case 'position': return job?.position || 'N/A';
-                case 'status': return staff.status === 'inactive' ? 'Inactive' : 'Active';
+                case 'status': return (staff.status === 'inactive' || staff.status === 'archived') ? 'Inactive' : 'Active';
                 case 'email': return staff.email || 'N/A';
                 case 'phone': return staff.phone || 'N/A';
                 case 'address': return staff.address || 'N/A';
