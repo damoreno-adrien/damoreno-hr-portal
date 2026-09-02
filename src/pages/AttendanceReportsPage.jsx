@@ -6,10 +6,11 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import Modal from '../components/common/Modal';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
 import ImportConfirmationModal from '../components/common/ImportConfirmationModal.jsx';
+import FinancialAdjustmentsCalculator from '../components/Attendance/FinancialAdjustmentsCalculator.jsx';
 import * as dateUtils from '../utils/dateUtils';
 import { calculateAttendanceStatus } from '../utils/statusUtils';
 import { app } from "../../firebase.js";
-import { ArrowUp, ArrowDown, Download, Upload, Trash2, Check, ChevronDown, Users, Clock, AlertTriangle, Calendar } from 'lucide-react';
+import { ArrowUp, ArrowDown, Download, Upload, Trash2, Check, ChevronDown, Users, Clock, AlertTriangle, Calendar, Calculator as CalculatorIcon } from 'lucide-react';
 import FinancialSummaryCard from '../components/Financials/FinancialSummaryCard'; 
 import { exportAttendancePDF } from '../utils/attendanceExport';
 
@@ -53,6 +54,7 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
     const fileInputRef = useRef(null);
     const [cleanupLoading, setCleanupLoading] = useState(false);
     const [cleanupResult, setCleanupResult] = useState(null);
+    const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
 
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
@@ -350,6 +352,13 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
             
             <ImportConfirmationModal isOpen={isConfirmModalOpen} onClose={() => setIsConfirmModalOpen(false)} analysis={analysisResult} onConfirm={handleConfirmImport} isLoading={isConfirmingImport} fileName="Attendance Import" entityName="Records" />
 
+            <FinancialAdjustmentsCalculator
+                isOpen={isCalculatorOpen}
+                onClose={() => setIsCalculatorOpen(false)}
+                reportData={processedReportData}
+                staffList={staffList}
+            />
+
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
 
             {/* SECTION FILTRES PRINCIPAUX */}
@@ -412,6 +421,12 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                         <button onClick={handleExportLocalPDF} disabled={isLoading || processedReportData.length === 0} className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow transition-colors">
                             <Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF
                         </button>
+
+                        {isSuperAdmin && (
+                            <button onClick={() => setIsCalculatorOpen(true)} disabled={isLoading || processedReportData.length === 0} className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-lg font-bold text-xs shadow transition-colors">
+                                <CalculatorIcon className="w-3.5 h-3.5 mr-1.5" /> Calculate Adjustments
+                            </button>
+                        )}
                         
                         {isSuperAdmin && (
                             <>
