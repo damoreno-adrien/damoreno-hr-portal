@@ -1,8 +1,6 @@
 /* src/components/Payroll/PayrollGenerator.jsx */
 
 import React, { useState, useMemo } from 'react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import usePayrollGenerator from '../../hooks/usePayrollGenerator';
 import * as dateUtils from '../../utils/dateUtils';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -10,6 +8,8 @@ import { AlertCircle } from 'lucide-react';
 import FeedbackModal from '../common/FeedbackModal';
 import ConfirmModal from '../common/ConfirmModal';
 import SharedPayslipTable from './SharedPayslipTable';
+import PayrollExportOptionsModal from './PayrollExportOptionsModal';
+import { generateCustomPayrollExport } from '../../utils/payrollExport';
 
 const formatCurrency = (num) => num ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -35,6 +35,7 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
     // CHANGEMENT : on trie par staffName
     const [sortConfig, setSortConfig] = useState({ key: 'staffName', direction: 'asc' });
     const [methodFilter, setMethodFilter] = useState('all');
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     const handleSort = (key) => {
         setSortConfig(prev => ({
@@ -108,26 +109,10 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
         }
     };
 
-    const handleExportSummaryPDF = () => {
-        const docPDF = new jsPDF();
-        docPDF.text(`Payroll Summary - ${months[payPeriod.month - 1]} ${payPeriod.year}`, 14, 15);
-        autoTable(docPDF, {
-            head: [['Staff', 'Department', 'Method', 'Total Earnings', 'Total Deductions', 'Net Pay']],
-            body: tableData
-                .filter(item => selectedForPayroll.has(item.id))
-                .map(item => [
-                    item.branchName ? `${item.staffName} (${item.branchName})` : item.staffName,
-                    item.department,
-                    item.paymentMethod === 'cash' ? 'Cash' : 'Bank Transfer',
-                    formatCurrency(item.totalEarnings),
-                    formatCurrency(item.totalDeductions),
-                    formatCurrency(item.netPay)
-                ]),
-            startY: 20,
-            foot: [['TOTAL', '', '', '', '', formatCurrency(totalSelectedNetPay)]], 
-            footStyles: { fontStyle: 'bold', fillColor: [230, 230, 230], textColor: 20 },
-        });
-        docPDF.save(`payroll_summary_${payPeriod.year}_${payPeriod.month}.pdf`);
+    const handleExportOptions = (options) => {
+        const selectedPayslips = tableData.filter(item => selectedForPayroll.has(item.id));
+        generateCustomPayrollExport({ selectedPayslips, options, companyConfig });
+        setIsExportModalOpen(false);
     };
 
     const hasPendingAdvances = pendingAdvancesCount > 0;
@@ -137,6 +122,14 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
     return (
         <section className="mb-12">
             <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+
+            <PayrollExportOptionsModal
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                onExport={handleExportOptions}
+                selectedCount={selectedForPayroll.size}
+            />
+
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">Run New Payroll</h2>
             
             <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8 flex flex-col sm:flex-row sm:items-end gap-4">
@@ -165,7 +158,7 @@ export default function PayrollGenerator({ db, staffList, companyConfig, payPeri
                 <button onClick={handleGeneratePayroll} disabled={isLoading || isFinalizing} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 flex-shrink-0 transition-colors">
                     {isLoading ? 'Generating...' : 'Generate'}
                 </button>
-                <button onClick={handleExportSummaryPDF} disabled={tableData.length === 0 || selectedForPayroll.size === 0 || isLoading || isFinalizing} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 flex-shrink-0 transition-colors">
+                <button onClick={() => setIsExportModalOpen(true)} disabled={tableData.length === 0 || selectedForPayroll.size === 0 || isLoading || isFinalizing} className="w-full sm:w-auto px-6 py-2 h-10 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 flex-shrink-0 transition-colors">
                     Export Selected
                 </button>
             </div>
