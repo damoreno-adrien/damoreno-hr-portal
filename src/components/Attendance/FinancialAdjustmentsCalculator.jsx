@@ -23,6 +23,55 @@ const formatCurrency = (num) => {
     return safeNum.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
+// --- FALLBACK CONSTANTS (used ONLY when the contract is missing this info) ---
+const DEFAULT_HOURS_PER_DAY = 8;
+const DEFAULT_DAYS_PER_MONTH = 30;
+
+/**
+ * Derives { dailyRate, hourlyRate, hasContractInfo, payTypeLabel } from a job's
+ * actual contract terms, instead of hardcoding 30 days / 8 hours.
+ *
+ * Supported payType values: 'Salary' (monthly), 'Daily', 'Hourly'.
+ * Falls back gracefully (and safely, avoiding NaN/Infinity) when fields are missing.
+ */
+const deriveRatesFromJob = (currentJob) => {
+    if (!currentJob) {
+        return { dailyRate: 0, hourlyRate: 0, hasContractInfo: false, payTypeLabel: 'N/A' };
+    }
+
+    const payType = currentJob.payType || 'Salary';
+
+    // Hours worked per standard day. Multiple possible field names supported for robustness.
+    const hoursPerDay = Number(currentJob.standardDayHours ?? currentJob.hoursPerDay) || DEFAULT_HOURS_PER_DAY;
+
+    // Days used to convert a monthly salary into a daily rate.
+    const daysPerMonth = Number(currentJob.daysPerMonth ?? currentJob.workingDaysPerMonth) || DEFAULT_DAYS_PER_MONTH;
+
+    let dailyRate = 0;
+    let hourlyRate = 0;
+    let hasContractInfo = true;
+
+    if (payType === 'Hourly') {
+        // baseSalary is unreliable here; prefer explicit hourlyRate/payRate fields.
+        hourlyRate = Number(currentJob.hourlyRate ?? currentJob.payRate ?? currentJob.rate) || 0;
+        dailyRate = hourlyRate * hoursPerDay;
+        if (hourlyRate === 0) hasContractInfo = false;
+    } else if (payType === 'Daily') {
+        // baseSalary (or equivalent) already represents the daily rate for this contract.
+        dailyRate = Number(currentJob.dailyRate ?? currentJob.baseSalary ?? currentJob.payRate ?? currentJob.rate) || 0;
+        hourlyRate = hoursPerDay > 0 ? dailyRate / hoursPerDay : 0;
+        if (dailyRate === 0) hasContractInfo = false;
+    } else {
+        // Default: 'Salary' / Monthly contracts.
+        const baseSalary = Number(currentJob.baseSalary ?? currentJob.rate) || 0;
+        dailyRate = daysPerMonth > 0 ? baseSalary / daysPerMonth : 0;
+        hourlyRate = hoursPerDay > 0 ? dailyRate / hoursPerDay : 0;
+        if (baseSalary === 0) hasContractInfo = false;
+    }
+
+    return { dailyRate, hourlyRate, hasContractInfo, payTypeLabel: payType };
+};
+
 export default function FinancialAdjustmentsCalculator({ isOpen, onClose, reportData = [], staffList = [] }) {
 
     const adjustmentsByStaff = useMemo(() => {
@@ -41,10 +90,8 @@ export default function FinancialAdjustmentsCalculator({ isOpen, onClose, report
         grouped.forEach((rows, staffId) => {
             const staff = staffList.find(s => s.id === staffId);
             const currentJob = getStaffCurrentJob(staff);
-            const baseSalary = Number(currentJob?.baseSalary) || 0;
 
-            const dailyRate = baseSalary / 30;
-            const hourlyRate = dailyRate / 8;
+            const { dailyRate, hourlyRate, hasContractInfo, payTypeLabel } = deriveRatesFromJob(currentJob);
             const minuteRate = hourlyRate / 60;
 
             let totalLateMinutes = 0;
@@ -68,9 +115,10 @@ export default function FinancialAdjustmentsCalculator({ isOpen, onClose, report
             results.push({
                 staffId,
                 staffName: getDisplayName(staff),
-                baseSalary,
+                payTypeLabel,
                 dailyRate,
                 hourlyRate,
+                hasContractInfo,
                 totalLateMinutes,
                 totalOtHours,
                 absenceCount,
@@ -120,7 +168,7 @@ export default function FinancialAdjustmentsCalculator({ isOpen, onClose, report
                                 <thead className="bg-gray-900/60">
                                     <tr>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-gray-300 uppercase">Staff Member</th>
-                                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-300 uppercase">Base Salary</th>
+                                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-300 uppercase">Pay Rate</th>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-gray-300 uppercase">Lateness</th>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-gray-300 uppercase">Absences</th>
                                         <th className="px-4 py-3 text-left text-xs font-bold text-gray-300 uppercase">Overtime</th>
@@ -132,17 +180,20 @@ export default function FinancialAdjustmentsCalculator({ isOpen, onClose, report
                                         <tr key={item.staffId} className="hover:bg-gray-700/40 transition-colors">
                                             <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-white">
                                                 {item.staffName}
-                                                {item.baseSalary === 0 && (
+                                                {!item.hasContractInfo && (
                                                     <span
-                                                        title="No base salary found on record. Amounts default to 0."
+                                                        title="No pay rate found on record for this contract type. Amounts default to 0."
                                                         className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase text-amber-400 bg-amber-900/30 border border-amber-700/40 px-1.5 py-0.5 rounded"
                                                     >
-                                                        <AlertTriangle className="h-3 w-3" /> No Salary
+                                                        <AlertTriangle className="h-3 w-3" /> No Rate
                                                     </span>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-400 font-mono">
-                                                {formatCurrency(item.baseSalary)} THB
+                                                <div className="flex flex-col">
+                                                    <span>{formatCurrency(item.dailyRate)} THB / day</span>
+                                                    <span className="text-gray-500">{formatCurrency(item.hourlyRate)} THB / hr &middot; {item.payTypeLabel}</span>
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3 whitespace-nowrap text-xs">
                                                 {item.totalLateMinutes > 0 ? (
