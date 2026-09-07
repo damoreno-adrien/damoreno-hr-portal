@@ -22,7 +22,7 @@ const FIELD_LABELS = {
 };
 
 // Fields whose values are monetary amounts. Used to right-align columns
-// and format the amounts with 2 decimal places.
+// and format the amounts with thousands separators + 2 decimal places.
 const FINANCIAL_FIELD_IDS = new Set([
     'basePay',
     'attendanceBonus',
@@ -37,8 +37,7 @@ const FINANCIAL_FIELD_IDS = new Set([
 ]);
 
 const formatMoney = (num) => {
-    const n = Number(num) || 0;
-    return n.toFixed(2);
+    return Number(num || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
 const escapeCSV = (str) => {
