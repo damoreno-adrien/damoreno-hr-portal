@@ -433,7 +433,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                 </div>
             )}
 
-            {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} activeBranch={activeBranch} />}
+            {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} companyConfig={companyConfig} activeBranch={activeBranch} />}
             {selectedAttendance && <Modal isOpen={true} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} title="Attendance Correction"><EditAttendanceModal db={db} record={selectedAttendance} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} /></Modal>}
 
             {showBulkCreator && (
@@ -447,6 +447,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                         {...bulkCreatorProps}
                         activeBranch={activeBranch}
                         branches={companyConfig?.branches || []}
+                        companyConfig={companyConfig}
                     />
                 </Modal>
             )}

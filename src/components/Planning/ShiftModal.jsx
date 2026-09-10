@@ -1,23 +1,46 @@
 /* src/components/Planning/ShiftModal.jsx */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { X, Clock, Save, Trash2, Coffee, Flame, Loader2 } from 'lucide-react';
 
-// --- IMPORTS DES MODALES ---
 import FeedbackModal from '../common/FeedbackModal';
 import ConfirmModal from '../common/ConfirmModal';
 
-export default function ShiftModal({ isOpen, onClose, db, data }) {
+export default function ShiftModal({ isOpen, onClose, db, data, companyConfig }) {
     const { staff, date, shift } = data || {};
     const [startTime, setStartTime] = useState(shift?.startTime || "14:00");
     const [endTime, setEndTime] = useState(shift?.endTime || "23:00");
-    const [includesBreak, setIncludesBreak] = useState(shift?.includesBreak !== false);
+    
+    // --- NOUVEAU : Gestion numérique de la pause ---
+    const [breakMinutes, setBreakMinutes] = useState(60); 
     const [loading, setLoading] = useState(false);
 
-    // --- STATES POUR LES MODALES ---
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
+
+    // Initialisation intelligente de la pause
+    useEffect(() => {
+        if (!isOpen || !data) return;
+
+        // 1. Si le shift existe déjà, on prend sa valeur
+        if (shift?.breakMinutes !== undefined) {
+            setBreakMinutes(shift.breakMinutes);
+        } 
+        // 2. Rétrocompatibilité (anciens shifts avec juste true/false)
+        else if (shift?.includesBreak === false) {
+            setBreakMinutes(0);
+        } 
+        // 3. Nouveau shift : on cherche la valeur par défaut de la branche
+        else {
+            const branchOverrides = companyConfig?.branchSettings?.[staff?.branchId] || {};
+            const defaultBreak = branchOverrides.breakDurationMinutes !== undefined 
+                ? parseInt(branchOverrides.breakDurationMinutes) 
+                : (companyConfig?.breakDurationMinutes !== undefined ? parseInt(companyConfig.breakDurationMinutes) : 60);
+            
+            setBreakMinutes(defaultBreak);
+        }
+    }, [isOpen, data, shift, companyConfig, staff]);
 
     if (!isOpen || !data) return null;
 
@@ -25,6 +48,7 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
         setLoading(true);
         try {
             const shiftRef = doc(db, "schedules", `${staff.id}_${date}`);
+            const finalBreakMins = parseInt(breakMinutes) || 0;
 
             await setDoc(shiftRef, {
                 staffId: staff.id,
@@ -32,9 +56,10 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
                 date: date,
                 startTime,
                 endTime,
-                includesBreak,
-                type: "work",        // <-- On standardise la nature
-                source: "manual",    // <-- On indique que c'est fait par un humain
+                breakMinutes: finalBreakMins,                  // <-- Nouvelle donnée précise
+                includesBreak: finalBreakMins > 0,             // <-- Rétrocompatibilité maintenue
+                type: "work",        
+                source: "manual",    
                 branchId: staff.branchId || null,
                 updatedAt: new Date()
             }, { merge: true });
@@ -42,7 +67,6 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
             onClose();
         } catch (error) {
             console.error("Error saving shift:", error);
-            // --- MODIFIÉ : Remplacement de alert() ---
             setFeedbackModal({ type: 'error', title: 'Save Failed', message: "Failed to save shift." });
         } finally {
             setLoading(false);
@@ -50,7 +74,6 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
     };
 
     const handleDelete = async () => {
-        // --- MODIFIÉ : Remplacement de window.confirm() ---
         setConfirmState({
             isOpen: true,
             title: "Delete Shift",
@@ -66,7 +89,6 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
                     onClose();
                 } catch (error) {
                     console.error("Error deleting shift:", error);
-                    // --- MODIFIÉ : Remplacement de alert() ---
                     setFeedbackModal({ type: 'error', title: 'Delete Failed', message: "Failed to delete shift. Check console for details." });
                 } finally {
                     setLoading(false);
@@ -78,23 +100,8 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
 
     return (
         <>
-            {/* INJECTION DES MODALES EN DEHORS DU CONTENEUR Z-120 POUR QU'ELLES SOIENT VISIBLES */}
-            <FeedbackModal
-                isOpen={!!feedbackModal}
-                type={feedbackModal?.type}
-                title={feedbackModal?.title}
-                message={feedbackModal?.message}
-                onClose={() => setFeedbackModal(null)}
-            />
-            <ConfirmModal
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                onConfirm={confirmState.onConfirm}
-                onCancel={confirmState.onCancel}
-                isDestructive={confirmState.isDestructive}
-                confirmText={confirmState.confirmText}
-            />
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} isDestructive={confirmState.isDestructive} confirmText={confirmState.confirmText} />
 
             <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                 <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
@@ -118,23 +125,31 @@ export default function ShiftModal({ isOpen, onClose, db, data }) {
                             </div>
                         </div>
 
-                        <button
-                            onClick={() => setIncludesBreak(!includesBreak)}
-                            className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${includesBreak ? 'bg-gray-900 border-gray-700' : 'bg-amber-500/5 border-amber-500/30'}`}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className={`p-2 rounded-lg ${includesBreak ? 'bg-gray-800 text-gray-500' : 'bg-amber-500/20 text-amber-500'}`}>
-                                    {includesBreak ? <Coffee className="w-5 h-5" /> : <Flame className="w-5 h-5" />}
+                        {/* NOUVELLE UI POUR LA PAUSE NUMÉRIQUE */}
+                        <div className={`p-4 rounded-xl border transition-all ${breakMinutes > 0 ? 'bg-gray-900 border-gray-700' : 'bg-amber-500/5 border-amber-500/30'}`}>
+                            <div className="flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-lg ${breakMinutes > 0 ? 'bg-gray-800 text-gray-500' : 'bg-amber-500/20 text-amber-500'}`}>
+                                        {breakMinutes > 0 ? <Coffee className="w-5 h-5" /> : <Flame className="w-5 h-5" />}
+                                    </div>
+                                    <div className="text-left">
+                                        <p className="text-sm font-bold text-white">{breakMinutes > 0 ? "Unpaid Break" : "Continuous Shift"}</p>
+                                        <p className="text-[10px] text-gray-500 font-bold uppercase">{breakMinutes > 0 ? "Time subtracted" : "No break taken"}</p>
+                                    </div>
                                 </div>
-                                <div className="text-left">
-                                    <p className="text-sm font-bold text-white">{includesBreak ? "Standard Break" : "Continuous Shift"}</p>
-                                    <p className="text-[10px] text-gray-500 font-bold uppercase">{includesBreak ? "1h Unpaid break" : "No time subtracted"}</p>
+                                <div className="flex items-center gap-2">
+                                    <input 
+                                        type="number" 
+                                        value={breakMinutes} 
+                                        onChange={(e) => setBreakMinutes(e.target.value)}
+                                        min="0"
+                                        step="5"
+                                        className="w-16 bg-gray-800 text-white p-2 rounded-lg border border-gray-600 text-center font-bold focus:border-indigo-500 outline-none" 
+                                    />
+                                    <span className="text-xs text-gray-500 font-bold">mins</span>
                                 </div>
                             </div>
-                            <div className={`w-10 h-6 rounded-full relative transition-colors ${includesBreak ? 'bg-gray-700' : 'bg-amber-500'}`}>
-                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${includesBreak ? 'left-1' : 'left-5'}`}></div>
-                            </div>
-                        </button>
+                        </div>
 
                         <div className="flex gap-3 pt-2">
                             {shift && (

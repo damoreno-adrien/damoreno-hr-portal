@@ -1,4 +1,4 @@
-/* src/pages/DashboardPage.jsx */
+/* src/pages/StaffDashboardPage.jsx */
 
 import React, { useState, useEffect } from 'react';
 import { doc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
@@ -24,10 +24,8 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     const [isOnLeaveToday, setIsOnLeaveToday] = useState(false);
     const [upcomingLeave, setUpcomingLeave] = useState(null);
 
-    // --- STATE POUR LA MODALE DE CONFIRMATION ---
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
-    // Safety check for stats to prevent app crash or NaN display
     const rawStats = useMonthlyStats(db, user, companyConfig);
     const monthlyStats = rawStats.monthlyStats || { totalHoursWorked: "0h 0m", workedDays: 0, absences: 0, totalTimeLate: "0h 0m" };
     const bonusStatus = rawStats.bonusStatus || { notEligible: true };
@@ -36,25 +34,28 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     const colleaguesWithBirthday = staffList.filter(s =>
         s.id !== user.uid &&
-        s.branchId === staffProfile?.branchId && // <-- FIX RBAC : Uniquement ma branche[cite: 12]
+        s.branchId === staffProfile?.branchId && 
         checkIsBirthday(s.birthdate) &&
         isStaffActiveOnDate(s, new Date())
     );
 
-    function checkBirthday(birthdate) {
-        if (!birthdate) return false;
-        const birthDateStr = formatCustom(birthdate, 'MM-dd');
-        const todayStr = formatCustom(new Date(), 'MM-dd');
-        return birthDateStr === todayStr;
-    }
-    const getDisplayName = (staff) => staff.nickname || staff.firstName || staff.fullName;
+    // --- LOGICAL DAY HELPER ---
+    const getLogicalDate = () => {
+        const now = new Date();
+        // Si l'heure est avant 04h30 du matin, on recule d'un jour.
+        if (now.getHours() < 4 || (now.getHours() === 4 && now.getMinutes() <= 30)) {
+            return addDays(now, -1);
+        }
+        return now;
+    };
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
 
-    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${formatISODate(new Date())}`);
+    // Utilisation de la date logique pour cibler le bon document
+    const getDocRef = () => doc(db, 'attendance', `${user.uid}_${formatISODate(getLogicalDate())}`);
 
     useEffect(() => {
         if (!db || !user) return;
@@ -76,10 +77,13 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = formatISODate(new Date());
-        const tomorrowStr = formatISODate(addDays(new Date(), 1));
+        const logicalToday = getLogicalDate();
+        const todayStr = formatISODate(logicalToday);
+        const tomorrowStr = formatISODate(addDays(logicalToday, 1));
+        
         setTodaysSchedule(null);
         setTomorrowsSchedule(null);
+        
         const q = query(
             collection(db, 'schedules'),
             where('staffId', '==', user.uid),
@@ -108,7 +112,7 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     useEffect(() => {
         if (!db || !user) return;
-        const todayStr = formatISODate(new Date());
+        const todayStr = formatISODate(getLogicalDate());
         const q = query(
             collection(db, 'leave_requests'),
             where('staffId', '==', user.uid),
@@ -173,9 +177,7 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
     };
 
     const handleCheckIn = async () => {
-        const localDateString = formatISODate(new Date());
-
-        // --- NEW: Find the user's home branch from the staff list ---
+        const localDateString = formatISODate(getLogicalDate());
         const currentStaffProfile = staffList?.find(s => s.id === user.uid);
 
         await setDoc(getDocRef(), {
@@ -215,7 +217,6 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
         };
 
         if (requiresConfirmation) {
-            // --- MODIFIÉ : Remplacement de window.confirm() ---
             setConfirmState({
                 isOpen: true,
                 title: "Early Check-Out",
@@ -233,12 +234,10 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
         }
     };
 
-    // --- FIX: Dynamic Buttons based on Shift Type ---
     const renderButtons = () => {
         if (isOnLeaveToday) return <p className="text-center text-xl md:text-2xl text-blue-400">On Leave. Clock disabled.</p>;
         const commonButtonClasses = "w-full py-4 text-xl md:text-2xl font-bold rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed";
 
-        // Detect Continuous Shift (No Break)
         const isContinuousShift = todaysSchedule && todaysSchedule.includesBreak === false;
 
         switch (status) {
@@ -248,7 +247,6 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
             case 'checked-in':
                 if (todaysAttendance?.breakEnd) return <button onClick={handleCheckOut} disabled={!isWithinGeofence} className={`${commonButtonClasses} bg-red-600 hover:bg-red-700`}>Check-Out</button>;
 
-                // If Continuous Shift, HIDE Start Break button
                 if (isContinuousShift) {
                     return (
                         <div className="space-y-2">
@@ -260,7 +258,6 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
                     );
                 }
 
-                // Standard Shift (Show Both)
                 return (
                     <div className="grid grid-cols-2 gap-4">
                         <button onClick={handleToggleBreak} disabled={!isWithinGeofence} className={`${commonButtonClasses} text-lg md:text-xl bg-yellow-500 hover:bg-yellow-600`}>Start Break</button>
@@ -302,12 +299,10 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
         bonusBgClass = "bg-red-500/20";
     }
 
-    // --- FIX: Sanitize NaN values for display ---
     const sanitizeTime = (val) => (val && !val.includes('NaN') ? val : "0h 0m");
 
     return (
         <div className="relative">
-            {/* INJECTION DE LA MODALE */}
             <ConfirmModal
                 isOpen={confirmState.isOpen}
                 title={confirmState.title}
@@ -319,7 +314,7 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
             />
 
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday! 🎂</div>}
-            {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p>🎈 It's {colleaguesWithBirthday.map(getDisplayName).join(', ')}'s Birthday!</p></div>}
+            {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p>🎈 It's {colleaguesWithBirthday.map(s => s.nickname || s.firstName).join(', ')}'s Birthday!</p></div>}
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-8">My Dashboard</h2>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -347,7 +342,6 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
                             <StatItem icon={Clock} label="Total Hours Worked" value={sanitizeTime(monthlyStats.totalHoursWorked)} colorClass="blue" caption={`Target: ${sanitizeTime(monthlyStats.totalHoursScheduled)}`} />
                             <StatItem icon={LogIn} label="Days Worked" value={monthlyStats.workedDays || 0} colorClass="green" />
                             <StatItem icon={Moon} label="Absences" value={monthlyStats.absences || 0} colorClass="red" />
-                            {/* --- FIX: Safely display Late Time --- */}
                             <StatItem icon={AlertTriangle} label="Total Time Late" value={sanitizeTime(monthlyStats.totalTimeLate)} colorClass="yellow" />
                         </div>
                     </DashboardCard>

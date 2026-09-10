@@ -4,11 +4,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, writeBatch, doc, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { Save, Loader2, Coffee, Flame, Fingerprint, Calendar, Copy } from 'lucide-react';
 
-// --- IMPORT DE LA MODALE ---
 import FeedbackModal from '../common/FeedbackModal';
 
-export default function ShiftCreator({ db, staffList, userRole, existingWeekData, onSuccess, initialStaffId, initialStartDate, initialEndDate, activeBranch, branches = [] }) {
+export default function ShiftCreator({ db, staffList, userRole, existingWeekData, onSuccess, initialStaffId, initialStartDate, initialEndDate, activeBranch, branches = [], companyConfig }) {
     const isManager = ['admin', 'manager', 'super_admin'].includes(userRole);
+
+    // --- LECTURE DU DEFAULT BREAK SELON LA BRANCHE ---
+    const defaultBreak = useMemo(() => {
+        const branchOverrides = companyConfig?.branchSettings?.[activeBranch] || {};
+        if (branchOverrides.breakDurationMinutes !== undefined) return parseInt(branchOverrides.breakDurationMinutes);
+        if (companyConfig?.breakDurationMinutes !== undefined) return parseInt(companyConfig.breakDurationMinutes);
+        return 60; // Fallback absolu
+    }, [companyConfig, activeBranch]);
 
     const getNextWeekBounds = () => {
         const today = new Date();
@@ -26,19 +33,16 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
     const [endDate, setEndDate] = useState(initialEndDate || defaults.end);
     const [loading, setLoading] = useState(false);
 
-    // --- QUICK FILL STATE ---
     const [globalStart, setGlobalStart] = useState("14:00");
     const [globalEnd, setGlobalEnd] = useState("23:00");
     const [isAllSelected, setIsAllSelected] = useState(false);
 
-    const defaultDay = { selected: false, schedActive: false, attActive: false, start: "14:00", end: "23:00", break: true, attStart: "14:00", attEnd: "23:00" };
+    // Remplacement de "break: true" par "breakMinutes: defaultBreak"
+    const defaultDay = { selected: false, schedActive: false, attActive: false, start: "14:00", end: "23:00", breakMinutes: defaultBreak, attStart: "14:00", attEnd: "23:00" };
     const [weekPattern, setWeekPattern] = useState({ 0: { ...defaultDay }, 1: { ...defaultDay }, 2: { ...defaultDay }, 3: { ...defaultDay }, 4: { ...defaultDay }, 5: { ...defaultDay }, 6: { ...defaultDay } });
 
-    // --- STATE POUR LA MODALE DE FEEDBACK ---
     const [feedbackModal, setFeedbackModal] = useState(null);
 
-    // --- FIX : ORDRE D'AFFICHAGE LUNDI -> DIMANCHE ---
-    // On force l'ordre d'affichage tout en conservant l'index JS natif (0 = Dimanche) pour la BDD
     const daysOrder = [
         { name: "Monday", idx: 1 },
         { name: "Tuesday", idx: 2 },
@@ -75,7 +79,9 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                     newPattern[dayIdx].schedActive = true;
                     newPattern[dayIdx].start = data.startTime || "14:00";
                     newPattern[dayIdx].end = data.endTime || "23:00";
-                    newPattern[dayIdx].break = data.includesBreak ?? true;
+                    
+                    // Rétrocompatibilité + Nouvelle logique
+                    newPattern[dayIdx].breakMinutes = data.breakMinutes !== undefined ? data.breakMinutes : (data.includesBreak === false ? 0 : defaultBreak);
                 });
 
                 const hydratedAttDays = new Set();
@@ -99,7 +105,7 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
         };
 
         fetchExistingData();
-    }, [selectedStaffId, startDate, endDate, db]);
+    }, [selectedStaffId, startDate, endDate, db, defaultBreak]);
 
     useEffect(() => {
         setIsAllSelected(Object.values(weekPattern).every(d => d.selected));
@@ -133,7 +139,13 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
             const [eh, em] = (field === 'end' ? value : newPattern.end).split(':').map(Number);
             let diff = (eh * 60 + em) - (sh * 60 + sm);
             if (diff < 0) diff += 1440;
-            newPattern.break = diff >= 420;
+            
+            // Auto-ajustement intelligent de la pause (7 heures = 420 mins)
+            if (diff < 420) {
+                newPattern.breakMinutes = 0;
+            } else if (newPattern.breakMinutes === 0 && diff >= 420) {
+                newPattern.breakMinutes = defaultBreak;
+            }
         }
 
         setWeekPattern(prev => ({ ...prev, [dayIndex]: newPattern }));
@@ -162,7 +174,7 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                     const [eh, em] = globalEnd.split(':').map(Number);
                     let diff = (eh * 60 + em) - (sh * 60 + sm);
                     if (diff < 0) diff += 1440;
-                    updated[idx].break = diff >= 420;
+                    updated[idx].breakMinutes = diff >= 420 ? defaultBreak : 0;
                 }
             });
             return updated;
@@ -184,7 +196,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
     };
 
     const generateShifts = async () => {
-        // --- MODIFIÉ : Remplacement du alert() ---
         if (!selectedStaffId) {
             setFeedbackModal({ type: 'error', title: 'Missing Selection', message: "Please select a Staff Member first!" });
             return;
@@ -214,12 +225,14 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                 if (pattern.selected) {
                     if (pattern.schedActive) {
                         const shiftRef = doc(db, "schedules", `${selectedStaffId}_${dateStr}`);
+                        const breakMins = parseInt(pattern.breakMinutes) || 0;
                         batch.set(shiftRef, {
                             staffId: selectedStaffId, staffName: staff.nickname || staff.firstName,
                             date: dateStr, startTime: pattern.start, endTime: pattern.end,
-                            includesBreak: pattern.break,
-                            type: 'work',               // <-- On standardise la nature
-                            source: 'bulk_generator',   // <-- On ajoute la provenance
+                            breakMinutes: breakMins,
+                            includesBreak: breakMins > 0, // Rétrocompatibilité
+                            type: 'work',               
+                            source: 'bulk_generator',   
                             branchId: staff.branchId || null, updatedAt: new Date()
                         });
                     } else if (existingSchedDocs[dateStr]) {
@@ -231,6 +244,10 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                             const attRef = doc(db, "attendance", `${selectedStaffId}_${dateStr}`);
                             const checkIn = new Date(`${dateStr}T${pattern.attStart}:00`);
                             const checkOut = new Date(`${dateStr}T${pattern.attEnd}:00`);
+                            
+                            // Logique simple pour l'attendance J+1 en bulk (si le out est plus petit que le in)
+                            if (checkOut < checkIn) checkOut.setDate(checkOut.getDate() + 1);
+
                             batch.set(attRef, {
                                 staffId: selectedStaffId, staffName: staff.nickname || staff.firstName,
                                 date: dateStr, branchId: staff.branchId || null,
@@ -252,7 +269,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
             onSuccess();
         } catch (e) {
             console.error(e);
-            // --- MODIFIÉ : Remplacement du alert() ---
             setFeedbackModal({ type: 'error', title: 'Save Failed', message: "Error saving shifts: " + e.message });
         }
         finally { setLoading(false); }
@@ -260,7 +276,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
 
     return (
         <div className="space-y-6 relative">
-            {/* INJECTION DU FEEDBACK MODAL */}
             <FeedbackModal
                 isOpen={!!feedbackModal}
                 type={feedbackModal?.type}
@@ -269,7 +284,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                 onClose={() => setFeedbackModal(null)}
             />
 
-            {/* Header: Staff & Dates */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-900/50 p-4 rounded-lg border border-gray-700">
                 <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-gray-500 uppercase">Staff Member</label>
@@ -288,7 +302,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                 </div>
             </div>
 
-            {/* QUICK FILL BAR */}
             <div className="bg-indigo-900/20 border border-indigo-500/30 p-3 rounded-lg flex flex-col xl:flex-row items-center justify-between gap-4 shadow-inner">
                 <div className="flex items-center gap-4 w-full xl:w-auto border-b xl:border-b-0 border-indigo-500/30 pb-3 xl:pb-0">
                     <label className="flex items-center gap-2 cursor-pointer bg-indigo-900/40 px-3 py-1.5 rounded-lg border border-indigo-500/50 hover:bg-indigo-500/30 transition-colors">
@@ -314,7 +327,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                 </div>
             </div>
 
-            {/* PATTERN LIST */}
             <div className="max-h-[45vh] overflow-y-auto pr-2 custom-scrollbar space-y-2">
                 {daysOrder.map(({ name: day, idx }) => (
                     <div key={day} className={`grid grid-cols-[100px_1fr] gap-4 p-3 rounded-xl border transition-all ${weekPattern[idx].selected ? 'bg-gray-800 border-gray-600 shadow-lg' : 'bg-gray-900/40 border-gray-800'}`}>
@@ -325,8 +337,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                         </div>
 
                         <div className={`flex flex-col gap-3 transition-opacity ${weekPattern[idx].selected ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-
-                            {/* Schedule Row */}
                             <div className="flex items-center gap-3">
                                 <label className="flex items-center gap-2 cursor-pointer w-24">
                                     <input type="checkbox" checked={weekPattern[idx].schedActive} onChange={e => handlePatternChange(idx, 'schedActive', e.target.checked)} className="rounded bg-gray-900 border-gray-600 text-indigo-500 w-3.5 h-3.5 focus:ring-indigo-500" />
@@ -336,13 +346,24 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                                     <input type="time" value={weekPattern[idx].start} onChange={e => handlePatternChange(idx, 'start', e.target.value)} className="bg-gray-900 text-white text-xs p-1.5 rounded-lg border border-gray-700 focus:border-indigo-500 outline-none [color-scheme:dark]" />
                                     <span className="text-gray-600">-</span>
                                     <input type="time" value={weekPattern[idx].end} onChange={e => handlePatternChange(idx, 'end', e.target.value)} className="bg-gray-900 text-white text-xs p-1.5 rounded-lg border border-gray-700 focus:border-indigo-500 outline-none [color-scheme:dark]" />
-                                    <button onClick={() => handlePatternChange(idx, 'break', !weekPattern[idx].break)} className={`ml-2 p-1.5 rounded transition-colors ${weekPattern[idx].break ? 'text-gray-500 bg-gray-900 hover:bg-gray-700' : 'text-amber-500 bg-amber-500/10 hover:bg-amber-500/20'}`} title={weekPattern[idx].break ? "1h Break Included" : "Continuous Shift (No Break)"}>
-                                        {weekPattern[idx].break ? <Coffee className="w-3.5 h-3.5" /> : <Flame className="w-3.5 h-3.5" />}
-                                    </button>
+                                    
+                                    {/* NOUVEL INPUT NUMERIQUE POUR LA PAUSE */}
+                                    <div className="flex items-center ml-2 bg-gray-900 rounded-lg border border-gray-700 focus-within:border-indigo-500 overflow-hidden" title="Break duration in minutes">
+                                        <div className={`p-1.5 flex items-center justify-center ${weekPattern[idx].breakMinutes > 0 ? 'bg-gray-800 text-gray-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                                            {weekPattern[idx].breakMinutes > 0 ? <Coffee className="w-3.5 h-3.5" /> : <Flame className="w-3.5 h-3.5" />}
+                                        </div>
+                                        <input 
+                                            type="number" 
+                                            value={weekPattern[idx].breakMinutes} 
+                                            onChange={e => handlePatternChange(idx, 'breakMinutes', e.target.value)}
+                                            className="w-12 bg-transparent text-white text-xs p-1.5 text-center outline-none [color-scheme:dark]"
+                                            min="0"
+                                            step="5"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* Attendance Row */}
                             {isManager && (
                                 <div className="flex items-center gap-3 pt-3 border-t border-gray-700/50">
                                     <label className="flex items-center gap-2 cursor-pointer w-24">

@@ -14,7 +14,6 @@ import { ArrowUp, ArrowDown, Download, Upload, Trash2, Check, ChevronDown, Users
 import FinancialSummaryCard from '../components/Financials/FinancialSummaryCard'; 
 import { exportAttendancePDF } from '../utils/attendanceExport';
 
-// --- IMPORTS DES MODALES ---
 import FeedbackModal from '../components/common/FeedbackModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 
@@ -27,6 +26,15 @@ const getDisplayName = (staff) => {
     if (staff && staff.nickname) return staff.nickname;
     if (staff && staff.firstName && staff.lastName) return `${staff.firstName} ${staff.lastName}`;
     return staff?.firstName || staff?.fullName || 'Unknown Staff';
+};
+
+// --- HELPER FORMAT HEURE/MINUTE OPTIMISÉ ---
+const formatDuration = (mins) => {
+    if (!mins || mins === 0) return '0m';
+    if (mins < 60) return `${mins}m`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
 };
 
 export default function AttendanceReportsPage({ db, staffList, activeBranch, userRole }) {
@@ -143,7 +151,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                 }
             });
 
-            // On compile toujours toutes les données pour rendre les filtres instantanés
             const staffToReport = relevantStaffList; 
             const generatedData = [];
             const dateInterval = dateUtils.eachDayOfInterval(startDate, endDate);
@@ -164,24 +171,44 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                     const attendance = attendanceMap.get(key);
                     const approvedLeave = leaveMap.get(key);
 
-                    let { status, isLate, lateMinutes, otMinutes, checkInTime, checkOutTime } = calculateAttendanceStatus(
+                    let { status, checkInTime, checkOutTime, suggestedLateMinutes, suggestedOtMinutes, approvedLateMinutes, approvedOtMinutes } = calculateAttendanceStatus(
                         schedule, attendance, approvedLeave, day, companyConfig
                     );
 
                     let displayStatus = status;
+                    let baseStatus = status; // On crée une base propre pour la coloration
+                    
                     const hasSchedule = schedule && schedule.type !== 'off';
                     const hasAttendance = attendance && attendance.checkInTime;
 
-                    if (approvedLeave) displayStatus = 'Leave';
+                    if (approvedLeave) {
+                        displayStatus = 'Leave';
+                        baseStatus = 'Leave';
+                    }
                     else if (hasAttendance) {
-                         if (isLate) displayStatus = `Late (${lateMinutes}m)`;
-                         else if (status === 'Overtime' && otMinutes > 0) {
-                            const h = Math.floor(otMinutes / 60); const m = otMinutes % 60;
-                            displayStatus = `Overtime (+${h}h ${m}m)`;
-                         } else if (!hasSchedule) displayStatus = 'Extra Shift';
-                         else displayStatus = 'Completed';
-                    } else if (hasSchedule) displayStatus = 'Absent';
-                    else displayStatus = 'Off';
+                        if (status === 'Paid OT') {
+                            displayStatus = `Paid OT (+${formatDuration(approvedOtMinutes)})`;
+                        } else if (status === 'Penalty Late') {
+                            displayStatus = `Penalty Late (-${formatDuration(approvedLateMinutes)})`;
+                        } else if (status === 'Adjusted') {
+                            displayStatus = `Adjusted (OT/Late)`;
+                        } else if (status === 'Completed' || status === 'Present') {
+                            if (suggestedOtMinutes > 0) displayStatus = `Completed (Sug. OT: ${formatDuration(suggestedOtMinutes)})`;
+                            else if (suggestedLateMinutes > 0) displayStatus = `Completed (Sug. Late: ${formatDuration(suggestedLateMinutes)})`;
+                            else displayStatus = 'Completed';
+                        } else if (status === 'Late') {
+                            displayStatus = `Late (${formatDuration(suggestedLateMinutes)})`;
+                        } else if (status === 'Extra Shift') {
+                            if (approvedOtMinutes > 0) displayStatus = `Extra Shift (Paid: ${formatDuration(approvedOtMinutes)})`;
+                            else displayStatus = `Extra Shift (Sug. OT: ${formatDuration(suggestedOtMinutes)})`;
+                        }
+                    } else if (hasSchedule) {
+                        displayStatus = 'Absent';
+                        baseStatus = 'Absent'; // Force the base status
+                    } else {
+                        displayStatus = 'Off';
+                        baseStatus = 'Off'; // Force the base status
+                    }
 
                     let workHours = 0;
                     if (checkInTime && checkOutTime) {
@@ -201,10 +228,13 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                         date: dateStr,
                         checkIn: checkInTime ? dateUtils.formatCustom(checkInTime, 'HH:mm') : '-',
                         checkOut: checkOutTime ? dateUtils.formatCustom(checkOutTime, 'HH:mm') : '-',
-                        workHours: ['Leave', 'Off', 'Absent'].includes(displayStatus) ? -1 : (workHours > 0 ? parseFloat(workHours.toFixed(2)) : 0),
+                        workHours: ['Leave', 'Off', 'Absent'].includes(baseStatus) ? -1 : (workHours > 0 ? parseFloat(workHours.toFixed(2)) : 0),
                         status: displayStatus,
-                        rawLateMinutes: isLate ? lateMinutes : 0,
-                        rawOtMinutes: status === 'Overtime' ? otMinutes : 0,
+                        baseStatus: baseStatus, 
+                        rawLateMinutes: suggestedLateMinutes || 0,
+                        rawOtMinutes: suggestedOtMinutes || 0,
+                        approvedLateMinutes: approvedLateMinutes || 0,
+                        approvedOtMinutes: approvedOtMinutes || 0,
                         fullRecord: attendance || { staffId: staff.id, date: dateStr, id: null },
                     });
                 }
@@ -215,7 +245,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         } finally { setIsLoading(false); }
     };
 
-    // --- APPLICATION FILTRES (STAFF + STATUT) & TRI DYNAMIQUE ---
     const processedReportData = useMemo(() => {
         let data = [...unsortedReportData];
 
@@ -224,9 +253,9 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         }
         
         if (statusFilter !== 'All') {
-            if (statusFilter === 'Late') data = data.filter(r => r.status.startsWith('Late'));
-            else if (statusFilter === 'Overtime') data = data.filter(r => r.status.startsWith('Overtime'));
-            else data = data.filter(r => r.status === statusFilter);
+            if (statusFilter === 'Late') data = data.filter(r => r.baseStatus.includes('Late') || r.rawLateMinutes > 0);
+            else if (statusFilter === 'Overtime') data = data.filter(r => r.baseStatus.includes('OT') || r.rawOtMinutes > 0);
+            else data = data.filter(r => r.baseStatus === statusFilter);
         }
 
         data.sort((a, b) => {
@@ -240,26 +269,37 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
         return data;
     }, [unsortedReportData, statusFilter, sortConfig, selectedStaffIds]);
 
-    // --- CALCUL DES STATISTIQUES (Basé sur les données filtrées) ---
     const metricsSummary = useMemo(() => {
         const totalItems = processedReportData.length;
-        if (totalItems === 0) return { complianceRate: 0, completedShifts: 0, plannedShifts: 0, totalLateMinutes: 0, lateCount: 0, totalOtHours: 0, absentCount: 0, leaveCount: 0 };
+        if (totalItems === 0) return { complianceRate: 0, completedShifts: 0, plannedShifts: 0, totalApprovedLate: 0, totalSuggestedLate: 0, lateCount: 0, approvedOtHours: 0, suggestedOtHours: 0, absentCount: 0, leaveCount: 0 };
 
-        let plannedShifts = 0, completedShifts = 0, totalLateMinutes = 0, lateCount = 0, totalOtMinutes = 0, absentCount = 0, leaveCount = 0;
+        let plannedShifts = 0, completedShifts = 0;
+        let totalApprovedLate = 0, totalSuggestedLate = 0, lateCount = 0;
+        let totalApprovedOt = 0, totalSuggestedOt = 0;
+        let absentCount = 0, leaveCount = 0;
 
         processedReportData.forEach(r => {
-            if (r.status === 'Absent') { plannedShifts++; absentCount++; }
-            else if (r.status === 'Leave') { leaveCount++; }
-            else if (r.status === 'Extra Shift') { completedShifts++; totalOtMinutes += (r.workHours * 60); }
-            else if (r.status === 'Completed') { plannedShifts++; completedShifts++; }
-            else if (r.status.startsWith('Late')) { plannedShifts++; completedShifts++; lateCount++; totalLateMinutes += r.rawLateMinutes; }
-            else if (r.status.startsWith('Overtime')) { plannedShifts++; completedShifts++; totalOtMinutes += r.rawOtMinutes; }
+            if (r.baseStatus === 'Absent') { plannedShifts++; absentCount++; }
+            else if (r.baseStatus === 'Leave') { leaveCount++; }
+            else if (['Completed', 'Present', 'Extra Shift', 'Paid OT', 'Penalty Late', 'Adjusted', 'Late'].includes(r.baseStatus)) {
+                completedShifts++;
+                if (r.baseStatus !== 'Extra Shift') plannedShifts++;
+                
+                totalApprovedOt += r.approvedOtMinutes;
+                totalSuggestedOt += r.rawOtMinutes;
+                
+                totalApprovedLate += r.approvedLateMinutes;
+                totalSuggestedLate += r.rawLateMinutes;
+                
+                if (r.approvedLateMinutes > 0 || r.rawLateMinutes > 0) lateCount++;
+            }
         });
 
         const complianceRate = plannedShifts > 0 ? Math.round((completedShifts / plannedShifts) * 100) : 100;
-        const totalOtHours = (totalOtMinutes / 60).toFixed(1);
+        const approvedOtHours = (totalApprovedOt / 60).toFixed(1);
+        const suggestedOtHours = (totalSuggestedOt / 60).toFixed(1);
 
-        return { complianceRate, completedShifts, plannedShifts, totalLateMinutes, lateCount, totalOtHours, absentCount, leaveCount };
+        return { complianceRate, completedShifts, plannedShifts, totalApprovedLate, totalSuggestedLate, lateCount, approvedOtHours, suggestedOtHours, absentCount, leaveCount };
     }, [processedReportData]);
 
     const requestSort = (key) => {
@@ -361,7 +401,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
 
             <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Attendance Reports</h2>
 
-            {/* SECTION FILTRES PRINCIPAUX */}
             <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-6 border border-gray-700">
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
                     <div>
@@ -402,7 +441,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                     </button>
                 </div>
 
-                {/* ZONE ACTIONS ROUTINES ET PASSAGES SÉCURISÉS */}
                 <div className="flex flex-wrap gap-2 justify-between items-center mt-5 pt-4 border-t border-gray-700/60">
                     <div className="flex items-center gap-2">
                         <label className="text-xs font-bold text-gray-400 uppercase">Isolate:</label>
@@ -452,17 +490,32 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                 </div>
             )}
 
-            {/* ENCART ANALYTICS DYNAMIQUE & INTERACTIF */}
             {unsortedReportData.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-in fade-in duration-300">
                     <div onClick={() => setStatusFilter(statusFilter === 'All' ? 'All' : 'All')} className="cursor-pointer transition-transform hover:scale-[1.02]">
                         <FinancialSummaryCard title="Shift Compliance Rate" value={`${metricsSummary.complianceRate}%`} subText={`${metricsSummary.completedShifts} done / ${metricsSummary.plannedShifts} scheduled`} isCurrency={false} icon={Calendar} color={metricsSummary.complianceRate > 90 ? "green" : "amber"} isActive={statusFilter === 'All'} />
                     </div>
                     <div onClick={() => setStatusFilter(statusFilter === 'Late' ? 'All' : 'Late')} className="cursor-pointer transition-transform hover:scale-[1.02]">
-                        <FinancialSummaryCard title="Accumulated Lateness" value={`${metricsSummary.totalLateMinutes} Mins`} subText={`${metricsSummary.lateCount} flag events registered`} isCurrency={false} icon={Clock} color={metricsSummary.totalLateMinutes > 0 ? "red" : "blue"} isActive={statusFilter === 'Late'} />
+                        <FinancialSummaryCard 
+                            title="Accumulated Lateness" 
+                            value={`${formatDuration(metricsSummary.totalApprovedLate)} Deducted`} 
+                            subText={`${formatDuration(metricsSummary.totalSuggestedLate)} suggested | ${metricsSummary.lateCount} flags`} 
+                            isCurrency={false} 
+                            icon={Clock} 
+                            color={metricsSummary.totalApprovedLate > 0 ? "red" : (metricsSummary.totalSuggestedLate > 0 ? "amber" : "blue")} 
+                            isActive={statusFilter === 'Late'} 
+                        />
                     </div>
                     <div onClick={() => setStatusFilter(statusFilter === 'Overtime' ? 'All' : 'Overtime')} className="cursor-pointer transition-transform hover:scale-[1.02]">
-                        <FinancialSummaryCard title="Accumulated Overtime" value={`${metricsSummary.totalOtHours} Hours`} subText="Additional compiled hours" isCurrency={false} icon={Clock} color="green" isActive={statusFilter === 'Overtime'} />
+                        <FinancialSummaryCard 
+                            title="Accumulated Overtime" 
+                            value={`${metricsSummary.approvedOtHours} Hours Paid`} 
+                            subText={`${metricsSummary.suggestedOtHours}h suggested`} 
+                            isCurrency={false} 
+                            icon={Clock} 
+                            color={metricsSummary.approvedOtHours > 0 ? "green" : "blue"} 
+                            isActive={statusFilter === 'Overtime'} 
+                        />
                     </div>
                     <div onClick={() => setStatusFilter(statusFilter === 'Absent' ? 'All' : 'Absent')} className="cursor-pointer transition-transform hover:scale-[1.02]">
                         <FinancialSummaryCard title="Absences & Approved Leaves" value={`A: ${metricsSummary.absentCount} | L: ${metricsSummary.leaveCount}`} subText="Loss parameters summary" isCurrency={false} icon={AlertTriangle} color="purple" isActive={statusFilter === 'Absent'} />
@@ -470,7 +523,6 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                 </div>
             )}
 
-            {/* GRILLE PRINCIPALE DES DONNÉES COMPILÉES */}
             <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto border border-gray-700">
                 <table className="min-w-full">
                     <thead className="bg-gray-700">
@@ -499,15 +551,22 @@ export default function AttendanceReportsPage({ db, staffList, activeBranch, use
                                         })()}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{dateUtils.formatDisplayDate(row.date)}</td>
+                                    
+                                    {/* COLORATION INTELLIGENTE DU STATUT */}
                                     <td className={`px-6 py-4 whitespace-nowrap text-sm font-bold ${
-                                        row.status === 'Absent' ? 'text-red-400' :
-                                        row.status.startsWith('Late') ? 'text-yellow-400' :
-                                        row.status.startsWith('Overtime') ? 'text-green-400' :
-                                        row.status === 'Leave' ? 'text-blue-400' :
-                                        row.status === 'Off' ? 'text-gray-500' : 'text-gray-300'
+                                        row.baseStatus === 'Absent' ? 'text-red-500' :
+                                        row.baseStatus === 'Off' ? 'text-gray-500 opacity-50' :
+                                        row.baseStatus === 'Penalty Late' || row.baseStatus === 'Late' ? 'text-orange-500' :
+                                        row.baseStatus === 'Paid OT' || row.baseStatus === 'Adjusted' ? 'text-purple-400' :
+                                        row.baseStatus === 'Leave' ? 'text-blue-400' :
+                                        row.status.includes('Sug. OT') ? 'text-emerald-400' :
+                                        row.status.includes('Sug. Late') ? 'text-yellow-400' :
+                                        row.baseStatus === 'Extra Shift' ? 'text-teal-400' :
+                                        'text-green-500'
                                     }`}>
                                         {row.status}
                                     </td>
+                                    
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 font-mono">{row.checkIn}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 font-mono">{row.checkOut}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300 font-mono">{row.workHours < 0 ? 'N/A' : `${row.workHours.toFixed(2)} h`}</td>

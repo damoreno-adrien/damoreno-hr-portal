@@ -4,12 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Check } from 'lucide-react';
 
-// --- NOUVEAUX IMPORTS POUR L'AUDIT LOG ---
 import { getAuth } from 'firebase/auth';
 import { app } from '../../../firebase.js';
 import { logSystemAction } from '../../utils/auditLogger';
 
-// --- IMPORT DE LA MODALE ---
 import FeedbackModal from '../common/FeedbackModal';
 
 export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
@@ -18,10 +16,7 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
 
-    // --- STATE POUR LA MODALE DE FEEDBACK ---
     const [feedbackModal, setFeedbackModal] = useState(null);
-
-    // Initialisation de l'authentification pour le logger
     const auth = getAuth(app);
 
     useEffect(() => {
@@ -37,6 +32,7 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                 mealDiscountPercent: config.mealDiscountPercent ?? 50,
                 staffUniforms: config.staffUniforms ?? 3,
                 standardStartTime: config.standardStartTime || '14:00',
+                breakDurationMinutes: config.breakDurationMinutes ?? 60,
             };
             setLocalConfig(data);
             setOriginalConfig(data);
@@ -67,12 +63,11 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                 [`${prefix}mealDiscountPercent`]: Number(localConfig.mealDiscountPercent),
                 [`${prefix}staffUniforms`]: Number(localConfig.staffUniforms),
                 [`${prefix}standardStartTime`]: localConfig.standardStartTime, 
+                [`${prefix}breakDurationMinutes`]: Number(localConfig.breakDurationMinutes),
             };
             
             await updateDoc(configDocRef, dataToSave);
             
-            // --- LE JOURNAL D'AUDIT INTELLIGENT ---
-            // On détecte exactement quels champs ont été modifiés pour le log
             const changedKeys = Object.keys(localConfig).filter(key => localConfig[key] !== originalConfig[key]);
             const changesDetails = changedKeys.map(key => `${key} (${originalConfig[key]} -> ${localConfig[key]})`).join(', ');
             
@@ -83,7 +78,6 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                 'UPDATE_FINANCIAL_RULES', 
                 `Updated financial parameters: ${changesDetails}`
             );
-            // ------------------------------------------------
 
             setOriginalConfig(localConfig); 
             setIsSaved(true);
@@ -97,14 +91,7 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
 
     return (
         <div id="financial-rules" className="bg-gray-800 rounded-lg shadow-lg p-6 scroll-mt-8 border border-gray-700 relative">
-            {/* INJECTION DU FEEDBACK MODAL */}
-            <FeedbackModal 
-                isOpen={!!feedbackModal} 
-                type={feedbackModal?.type} 
-                title={feedbackModal?.title} 
-                message={feedbackModal?.message} 
-                onClose={() => setFeedbackModal(null)} 
-            />
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
 
             <h3 className="text-xl font-semibold text-white">Financial & Payroll Rules</h3>
             <p className="text-gray-400 mt-2">Set percentages and caps for various financial calculations for this location.</p>
@@ -166,6 +153,10 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                     <div>
                         <label htmlFor="standardStartTime" className="block text-sm font-medium text-gray-300 mb-1">Standard Start Time</label>
                         <input type="time" id="standardStartTime" value={localConfig.standardStartTime || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white [color-scheme:dark]" />
+                    </div>
+                    <div>
+                        <label htmlFor="breakDurationMinutes" className="block text-sm font-medium text-gray-300 mb-1">Default Break (Minutes)</label>
+                        <input type="number" id="breakDurationMinutes" value={localConfig.breakDurationMinutes ?? ''} onChange={handleChange} step="5" min="0" className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
                     </div>
                 </div>
             </div>

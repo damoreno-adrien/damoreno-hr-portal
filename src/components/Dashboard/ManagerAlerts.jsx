@@ -6,23 +6,21 @@ import { app, db } from "../../../firebase";
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, getDocs } from "firebase/firestore";
 import { AlertTriangle, Clock, Loader2, CheckCircle, AlertOctagon, CheckSquare, Search, DollarSign } from 'lucide-react';
 import { formatDisplayTime, formatDisplayDate, formatISODate, addDays } from '../../utils/dateUtils';
-import { generateDocument } from '../../utils/documentGenerator'; // <-- IMPORT DU GÉNÉRATEUR DE DOCUMENTS
+import { generateDocument } from '../../utils/documentGenerator';
 
 import FeedbackModal from '../common/FeedbackModal';
 import ConfirmModal from '../common/ConfirmModal';
 
 const functions = getFunctions(app, "asia-southeast1");
-const autoFixShiftFunc = httpsCallable(functions, 'autoFixSingleShift');
 const runUnifiedHRScanFunc = httpsCallable(functions, 'runUnifiedHRScan');
 
 const MissingCheckoutItem = ({ alert, onManualFix }) => {
-    // ... (Garder la fonction MissingCheckoutItem identique à ta version)
     const [isFixing, setIsFixing] = useState(false);
     const [error, setError] = useState(null);
     const [scheduledEndStr, setScheduledEndStr] = useState("23:00");
     const [isLoadingTime, setIsLoadingTime] = useState(true);
 
-    const checkInTime = alert.checkInTime?.toDate();
+    const checkInTime = alert.checkInTime?.toDate ? alert.checkInTime.toDate() : new Date(alert.checkInTime);
     const formattedCheckIn = checkInTime ? formatDisplayTime(checkInTime) : 'Unknown';
     const displayEndTime = scheduledEndStr.replace(':', 'h');
 
@@ -38,10 +36,30 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
         fetchScheduleTime();
     }, [alert.staffId, alert.date]);
 
+    // --- CORRECTION : MISE À JOUR DIRECTE CLIENT-SIDE SANS CLOUD FUNCTION ---
     const handleAutoFix = async () => {
-        setIsFixing(true); setError(null);
-        try { await autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr }); } 
-        catch (err) { setError(err.message || "Failed to fix."); setIsFixing(false); }
+        setIsFixing(true); 
+        setError(null);
+        try { 
+            const [h, m] = scheduledEndStr.split(':').map(Number);
+            const outDate = new Date(alert.date);
+            outDate.setHours(h, m, 0, 0);
+
+            // Gestion de la logique "Logical Day" (Passage de minuit)
+            if (checkInTime && outDate < checkInTime) {
+                outDate.setDate(outDate.getDate() + 1);
+            }
+
+            await updateDoc(doc(db, "attendance", alert.attendanceDocId), {
+                checkOutTime: outDate,
+                manuallyEdited: true,
+                updatedAt: new Date()
+            });
+            // Pas de setIsFixing(false) ici car le onSnapshot de Firestore va supprimer ce composant de la liste instantanément
+        } catch (err) { 
+            setError(err.message || "Failed to fix."); 
+            setIsFixing(false); 
+        }
     };
 
     return (
@@ -64,18 +82,16 @@ const MissingCheckoutItem = ({ alert, onManualFix }) => {
     );
 };
 
-// --- MODIFIÉ : Injection de companyConfig et setFeedbackModal ---
 const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
     const [isProcessing, setIsProcessing] = useState(false);
 
     let icon, borderColor, bgColor, title, actionText, actionColor;
     
-    // Prise en charge du nouveau type 'risk_disciplinary' et des anciens types pour rétrocompatibilité
     if (alert.type === 'risk_disciplinary' || alert.type === 'risk_absence' || alert.type === 'risk_late') {
         icon = <AlertOctagon className="h-5 w-5 text-red-400" />;
         borderColor = "border-red-500"; bgColor = "bg-red-900/10";
         title = alert.message || "Disciplinary Action Required"; 
-        actionText = "Enforce & Generate Doc"; // <-- NOUVEAU TEXTE
+        actionText = "Enforce & Generate Doc"; 
         actionColor = "bg-red-600 hover:bg-red-500";
     } else if (alert.type === 'overtime_request') {
         icon = <DollarSign className="h-5 w-5 text-green-400" />;
@@ -91,7 +107,6 @@ const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
         catch (err) { setIsProcessing(false); }
     };
 
-    // --- LE CŒUR DE L'OPTION B : Le Workflow Automatisé ---
     const handleEnforce = async () => {
         setIsProcessing(true);
         try {
@@ -99,8 +114,6 @@ const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
                 await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'approved' });
                 setFeedbackModal({ type: 'success', title: 'OT Approved', message: 'Overtime has been added to payroll.' });
             } else {
-                
-                // 1. Découpage du Message (ex: "3rd Lateness - Recommend: 1-Day Suspension")
                 let warningLevel = "Disciplinary Warning";
                 let consequence = "Verbal Warning";
                 
@@ -112,7 +125,6 @@ const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
                     warningLevel = alert.message;
                 }
 
-                // 2. Formatage du Dossier Historique pour le champ {{REASON}}
                 let incidentDetails = "Attendance violation.";
                 let lastIncidentDate = formatDisplayDate(alert.date);
 
@@ -122,13 +134,12 @@ const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
                         if (inc.type === 'Late') return `- ${dateStr} : Late check-in (${inc.minutesLate} mins)`;
                         if (inc.type === 'Absence') return `- ${dateStr} : Unexcused Absence`;
                         return `- ${dateStr} : ${inc.type}`;
-                    }).join('\n'); // Le saut de ligne sera interprété par docxtemplater
+                    }).join('\n'); 
                     
                     const lastInc = alert.incidentHistory[alert.incidentHistory.length - 1];
                     if (lastInc) lastIncidentDate = formatDisplayDate(lastInc.date);
                 }
 
-                // 3. Préparation des données pour le Word
                 const mockStaff = {
                     fullName: alert.staffName,
                     branchId: alert.branchId,
@@ -142,16 +153,14 @@ const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
                     REASON: incidentDetails
                 };
 
-                // 4. GÉNÉRATION DU DOCUMENT
                 const docResult = await generateDocument('warning', mockStaff, companyConfig, extraData);
                 
                 if (!docResult.success) {
                     setFeedbackModal({ type: 'error', title: 'Generation Failed', message: `Could not generate Warning Notice: ${docResult.error}` });
                     setIsProcessing(false);
-                    return; // ON STOPPE SI LE DOC ÉCHOUE (Sécurité)
+                    return; 
                 }
 
-                // 5. ENFORCEMENT FIREBASE (Seulement si le document a été créé)
                 await updateDoc(doc(db, "manager_alerts", alert.id), { status: 'enforced' });
                 setFeedbackModal({ type: 'success', title: 'Penalty Enforced', message: 'Warning notice generated successfully and penalty applied.' });
             }
@@ -187,7 +196,6 @@ const HRAlertItem = ({ alert, companyConfig, setFeedbackModal }) => {
     );
 };
 
-// --- MODIFIÉ : Ajout de la prop companyConfig ---
 export default function ManagerAlerts({ onManualFix, activeBranch, branches = [], userRole, adminBranchIds = [], companyConfig }) {
     const [rawHrAlerts, setRawHrAlerts] = useState([]);
     const [rawMissingCheckouts, setRawMissingCheckouts] = useState([]);
@@ -233,40 +241,33 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
         return () => unsubscribe();
     }, []);
 
-    // --- THE FILTER LAYER: Strict RBAC Enforcement ---
     const hrAlerts = useMemo(() => {
         if (userRole === 'super_admin') {
             return activeBranch === 'global' ? rawHrAlerts : rawHrAlerts.filter(a => a.branchId === activeBranch);
         }
-        
-        // POUR ADMIN ET MANAGER
         if (activeBranch === 'global') {
             return rawHrAlerts.filter(a => adminBranchIds.includes(a.branchId));
         }
-        
         if (adminBranchIds.includes(activeBranch)) {
             return rawHrAlerts.filter(a => a.branchId === activeBranch);
         }
-        
-        return []; // ACCÈS REFUSÉ
+        return []; 
     }, [rawHrAlerts, activeBranch, userRole, adminBranchIds]);
 
     const missingCheckouts = useMemo(() => {
         if (userRole === 'super_admin') {
             return activeBranch === 'global' ? rawMissingCheckouts : rawMissingCheckouts.filter(a => a.branchId === activeBranch);
         }
-        
         if (activeBranch === 'global') {
             return rawMissingCheckouts.filter(a => adminBranchIds.includes(a.branchId));
         }
-        
         if (adminBranchIds.includes(activeBranch)) {
             return rawMissingCheckouts.filter(a => a.branchId === activeBranch);
         }
-        
-        return []; // ACCÈS REFUSÉ
+        return []; 
     }, [rawMissingCheckouts, activeBranch, userRole, adminBranchIds]);
 
+    // --- CORRECTION : MISE À JOUR DIRECTE POUR "FIX ALL" ---
     const handleFixAll = async () => {
         setConfirmState({
             isOpen: true, title: "Auto-Fix Check-outs",
@@ -280,7 +281,21 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                         const schedQ = query(collection(db, "schedules"), where("staffId", "==", alert.staffId), where("date", "==", alert.date));
                         const schedSnap = await getDocs(schedQ);
                         const scheduledEndStr = !schedSnap.empty ? (schedSnap.docs[0].data().endTime || "23:00") : "23:00";
-                        return autoFixShiftFunc({ attendanceDocId: alert.attendanceDocId, alertId: "local_dummy_id", scheduledEndTime: scheduledEndStr });
+                        
+                        const [h, m] = scheduledEndStr.split(':').map(Number);
+                        const outDate = new Date(alert.date);
+                        outDate.setHours(h, m, 0, 0);
+
+                        const inDate = alert.checkInTime?.toDate ? alert.checkInTime.toDate() : new Date(alert.checkInTime);
+                        if (inDate && outDate < inDate) {
+                            outDate.setDate(outDate.getDate() + 1);
+                        }
+
+                        return updateDoc(doc(db, "attendance", alert.attendanceDocId), {
+                            checkOutTime: outDate,
+                            manuallyEdited: true,
+                            updatedAt: new Date()
+                        });
                     });
                     await Promise.allSettled(promises);
                 } catch (err) { setFeedbackModal({ type: 'error', title: 'Action Failed', message: "Error running Fix All." }); } 
@@ -352,7 +367,6 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                 <div className="space-y-6 animate-fadeIn">
                     {missingCheckouts.length > 0 && (
                         <div className="space-y-3 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
-                            {/* ... (Rendu des missing checkouts identique) ... */}
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
                                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                                     <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -405,7 +419,6 @@ export default function ManagerAlerts({ onManualFix, activeBranch, branches = []
                                         <div className="p-3">
                                             <ul className="space-y-2">
                                                 {groupedAlerts[staffName].map(alert => (
-                                                    // MODIFIÉ : On passe la config et le setter de modal à chaque élément
                                                     <HRAlertItem key={alert.id} alert={alert} companyConfig={companyConfig} setFeedbackModal={setFeedbackModal} />
                                                 ))}
                                             </ul>
