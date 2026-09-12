@@ -1,9 +1,8 @@
 /* src/components/Attendance/EditAttendanceModal.jsx */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { X, Clock, Save, Coffee, Flame, AlertCircle, Loader2, Watch, Trash2, ShieldAlert } from 'lucide-react';
-import * as dateUtils from '../../utils/dateUtils';
+import { doc, getDoc, setDoc, deleteDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { X, Clock, Save, Coffee, Flame, Loader2, Trash2, ShieldAlert } from 'lucide-react';
 import { calculateAttendanceStatus } from '../../utils/statusUtils';
 
 import FeedbackModal from '../common/FeedbackModal';
@@ -50,7 +49,6 @@ export default function EditAttendanceModal({ db, record, onClose }) {
         const fetchFreshData = async () => {
             setIsLoadingData(true);
             try {
-                // Fetch Company Config
                 const configSnap = await getDoc(doc(db, "settings", "company_config"));
                 if (configSnap.exists()) setCompanyConfig(configSnap.data());
 
@@ -119,8 +117,7 @@ export default function EditAttendanceModal({ db, record, onClose }) {
     }, [companyConfig, staffBranchId]);
 
     const liveCalculations = useMemo(() => {
-        if (!scheduledShift) return { ot: 0, late: 0 };
-        
+        // CORRECTION: On permet le calcul même sans scheduledShift (Pour les Extra Shifts)
         const dateStr = record.date || new Date().toISOString().split('T')[0];
         const baseDateObj = new Date(dateStr);
 
@@ -157,7 +154,6 @@ export default function EditAttendanceModal({ db, record, onClose }) {
             includesBreak: includesBreak
         };
 
-        // NOW WE PASS RESOLVED CONFIG!
         const statusResult = calculateAttendanceStatus(scheduledShift, mockAttendance, null, dateStr, resolvedConfig);
         return {
             ot: statusResult.suggestedOtMinutes || 0,
@@ -288,7 +284,8 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                     <div className="flex justify-center py-8"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>
                 ) : (
                     <>
-                        {scheduledShift && scheduledShift.type === 'work' && (
+                        {/* ENCART SHIFT PREVU VS EXTRA SHIFT */}
+                        {scheduledShift && scheduledShift.type === 'work' ? (
                             <div className="bg-indigo-900/20 border border-indigo-500/30 rounded-lg p-3 flex justify-between items-center -mb-2">
                                 <div>
                                     <p className="text-[10px] font-black text-indigo-400 uppercase">Planned Shift</p>
@@ -297,6 +294,13 @@ export default function EditAttendanceModal({ db, record, onClose }) {
                                 <button onClick={handleAutoFill} className="text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition-colors shadow">
                                     Use Planned
                                 </button>
+                            </div>
+                        ) : (
+                            <div className="bg-teal-900/20 border border-teal-500/30 rounded-lg p-3 flex justify-between items-center -mb-2">
+                                <div>
+                                    <p className="text-[10px] font-black text-teal-400 uppercase">Unscheduled Day</p>
+                                    <p className="text-sm text-gray-200 font-bold">Extra Shift / Day Off</p>
+                                </div>
                             </div>
                         )}
 

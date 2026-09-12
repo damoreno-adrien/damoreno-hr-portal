@@ -7,11 +7,12 @@ const calculateDurationMinutes = (startTime, endTime) => {
         const [startH, startM] = startTime.split(':').map(Number);
         const [endH, endM] = endTime.split(':').map(Number);
         let minutes = (endH * 60 + endM) - (startH * 60 + startM);
-        if (minutes < 0) minutes += 24 * 60; // Gère les shifts passant minuit
+        if (minutes < 0) minutes += 24 * 60;
         return minutes;
     } catch (e) { return 0; }
 };
 
+// --- CALCUL INTELLIGENT DE LA PAUSE ---
 const getWorkedMinutes = (attendance, companyConfig) => {
     if (!attendance || !attendance.checkInTime || !attendance.checkOutTime) return 0;
     
@@ -22,25 +23,33 @@ const getWorkedMinutes = (attendance, companyConfig) => {
 
     let breakDurationMs = 0;
     const breakMins = companyConfig?.breakDurationMinutes !== undefined ? parseInt(companyConfig.breakDurationMinutes) : 60;
+    const standardBreakMs = breakMins * 60000;
+    const rawDuration = checkOut - checkIn;
     
-    // 1. Manual Break (Start/End)
-    if (attendance.breakStart && attendance.breakEnd) {
-        const bStart = attendance.breakStart.toDate ? attendance.breakStart.toDate() : new Date(attendance.breakStart);
-        const bEnd = attendance.breakEnd.toDate ? attendance.breakEnd.toDate() : new Date(attendance.breakEnd);
-        if (!isNaN(bStart.getTime()) && !isNaN(bEnd.getTime())) {
-            breakDurationMs = bEnd - bStart;
-        }
-    } 
-    // 2. Auto Break (Dynamic based on config)
-    else if (attendance.includesBreak !== false) {
-        // Only deduct if shift > 5 hours
-        const rawDuration = checkOut - checkIn;
-        if (rawDuration > 5 * 60 * 60 * 1000) {
-            breakDurationMs = breakMins * 60 * 1000;
+    if (attendance.includesBreak !== false) {
+        if (attendance.breakStart) {
+            // Une pause a été initiée manuellement
+            if (attendance.breakEnd) {
+                const bStart = attendance.breakStart.toDate ? attendance.breakStart.toDate() : new Date(attendance.breakStart);
+                const bEnd = attendance.breakEnd.toDate ? attendance.breakEnd.toDate() : new Date(attendance.breakEnd);
+                if (!isNaN(bStart.getTime()) && !isNaN(bEnd.getTime())) {
+                    const actualBreakMs = bEnd - bStart;
+                    // On prend la pause la plus longue (Règle standard VS Réalité)
+                    breakDurationMs = Math.max(actualBreakMs, standardBreakMs);
+                } else {
+                    breakDurationMs = standardBreakMs;
+                }
+            } else {
+                // Le staff a oublié de clôturer sa pause -> On applique le standard par défaut
+                breakDurationMs = standardBreakMs;
+            }
+        } else if (rawDuration > 5 * 3600000) {
+            // Pas de clic manuel, mais un long shift -> Pause automatique standard déduite
+            breakDurationMs = standardBreakMs;
         }
     }
 
-    return Math.floor(((checkOut - checkIn) - breakDurationMs) / 60000);
+    return Math.floor((rawDuration - breakDurationMs) / 60000);
 };
 
 export const calculateAttendanceStatus = (schedule, attendance, leave, date, companyConfig) => {
@@ -56,7 +65,6 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, com
         const checkInTime = attendance.checkInTime.toDate ? attendance.checkInTime.toDate() : new Date(attendance.checkInTime);
         const checkOutTime = attendance.checkOutTime ? (attendance.checkOutTime.toDate ? attendance.checkOutTime.toDate() : new Date(attendance.checkOutTime)) : null;
 
-        // --- SUGGESTED LATENESS CHECK ---
         if (schedule && schedule.startTime) {
             const [schedH, schedM] = schedule.startTime.split(':').map(Number);
             const scheduledTime = new Date(checkInTime);
@@ -70,7 +78,6 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, com
             }
         }
 
-        // --- SUGGESTED OVERTIME CHECK ---
         if (checkOutTime && schedule && schedule.endTime) {
             const workedMinutes = getWorkedMinutes(attendance, companyConfig);
             let scheduledMinutes = calculateDurationMinutes(schedule.startTime, schedule.endTime);
@@ -90,7 +97,6 @@ export const calculateAttendanceStatus = (schedule, attendance, leave, date, com
              suggestedOtMinutes = getWorkedMinutes(attendance, companyConfig);
         }
 
-        // --- INTELLIGENT STATUS RESOLUTION ---
         let status = 'Present';
         
         if (checkOutTime) {
