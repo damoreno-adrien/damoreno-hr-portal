@@ -7,11 +7,10 @@ import { app } from "../../firebase"
 import * as dateUtils from '../utils/dateUtils';
 import { calculateMonthlyStats } from '../utils/attendanceCalculator';
 import { calculateStaffLeaveBalances } from '../utils/leaveCalculator';
+import { getCurrentJob } from '../utils/staffUtils';
 
 const functionsAsia = getFunctions(app, "asia-southeast1");
 const finalizeAndStorePayslips = httpsCallable(functionsAsia, 'finalizeAndStorePayslips');
-
-import { getCurrentJob } from '../utils/staffUtils';
 
 export default function usePayrollGenerator(db, staffList, companyConfig, payPeriod, activeBranch) {
     const [payrollData, setPayrollData] = useState([]);
@@ -24,7 +23,6 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
     const [pendingAdvancesCount, setPendingAdvancesCount] = useState(0);
     const [pendingLoansCount, setPendingLoansCount] = useState(0);
 
-    // States pour gérer les modales depuis le composant parent
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
@@ -78,8 +76,7 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     const sEnd = dateUtils.fromFirestore(s.endDate);
                     if (!sStart) return false;
                     return sStart <= endOfMonth && (!sEnd || sEnd >= startOfMonth);
-                }).map(s => s.id)
-                );
+                }).map(s => s.id));
                 if ([...eligibleStaffIds].every(id => finalizedStaffIds.has(id)) && eligibleStaffIds.size > 0) {
                     setIsMonthFullyFinalized(true); setPayrollData([]); setIsLoading(false); return;
                 }
@@ -87,11 +84,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
             const staffWithJobs = staffToProcess.map(staff => ({ ...staff, currentJob: getCurrentJob(staff) }));
 
-            const [advancesSnap, loansSnap, adjustmentsSnap, approvedOtSnap, attendanceSnap, cashOutsSnap, allStaffStats, allApprovedLeaveSnap] = await Promise.all([
+            const [advancesSnap, loansSnap, adjustmentsSnap, attendanceSnap, cashOutsSnap, allStaffStats, allApprovedLeaveSnap] = await Promise.all([
                 getDocs(query(collection(db, "salary_advances"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
                 getDocs(collection(db, "loans")),
                 getDocs(query(collection(db, "monthly_adjustments"), where("payPeriodYear", "==", payPeriod.year), where("payPeriodMonth", "==", payPeriod.month))),
-                getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr), where("otStatus", "==", "approved"))),
                 getDocs(query(collection(db, "attendance"), where("date", ">=", startDateStr), where("date", "<=", endDateStr))),
                 getDocs(query(collection(db, "leave_requests"), where("leaveType", "==", "Cash Out Holiday Credits"), where("status", "==", "approved"), where("startDate", ">=", startDateStr), where("startDate", "<=", endDateStr))),
                 Promise.all(staffWithJobs.map(staff => calculateMonthlyStats(db, staff, payPeriod, companyConfig, staff.currentJob).then(stats => ({ staffId: staff.id, ...stats })))),
@@ -102,13 +98,11 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
             const loansDataAll = loansSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const adjustmentsData = adjustmentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-            const approvedOtData = approvedOtSnap.docs.map(doc => doc.data());
             const attendanceData = attendanceSnap.docs.map(doc => doc.data());
             const cashOutsData = cashOutsSnap.docs.map(doc => doc.data());
             const allApprovedLeaveData = allApprovedLeaveSnap.docs.map(doc => doc.data());
             const statsMap = new Map(allStaffStats.map(res => [res.staffId, res]));
-            const overtimeRateMultiplier = Number(companyConfig.overtimeRate) || 1.5;
-
+            
             const approvedAdvances = advancesDataAll.filter(a => a.status === 'approved' || a.status === 'paid');
             const pendingAdvances = advancesDataAll.filter(a => a.status === 'pending');
             const pendingLoans = loansDataAll.filter(l => l.status === 'pending');
@@ -120,10 +114,15 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
             const data = staffWithJobs.map(staff => {
                 const currentJob = staff.currentJob;
-                const stats = statsMap.get(staff.id) || { totalAbsencesCount: 0, daysToDeduct: 0, totalActualMillis: 0 };
+                // Init avec les variables à jour
+                const stats = statsMap.get(staff.id) || { totalAbsencesCount: 0, daysToDeduct: 0, totalActualMillis: 0, totalLateMinutes: 0, totalApprovedLateMinutes: 0, totalOtMinutes: 0 };
                 const displayName = `${staff.nickname || staff.firstName || 'Staff'} (${currentJob.department || 'N/A'})`;
 
-                let basePay = 0; let autoDeductions = 0; let hourlyRateForOT = 0; let leavePayout = null;
+                const branchOverrides = staff.branchId && companyConfig.branchSettings ? companyConfig.branchSettings[staff.branchId] : {};
+                const resolvedConfig = { ...companyConfig, ...branchOverrides };
+                const overtimeRateMultiplier = Number(resolvedConfig.overtimeRate) || 1.5;
+
+                let basePay = 0; let autoDeductions = 0; let lateDeduction = 0; let hourlyRateForOT = 0; let leavePayout = null;
 
                 const staffStartDate = dateUtils.fromFirestore(staff.startDate);
                 const staffEndDate = dateUtils.fromFirestore(staff.endDate);
@@ -164,17 +163,24 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                         leavePayout = { annualDays: annualDaysToPay, holidayCredits: holidayCreditsToPay, dailyRate: legalDailyRate, total: (annualDaysToPay + holidayCreditsToPay) * legalDailyRate };
                     }
 
-                    autoDeductions = (legalDailyRate * (Number(stats.daysToDeduct) || 0)) + (legalDailyRate * (Number(stats.totalAbsencesCount) || 0));
                     hourlyRateForOT = legalDailyRate / standardHours;
+                    const minuteRate = hourlyRateForOT / 60;
+                    
+                    // CORRECTION: Seules les minutes approuvées sont facturées
+                    lateDeduction = (Number(stats.totalApprovedLateMinutes) || 0) * minuteRate;
+                    
+                    autoDeductions = (legalDailyRate * (Number(stats.daysToDeduct) || 0)) + 
+                                     (legalDailyRate * (Number(stats.totalAbsencesCount) || 0));
 
                 } else {
                     const rate = Number(currentJob.hourlyRate) || 0;
                     basePay = ((Number(stats.totalActualMillis) || 0) / (1000 * 60 * 60)) * rate;
-                    autoDeductions = 0; hourlyRateForOT = rate;
+                    autoDeductions = 0; 
+                    lateDeduction = 0;
+                    hourlyRateForOT = rate;
                 }
 
-                const staffApprovedOT = approvedOtData.filter(ot => ot.staffId === staff.id);
-                const totalOtMinutes = staffApprovedOT.reduce((sum, ot) => sum + (Number(ot.otApprovedMinutes) || 0), 0);
+                const totalOtMinutes = Number(stats.totalOtMinutes) || 0;
                 const overtimePay = (totalOtMinutes / 60) * hourlyRateForOT * overtimeRateMultiplier;
 
                 let holidayPayBonus = 0; let cashOutPay = 0;
@@ -222,14 +228,16 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
 
                 const preSsoEarnings = safeBasePay + safeAttendanceBonus + safeOtherEarningsTotal + leavePayoutTotal + safeOvertimePay;
 
-                // --- SSO : Calcul et Allowance (NE PAS TOUCHER À CETTE LOGIQUE) ---
                 let ssoDeduction = 0;
                 let ssoAllowance = 0;
 
-                if (staff.isSsoRegistered !== false && preSsoEarnings > 0) {
-                    const ssoRate = (Number(companyConfig.ssoRate) || 5) / 100;
-                    const ssoCap = Number(companyConfig.ssoCap) || 750;
-                    ssoDeduction = Math.min(Math.max(1650, preSsoEarnings) * ssoRate, ssoCap);
+                if (staff.isSsoRegistered !== false && (Number(currentJob.baseSalary) > 0 || preSsoEarnings > 0)) {
+                    const ssoRate = (Number(resolvedConfig.ssoRate) || 5) / 100;
+                    const ssoCap = Number(resolvedConfig.ssoCap) || 750;
+                    
+                    const ssoBasis = currentJob.payType === 'Salary' ? Number(currentJob.baseSalary) : preSsoEarnings;
+                    
+                    ssoDeduction = Math.min(Math.max(1650, ssoBasis) * ssoRate, ssoCap);
 
                     if (staff.receivesSsoAllowance !== false) {
                         ssoAllowance = ssoDeduction;
@@ -242,11 +250,12 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 const advanceDeduction = approvedAdvances.filter(a => a.staffId === staff.id).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
                 const safeAutoDeductions = Number(autoDeductions) || 0;
+                const safeLateDeduction = Number(lateDeduction) || 0;
                 const safeSsoDeduction = Number(ssoDeduction) || 0;
                 const safeAdvanceDeduction = Number(advanceDeduction) || 0;
                 const safeOtherDeductions = Number(otherDeductions) || 0;
 
-                const preLoanDeductions = safeAutoDeductions + safeSsoDeduction + safeAdvanceDeduction + safeOtherDeductions;
+                const preLoanDeductions = safeAutoDeductions + safeLateDeduction + safeSsoDeduction + safeAdvanceDeduction + safeOtherDeductions;
                 const preLoanNetPay = totalEarnings - preLoanDeductions;
 
                 const staffLoans = loansDataAll.filter(l => {
@@ -316,6 +325,16 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                 }
                 if (Number(stats.daysToDeduct) > 0) unpaidAbsArr.push({ date: `${stats.daysToDeduct} Sick Overage`, hours: stats.daysToDeduct * (currentJob.standardDayHours || 8), amount: ((currentJob.baseSalary || 0) / 30) * stats.daysToDeduct });
 
+                // CORRECTION: Seules les minutes approuvées sont injectées dans la fiche de paie finale
+                if (Number(stats.totalApprovedLateMinutes) > 0) {
+                    const minuteRate = ((currentJob.baseSalary || 0) / 30 / (currentJob.standardDayHours || 8)) / 60;
+                    unpaidAbsArr.push({
+                        date: `Attendance Adj. (${stats.totalApprovedLateMinutes}m)`,
+                        hours: Number((stats.totalApprovedLateMinutes / 60).toFixed(2)),
+                        amount: stats.totalApprovedLateMinutes * minuteRate
+                    });
+                }
+
                 return {
                     id: staff.id, name: staff.firstName ? `${staff.firstName} ${staff.lastName}` : (staff.fullName || 'Staff'), displayName,
                     position: currentJob.position || 'Staff', payType: currentJob.payType,
@@ -327,8 +346,10 @@ export default function usePayrollGenerator(db, staffList, companyConfig, payPer
                     earnings: { basePay: safeBasePay, overtimePay: safeOvertimePay, attendanceBonus: safeAttendanceBonus, ssoAllowance, leavePayout: leavePayoutTotal, leavePayoutDetails: leavePayout, others: safeOtherEarningsArray },
                     deductions: {
                         absences: safeAutoDeductions,
+                        lateness: safeLateDeduction, 
+                        latenessMinutes: Number(stats.totalApprovedLateMinutes) || 0, // Trace isolée
                         unpaidAbsences: unpaidAbsArr,
-                        totalAbsenceHours: (Number(stats.totalAbsencesCount) + Number(stats.daysToDeduct)) * (currentJob.standardDayHours || 8),
+                        totalAbsenceHours: ((Number(stats.totalAbsencesCount) + Number(stats.daysToDeduct)) * (currentJob.standardDayHours || 8)), 
                         sso: safeSsoDeduction, advance: safeAdvanceDeduction, loan: safeLoanDeduction,
                         others: staffAdjustments.filter(a => a.type === 'Deduction').map(a => ({ description: a.description || 'Deduction', amount: Number(a.amount) || 0 }))
                     }

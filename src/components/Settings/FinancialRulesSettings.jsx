@@ -21,6 +21,7 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
 
     useEffect(() => {
         if (config) {
+            const bonus = config.attendanceBonus || {};
             const data = {
                 advanceEligibilityPercentage: config.advanceEligibilityPercentage || 0,
                 ssoRate: config.ssoRate || 0,
@@ -33,6 +34,14 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                 staffUniforms: config.staffUniforms ?? 3,
                 standardStartTime: config.standardStartTime || '14:00',
                 breakDurationMinutes: config.breakDurationMinutes ?? 60,
+                
+                // --- NOUVEAU : Réglages du Bonus d'Assiduité ---
+                bonusMonth1: bonus.month1 || 0,
+                bonusMonth2: bonus.month2 || 0,
+                bonusMonth3: bonus.month3 || 0,
+                allowedLates: bonus.allowedLates ?? 3,
+                maxLateMinutesAllowed: bonus.maxLateMinutesAllowed ?? 30,
+                allowedAbsences: bonus.allowedAbsences ?? 0,
             };
             setLocalConfig(data);
             setOriginalConfig(data);
@@ -64,6 +73,16 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                 [`${prefix}staffUniforms`]: Number(localConfig.staffUniforms),
                 [`${prefix}standardStartTime`]: localConfig.standardStartTime, 
                 [`${prefix}breakDurationMinutes`]: Number(localConfig.breakDurationMinutes),
+                
+                // Sauvegarde sous forme d'objet structuré pour le calculateur
+                [`${prefix}attendanceBonus`]: {
+                    month1: Number(localConfig.bonusMonth1),
+                    month2: Number(localConfig.bonusMonth2),
+                    month3: Number(localConfig.bonusMonth3),
+                    allowedLates: Number(localConfig.allowedLates),
+                    maxLateMinutesAllowed: Number(localConfig.maxLateMinutesAllowed),
+                    allowedAbsences: Number(localConfig.allowedAbsences),
+                }
             };
             
             await updateDoc(configDocRef, dataToSave);
@@ -108,6 +127,48 @@ export const FinancialRulesSettings = ({ db, config, selectedBranchId }) => {
                 <div>
                     <label htmlFor="ssoCap" className="block text-sm font-medium text-gray-300 mb-1">SSO Max Contribution (THB)</label>
                     <input type="number" id="ssoCap" value={localConfig.ssoCap || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" />
+                </div>
+            </div>
+
+            {/* NOUVELLE SECTION : ATTENDANCE BONUS */}
+            <div className="mt-8 pt-6 border-t border-gray-700">
+                <h4 className="text-lg font-medium text-white mb-2">Attendance Bonus Policy</h4>
+                <p className="text-xs text-gray-400 mb-4">Leave amounts at 0 to disable the bonus widget on the staff dashboard.</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-indigo-900/20 p-4 rounded-lg border border-indigo-500/20">
+                    <div className="space-y-4">
+                        <h5 className="text-sm font-bold text-indigo-400 border-b border-indigo-500/20 pb-1">Reward Tiers (THB)</h5>
+                        <div>
+                            <label htmlFor="bonusMonth1" className="block text-xs font-bold text-gray-400 uppercase mb-1">Month 1 Streak</label>
+                            <input type="number" id="bonusMonth1" value={localConfig.bonusMonth1 ?? ''} onChange={handleChange} min="0" className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="bonusMonth2" className="block text-xs font-bold text-gray-400 uppercase mb-1">Month 2 Streak</label>
+                            <input type="number" id="bonusMonth2" value={localConfig.bonusMonth2 ?? ''} onChange={handleChange} min="0" className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                            <label htmlFor="bonusMonth3" className="block text-xs font-bold text-gray-400 uppercase mb-1">Month 3+ Streak</label>
+                            <input type="number" id="bonusMonth3" value={localConfig.bonusMonth3 ?? ''} onChange={handleChange} min="0" className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white" />
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 md:col-span-2">
+                        <h5 className="text-sm font-bold text-amber-400 border-b border-amber-500/20 pb-1">Disqualification Thresholds</h5>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label htmlFor="allowedLates" className="block text-xs font-bold text-gray-400 uppercase mb-1">Max Lates (Count)</label>
+                                <input type="number" id="allowedLates" value={localConfig.allowedLates ?? ''} onChange={handleChange} min="0" className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white" />
+                            </div>
+                            <div>
+                                <label htmlFor="maxLateMinutesAllowed" className="block text-xs font-bold text-gray-400 uppercase mb-1">Max Total Late Time (Mins)</label>
+                                <input type="number" id="maxLateMinutesAllowed" value={localConfig.maxLateMinutesAllowed ?? ''} onChange={handleChange} min="0" className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white" />
+                            </div>
+                            <div>
+                                <label htmlFor="allowedAbsences" className="block text-xs font-bold text-gray-400 uppercase mb-1">Max Unexcused Absences</label>
+                                <input type="number" id="allowedAbsences" value={localConfig.allowedAbsences ?? ''} onChange={handleChange} min="0" className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white" />
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-gray-500 mt-2 italic">*If a staff member exceeds any of these limits, their streak resets to 0 and they lose the bonus for the current month.</p>
+                    </div>
                 </div>
             </div>
 

@@ -74,7 +74,7 @@ export default function PayrollPage({ db, staffList, companyConfig, activeBranch
         <div className="space-y-12">
             {/* MODALE DE DÉTAILS INDIVIDUELS */}
             {selectedStaffDetails && (
-                <Modal isOpen={true} onClose={() => setSelectedStaffDetails(null)} title={`Payslip Details for ${selectedStaffDetails.name}`}>
+                <Modal isOpen={true} onClose={() => setSelectedStaffDetails(null)} title={`Payslip Details`}>
                     <PayslipDetailView
                         details={selectedStaffDetails}
                         companyConfig={resolvedConfig}

@@ -1,13 +1,12 @@
 /* src/pages/MyLeavePage.jsx */
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, deleteDoc, writeBatch } from 'firebase/firestore'; // <-- Ajout de writeBatch
 import { Plus, Lock } from 'lucide-react';
 import Modal from '../components/common/Modal';
 import LeaveRequestForm from '../components/LeaveManagement/LeaveRequestForm';
 import { LeaveRequestItem } from '../components/LeaveManagement/LeaveRequestItem';
 import { calculateStaffLeaveBalances } from '../utils/leaveCalculator'; 
 
-// --- IMPORTS DES MODALES ---
 import FeedbackModal from '../components/common/FeedbackModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 
@@ -17,7 +16,6 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
     const [requestToEdit, setRequestToEdit] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    // --- STATES POUR LES MODALES ---
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
@@ -36,7 +34,7 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
             // Sort newest first
             requests.sort((a,b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
             
-            // Hydrate with display name for the LeaveRequestItem component
+            // Hydrate with display name
             const hydratedRequests = requests.map(req => {
                 const me = staffList.find(s => s.id === user.uid);
                 return {
@@ -52,6 +50,31 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
         return () => unsubscribe();
     }, [db, user, staffList]);
 
+    // --- NOUVEAU : Effacement automatique du Badge Rouge (Mark as Read) ---
+    useEffect(() => {
+        if (!db || myRequests.length === 0) return;
+
+        // On cherche toutes les requêtes qui n'ont pas encore été lues par le staff
+        const unreadRequests = myRequests.filter(req => req.isReadByStaff === false);
+
+        if (unreadRequests.length > 0) {
+            const markAsRead = async () => {
+                try {
+                    const batch = writeBatch(db);
+                    unreadRequests.forEach(req => {
+                        const reqRef = doc(db, "leave_requests", req.id);
+                        batch.update(reqRef, { isReadByStaff: true });
+                    });
+                    await batch.commit(); // Mise à jour silencieuse en arrière-plan
+                } catch (error) {
+                    console.error("Error marking leave requests as read:", error);
+                }
+            };
+            markAsRead();
+        }
+    }, [myRequests, db]);
+    // ----------------------------------------------------------------------
+
     // 2. Dynamically calculate the RICH leave balances locally
     const richBalances = useMemo(() => {
         const me = staffList.find(s => s.id === user?.uid);
@@ -65,7 +88,6 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
     const ph = richBalances?.ph || {};
 
     const handleDeleteRequest = async (id) => {
-        // --- MODIFIÉ : Remplacement de window.confirm() ---
         setConfirmState({
             isOpen: true,
             title: "Delete Leave Request",
@@ -77,7 +99,6 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                 try {
                     await deleteDoc(doc(db, "leave_requests", id));
                 } catch (error) {
-                    // --- MODIFIÉ : Remplacement de alert() ---
                     setFeedbackModal({ type: 'error', title: 'Delete Failed', message: "Failed to delete request." });
                 }
             },
@@ -99,27 +120,13 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
         setIsModalOpen(false);
         setRequestToEdit(null);
     };
+    
     const isFullManager = ['admin', 'manager', 'super_admin'].includes(userRole);
 
     return (
         <div className="pb-10 animate-fadeIn relative">
-            {/* INJECTION DES MODALES */}
-            <FeedbackModal 
-                isOpen={!!feedbackModal} 
-                type={feedbackModal?.type} 
-                title={feedbackModal?.title} 
-                message={feedbackModal?.message} 
-                onClose={() => setFeedbackModal(null)} 
-            />
-            <ConfirmModal 
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                onConfirm={confirmState.onConfirm}
-                onCancel={confirmState.onCancel}
-                isDestructive={confirmState.isDestructive}
-                confirmText={confirmState.confirmText || "Confirm"}
-            />
+            <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} isDestructive={confirmState.isDestructive} confirmText={confirmState.confirmText || "Confirm"} />
             
             <Modal isOpen={isModalOpen} onClose={closeModal} title={requestToEdit ? "Edit Leave Request" : "Request Leave"}>
                 <LeaveRequestForm 
@@ -127,7 +134,7 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                     user={user} 
                     onClose={closeModal} 
                     existingRequest={requestToEdit} 
-                    userRole="staff" // Forces the form to hide the Admin staff dropdown
+                    userRole="staff"
                     staffList={staffList.filter(s => s.id === user.uid)} 
                     existingRequests={myRequests} 
                     companyConfig={companyConfig} 
@@ -146,7 +153,6 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                 </button>
             </div>
 
-            {/* --- RESTORED: RICH BALANCES GRID --- */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-10">
                 
                 {/* Annual Leave */}
@@ -167,7 +173,7 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                     </div>
                 </div>
 
-                {/* Paid Sick Leave - SEULEMENT POUR LE MANAGEMENT */}
+                {/* Paid Sick Leave */}
                 {isFullManager && (
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg flex flex-col justify-between">
                     <h3 className="text-gray-400 font-bold uppercase tracking-wider text-xs mb-2">Paid Sick Leave</h3>
@@ -181,7 +187,7 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                 </div>
                 )}
 
-                {/* Personal Leave - SEULEMENT POUR LE MANAGEMENT */}
+                {/* Personal Leave */}
                 {isFullManager && (
                 <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 shadow-lg flex flex-col justify-between">
                     <h3 className="text-gray-400 font-bold uppercase tracking-wider text-xs mb-2">Personal Leave</h3>
@@ -203,7 +209,6 @@ export default function MyLeavePage({ db, user, userRole, staffList, companyConf
                         <span className="text-gray-400 text-sm">Total Remaining</span>
                     </div>
                     
-                    {/* --- NEW: Dashboard Breakdown! --- */}
                     {ph.breakdown && Object.keys(ph.breakdown).length > 0 && (
                         <div className="flex gap-2 flex-wrap mb-3">
                             {Object.entries(ph.breakdown).sort().map(([year, days]) => (

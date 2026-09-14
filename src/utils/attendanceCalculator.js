@@ -5,7 +5,6 @@ import { DateTime } from 'luxon';
 import { calculateAttendanceStatus } from './statusUtils';
 
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
-const DEFAULT_BREAK_MS = 60 * 60 * 1000;
 const DEFAULT_CHECKOUT_TIME = '23:00:00';
 
 export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig, currentJob) => {
@@ -21,34 +20,28 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     const payType = currentJob?.payType || 'Monthly';
     const currentStreak = staff.bonusStreak || 0;
 
-    // --- LECTURE STRICTE DES PARAMÈTRES PAR SUCCURSALE ---
     const branchOverrides = staff.branchId && companyConfig.branchSettings ? companyConfig.branchSettings[staff.branchId] : {};
-
     const SICK_LEAVE_QUOTA_DAYS = branchOverrides?.leaveEntitlements?.sickDays ?? companyConfig.leaveEntitlements?.sickDays ?? 30;
 
     const bonusSettings = branchOverrides?.attendanceBonus || companyConfig.attendanceBonus || {};
     const allowedLates = bonusSettings.allowedLates ?? 3;
     const maxLateMinutesAllowed = bonusSettings.maxLateMinutesAllowed ?? 30;
     const allowedAbsences = bonusSettings.allowedAbsences ?? 0;
+    
+    const isBonusActive = !!(bonusSettings.month1 || bonusSettings.month2 || bonusSettings.month3);
 
-    // --- DÉTECTION DU 1ER MOIS D'EMBAUCHE ---
     let isFirstMonth = false;
     if (staff.startDate) {
         try {
             const jsDate = staff.startDate.toDate ? staff.startDate.toDate() : new Date(staff.startDate);
             const dtStart = DateTime.fromJSDate(jsDate, { zone: THAILAND_TIMEZONE });
-            if (dtStart.year === year && dtStart.month === month) {
-                isFirstMonth = true;
-            }
-        } catch (e) {
-            console.error("Error parsing staff start date", e);
-        }
+            if (dtStart.year === year && dtStart.month === month) isFirstMonth = true;
+        } catch (e) { console.error("Error parsing staff start date", e); }
     }
 
     const startOfYear = DateTime.fromObject({ year, month: 1, day: 1 }, { zone: THAILAND_TIMEZONE }).toISODate();
     const endOfPayPeriod = endOfMonth;
 
-    // --- FETCH DATA ---
     const [attendanceSnap, schedulesSnap, leaveSnap] = await Promise.all([
         getDocs(query(collection(db, 'attendance'), where('staffId', '==', userId), where('date', '>=', startOfMonth), where('date', '<=', endOfMonth))),
         getDocs(query(collection(db, 'schedules'), where('staffId', '==', userId), where('date', '>=', startOfMonth), where('date', '<=', endOfMonth))),
@@ -86,14 +79,19 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     let totalActualMillis = 0;
     let totalScheduledMillis = 0;
     let totalLateMinutes = 0;
+    let totalApprovedLateMinutes = 0; // <-- NOUVEAU: Trace isolée pour la paie
     let totalOtMinutes = 0;
     let totalLatesCount = 0;
     let totalUnexcusedAbsenceCount = 0;
-    let unexcusedAbsenceDates = []; // <-- NOUVEAU
+    let unexcusedAbsenceDates = []; 
     let workedDays = 0;
 
     let loopDay = DateTime.fromISO(startOfMonth, { zone: THAILAND_TIMEZONE });
     const loopUntil = (payPeriod.year === now.year && payPeriod.month === now.month) ? endOfLoop : DateTime.fromISO(endOfMonth, { zone: THAILAND_TIMEZONE });
+
+    const resolvedConfig = { ...companyConfig, ...branchOverrides };
+    const breakMins = resolvedConfig.breakDurationMinutes !== undefined ? parseInt(resolvedConfig.breakDurationMinutes) : 60;
+    const standardBreakMs = breakMins * 60000;
 
     while (loopDay <= loopUntil) {
         const dateStr = loopDay.toISODate();
@@ -102,22 +100,32 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         const schedule = schedulesMap.get(dateStr);
         const leave = leaveMap.get(dateStr);
 
-        // --- CALCULATION ---
-        const { status, lateMinutes, otMinutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS, companyConfig);
+        const { status, checkInTime, checkOutTime, suggestedLateMinutes, suggestedOtMinutes, approvedLateMinutes, approvedOtMinutes } = calculateAttendanceStatus(schedule, attendance, leave, dateJS, resolvedConfig);
 
-        if (attendance && attendance.checkInTime) {
+        if (checkInTime) {
             workedDays++;
-            const checkIn = attendance.checkInTime.toDate();
-            const checkOut = attendance.checkOutTime?.toDate() || (dateStr < today ? DateTime.fromISO(`${dateStr}T${DEFAULT_CHECKOUT_TIME}`, { zone: THAILAND_TIMEZONE }).toJSDate() : null);
+            let actualCheckOut = checkOutTime;
+            
+            if (!actualCheckOut && dateStr < today) {
+                actualCheckOut = DateTime.fromISO(`${dateStr}T${DEFAULT_CHECKOUT_TIME}`, { zone: THAILAND_TIMEZONE }).toJSDate();
+            }
 
-            if (checkOut) {
-                let durationMs = checkOut.getTime() - checkIn.getTime();
-                const breakPolicy = attendance.includesBreak !== undefined
-                    ? attendance.includesBreak
-                    : (schedule?.includesBreak !== undefined ? schedule.includesBreak : (payType === 'Monthly'));
-
-                if (breakPolicy && durationMs >= (7 * 60 * 60 * 1000)) {
-                    durationMs -= DEFAULT_BREAK_MS;
+            if (actualCheckOut) {
+                let durationMs = actualCheckOut.getTime() - checkInTime.getTime();
+                
+                if (attendance?.includesBreak !== false) {
+                    if (attendance?.breakStart) {
+                        if (attendance.breakEnd) {
+                            const bStart = attendance.breakStart.toDate ? attendance.breakStart.toDate() : attendance.breakStart;
+                            const bEnd = attendance.breakEnd.toDate ? attendance.breakEnd.toDate() : attendance.breakEnd;
+                            const actualBreakMs = bEnd - bStart;
+                            durationMs -= Math.max(actualBreakMs, standardBreakMs);
+                        } else {
+                            durationMs -= standardBreakMs;
+                        }
+                    } else if (durationMs > 5 * 3600000) {
+                        durationMs -= standardBreakMs;
+                    }
                 }
                 if (durationMs > 0) totalActualMillis += durationMs;
             }
@@ -128,47 +136,38 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
                 const start = DateTime.fromISO(`${schedule.date}T${schedule.startTime}`, { zone: THAILAND_TIMEZONE });
                 const end = DateTime.fromISO(`${schedule.date}T${schedule.endTime}`, { zone: THAILAND_TIMEZONE });
                 let schedMs = end.diff(start).as('milliseconds');
-                const schedBreak = schedule.includesBreak !== undefined ? schedule.includesBreak : (payType === 'Monthly');
-                if (schedBreak && schedMs >= (7 * 60 * 60 * 1000)) {
-                    schedMs -= DEFAULT_BREAK_MS;
+                if (schedule.includesBreak !== false && schedMs >= (5 * 3600000)) {
+                    schedMs -= standardBreakMs;
                 }
                 if (schedMs > 0) totalScheduledMillis += schedMs;
             } catch (e) { }
         }
-        // Juste avant le bloc : if (loopDay <= endOfLoop)
-        if (schedule) {
-            console.log(`Jour: ${dateStr} | SchedType: ${schedule.type} | HasPointed: ${!!attendance?.checkInTime}`);
-        }
-        if (loopDay <= endOfLoop) {
-            const currentStatus = (status || '').toLowerCase();
 
-            if (currentStatus === 'late') {
-                totalLateMinutes += (lateMinutes || 0);
+        if (loopDay <= endOfLoop) {
+            const actualLateForBonus = attendance?.manuallyEdited ? approvedLateMinutes : suggestedLateMinutes;
+            
+            if (actualLateForBonus > 0) {
+                totalLateMinutes += actualLateForBonus;
                 totalLatesCount++;
             }
-            if (otMinutes > 0) {
-                if (attendance?.otStatus !== 'rejected') {
-                    totalOtMinutes += otMinutes;
-                }
+
+            // CORRECTION: Seuls les retards validés par le manager sont accumulés pour la paie
+            if (approvedLateMinutes > 0) {
+                totalApprovedLateMinutes += approvedLateMinutes;
+            }
+            
+            if (approvedOtMinutes > 0) {
+                totalOtMinutes += approvedOtMinutes; 
             }
 
-            // --- LA DÉTECTION INFAILLIBLE DE L'ABSENCE (NO SHOW) ---
             const isScheduled = schedule && schedule.type !== 'off';
             const hasPointed = attendance && attendance.checkInTime;
             const hasApprovedLeave = !!leave;
 
             let isAbsent = false;
+            if (isScheduled && !hasPointed && !hasApprovedLeave) isAbsent = true;
+            else if (status === 'Absent') isAbsent = true;
 
-            // S'il devait travailler, n'a pas pointé et n'a pas de congé -> NO SHOW
-            if (isScheduled && !hasPointed && !hasApprovedLeave) {
-                isAbsent = true;
-            }
-            // Fallback: si le calculateur de statut remonte explicitement une absence
-            else if (currentStatus === 'absent' || currentStatus === 'no show') {
-                isAbsent = true;
-            }
-
-            // On ne comptabilise l'absence que si la journée est terminée
             const isPastMonth = (year < now.year) || (year === now.year && month < now.month);
             if (isAbsent) {
                 if (isPastMonth || loopDay.toISODate() < today) {
@@ -180,7 +179,6 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         loopDay = loopDay.plus({ days: 1 });
     }
 
-    // --- APPLICATION EXACTE DE TA RÈGLE DE BONUS ---
     const isBonusDisqualified = (totalLatesCount > allowedLates) ||
         (totalLateMinutes > maxLateMinutesAllowed) ||
         (totalUnexcusedAbsenceCount > allowedAbsences) ||
@@ -191,27 +189,19 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
 
     const isEligible = staff.isAttendanceBonusEligible !== false;
 
-    if (isEligible && !isBonusDisqualified) {
-        // 1. Paiement basé sur le Strike ACQUIS (currentStreak)
+    if (isBonusActive && isEligible && !isBonusDisqualified) {
         if (currentStreak === 1) bonusAmount = bonusSettings.month1 || 400;
         else if (currentStreak === 2) bonusAmount = bonusSettings.month2 || 800;
         else if (currentStreak >= 3) bonusAmount = bonusSettings.month3 || 1200;
-        else bonusAmount = 0; // Strike 0 = 0 THB
-
-        // 2. Sécurité : le 1er mois d'embauche donne toujours 0 THB
-        if (isFirstMonth) {
-            bonusAmount = 0;
-        }
-
-        // 3. Incrémentation du strike pour le mois prochain (Ex: 0 devient 1)
+        else bonusAmount = 0; 
+        
+        if (isFirstMonth) bonusAmount = 0;
         newStreak = currentStreak + 1;
     } else {
-        // Disqualifié (absences, retards excessifs, manuel), tout retombe à 0
         newStreak = 0;
         bonusAmount = 0;
     }
 
-    // Leave Logic
     const totalSickDaysYearSoFar = yearlySickLeaveRequests.reduce((acc, req) => {
         const start = DateTime.fromISO(req.startDate);
         const end = DateTime.fromISO(req.endDate);
@@ -237,8 +227,10 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         unexcusedAbsenceDates,
         totalLatesCount,
         totalLateMinutes,
+        totalApprovedLateMinutes, // <-- NOUVEAU
         totalOtMinutes,
         daysToDeduct,
+        isBonusActive, 
         didQualifyForBonus: !isBonusDisqualified,
         bonusAmount,
         newStreak,

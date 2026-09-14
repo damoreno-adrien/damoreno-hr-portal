@@ -303,15 +303,7 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
 
     return (
         <div className="relative">
-            <ConfirmModal
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                onConfirm={confirmState.onConfirm}
-                onCancel={confirmState.onCancel}
-                isDestructive={confirmState.isDestructive}
-                confirmText={confirmState.confirmText || "Confirm"}
-            />
+            <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} isDestructive={confirmState.isDestructive} confirmText={confirmState.confirmText || "Confirm"} />
 
             {isMyBirthday && <div className="bg-gradient-to-r from-amber-500 to-yellow-400 text-white p-4 rounded-lg mb-8 text-center font-bold text-lg shadow-lg">🎉 Happy Birthday! 🎂</div>}
             {colleaguesWithBirthday.length > 0 && <div className="bg-blue-500/20 border border-blue-400 text-blue-200 p-4 rounded-lg mb-8"><p>🎈 It's {colleaguesWithBirthday.map(s => s.nickname || s.firstName).join(', ')}'s Birthday!</p></div>}
@@ -332,9 +324,12 @@ export default function StaffDashboardPage({ db, user, companyConfig, leaveBalan
                     </DashboardCard>
                 </div>
                 <div className="space-y-8">
-                    <DashboardCard title="Bonus Status">
-                        <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>{bonusContent}</div>
-                    </DashboardCard>
+                    {/* CONDITION D'AFFICHAGE DU BONUS */}
+                    {!bonusStatus.hidden && (
+                        <DashboardCard title="Bonus Status">
+                            <div className={`flex justify-between items-center p-4 rounded-lg ${bonusBgClass}`}>{bonusContent}</div>
+                        </DashboardCard>
+                    )}
                     <UpcomingShiftsCard todaysSchedule={todaysSchedule} tomorrowsSchedule={tomorrowsSchedule} />
                     <QuickActionsCard setCurrentPage={setCurrentPage} />
                     <DashboardCard title="This Month's Summary">

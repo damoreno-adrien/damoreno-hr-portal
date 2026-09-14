@@ -24,17 +24,14 @@ const getStaffCurrentJob = (staff) => {
 };
 
 export default function FinancialsDashboardPage({ db, user, companyConfig }) {
-    // 1. Appel du hook personnalisé
     const { loadingPermissions } = usePermissions(db, user?.role, user?.uid);
 
-    // 2. Déclaration de tous les états (useState)
     const [payEstimate, setPayEstimate] = useState(null);
     const [isLoadingEstimate, setIsLoadingEstimate] = useState(true);
     const [latestPayslipForModal, setLatestPayslipForModal] = useState(null);
     const [staffLoans, setStaffLoans] = useState([]);
     const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
 
-    // 3. Déclaration de la fonction asynchrone (fetch)
     const fetchFinancialData = async () => {
         setIsLoadingEstimate(true);
         try {
@@ -68,35 +65,54 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
             const payPeriod = { month: now.getMonth() + 1, year: now.getFullYear() };
             const stats = await calculateMonthlyStats(db, rawProfile, payPeriod, companyConfig, jobInfo);
 
+            const branchOverrides = rawProfile.branchId && companyConfig.branchSettings ? companyConfig.branchSettings[rawProfile.branchId] : {};
+            const resolvedConfig = { ...companyConfig, ...branchOverrides };
+
             const dailyRate = baseSalary / 30;
-            const hourlyRate = dailyRate / 8; 
+            const standardHours = Number(resolvedConfig.standardDayHours) || 8;
+            const hourlyRate = dailyRate / standardHours; 
             const minuteRate = hourlyRate / 60;
             const daysInMonth = dateUtils.getDaysInMonth(now);
             const currentDay = now.getDate();
 
             const baseSalaryEarned = (baseSalary / daysInMonth) * currentDay;
-            const otPay = (stats.totalOtMinutes || 0) * minuteRate * 1.5;
+            
+            const overtimeRateMultiplier = Number(resolvedConfig.overtimeRate) || 1.5;
+            const otPay = (stats.totalOtMinutes || 0) * minuteRate * overtimeRateMultiplier;
             
             let targetBonusAmount = 0;
-            if (isBonusEligible) {
+            if (isBonusEligible && stats.isBonusActive) {
                 const currentStreak = rawProfile.bonusStreak || 0;
-                const nextStreak = currentStreak + 1;
-                if (nextStreak === 1) targetBonusAmount = companyConfig.attendanceBonus?.month1 || 400;
-                else if (nextStreak === 2) targetBonusAmount = companyConfig.attendanceBonus?.month2 || 800;
-                else targetBonusAmount = companyConfig.attendanceBonus?.month3 || 1200;
+                const bonusSettings = resolvedConfig.attendanceBonus || {};
+                
+                if (currentStreak === 1) targetBonusAmount = bonusSettings.month1 || 400;
+                else if (currentStreak === 2) targetBonusAmount = bonusSettings.month2 || 800;
+                else if (currentStreak >= 3) targetBonusAmount = bonusSettings.month3 || 1200;
+                else targetBonusAmount = 0;
+                
+                let isFirstMonth = false;
+                if (rawProfile.startDate) {
+                    const jsDate = dateUtils.fromFirestore(rawProfile.startDate);
+                    if (jsDate && jsDate.getFullYear() === now.getFullYear() && jsDate.getMonth() === now.getMonth()) {
+                        isFirstMonth = true;
+                    }
+                }
+                if (isFirstMonth) targetBonusAmount = 0;
             }
             
             const actualBonusEarnings = (isBonusEligible && stats.didQualifyForBonus) ? targetBonusAmount : 0;
             const estimatedGross = baseSalaryEarned + otPay + actualBonusEarnings;
 
             let sso = 0, ssoAllowanceAmount = 0;
-            // 1. Déduction : Seulement si isSsoRegistered est true (ou indéfini par défaut)
-            if (rawProfile.isSsoRegistered !== false && estimatedGross > 0) {
-                const ssoRate = (companyConfig.financialRules?.ssoRate || 5) / 100;
-                const ssoMax = Number(companyConfig.financialRules?.ssoMaxContribution) || 875;
-                sso = Math.min(Math.max(1650, estimatedGross) * ssoRate, ssoMax);
+            const isSsoActive = rawProfile.isSsoRegistered !== false;
+
+            if (isSsoActive && baseSalary > 0) {
+                const ssoRate = (Number(resolvedConfig.ssoRate) || 5) / 100;
+                const ssoMax = Number(resolvedConfig.ssoCap) || 750;
                 
-                // 2. Allowance : Seulement si receivesSsoAllowance est true (ou indéfini par défaut)
+                const ssoBasis = jobInfo.payType === 'Hourly' ? estimatedGross : baseSalary;
+                sso = Math.min(Math.max(1650, ssoBasis) * ssoRate, ssoMax);
+                
                 if (rawProfile.receivesSsoAllowance !== false) {
                     ssoAllowanceAmount = sso;
                 } else {
@@ -105,7 +121,9 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
             }
 
             const absenceDeduction = (stats.totalAbsencesCount || 0) * dailyRate;
-            const lateDeduction = (stats.totalLateMinutes || 0) * minuteRate;
+            
+            // CORRECTION: Seules les minutes approuvées impactent le Dashboard Staff
+            const lateDeduction = (Number(stats.totalApprovedLateMinutes) || 0) * minuteRate;
             
             const loanDeduction = activeLoansToDeduct.reduce((sum, loan) => sum + (parseFloat(loan.monthlyRepayment) || parseFloat(loan.monthlyInstallment) || 0), 0);
             const advanceDeduction = monthAdvances.filter(a => a.status === 'approved' || a.status === 'paid').reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
@@ -116,9 +134,10 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
 
             setPayEstimate({
                 estimatedNetPay: netPay, baseSalaryEarned, overtimePay: otPay, ssoAllowance: ssoAllowanceAmount, 
-                contractDetails: { payType: 'Monthly', baseSalary, standardHours: 8 },
-                potentialBonus: { amount: targetBonusAmount, onTrack: isBonusEligible && stats.didQualifyForBonus },
-                deductions: { absences: absenceDeduction, socialSecurity: sso, salaryAdvances: advanceDeduction, loanRepayment: loanDeduction },
+                isSsoActive,
+                contractDetails: { payType: 'Monthly', baseSalary, standardHours: standardHours },
+                potentialBonus: { amount: targetBonusAmount, onTrack: isBonusEligible && stats.didQualifyForBonus && stats.isBonusActive },
+                deductions: { absences: absenceDeduction, lateness: lateDeduction, socialSecurity: sso, salaryAdvances: advanceDeduction, loanRepayment: loanDeduction },
                 monthAdvances, latestPayslip, stats 
             });
 
@@ -129,7 +148,6 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
         }
     };
 
-    // 4. Déclaration du useEffect
     useEffect(() => {
         if (db && user && companyConfig) fetchFinancialData();
     }, [db, user, companyConfig]);
@@ -145,18 +163,16 @@ export default function FinancialsDashboardPage({ db, user, companyConfig }) {
     
     const closeModal = () => setLatestPayslipForModal(null);
 
-    // 5. Retours anticipés conditionnels (DOIVENT ÊTRE PLACÉS APRÈS LES HOOKS)
     if (loadingPermissions) return (
         <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500"></div>
         </div>
     );
 
-    // 6. Rendu du composant
     return (
         <div>
             {latestPayslipForModal && (
-                 <Modal isOpen={true} onClose={closeModal} title={`Payslip Details`}>
+                 <Modal isOpen={true} onClose={closeModal} title="Historical Record">
                     <PayslipDetailView details={latestPayslipForModal.details} companyConfig={companyConfig} payPeriod={latestPayslipForModal.payPeriod} />
                 </Modal>
             )}

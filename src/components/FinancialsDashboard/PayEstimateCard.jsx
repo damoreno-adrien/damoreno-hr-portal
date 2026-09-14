@@ -1,3 +1,4 @@
+/* src/components/FinancialsDashboard/PayEstimateCard.jsx */
 import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -15,13 +16,10 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
         return <div className="bg-gray-800 p-6 rounded-xl text-center border border-gray-700"><p className="text-gray-400">No data.</p></div>;
     }
 
-    // --- 1. Calculate Earnings & Deductions Locally ---
-    // This ensures the total is correct even if the backend sends 0 for 'estimatedNetPay'
     const baseEarned = payEstimate?.baseSalaryEarned || 0;
     const overtime = payEstimate?.overtimePay || 0;
     const ssoAllowance = payEstimate?.ssoAllowance || 0;
     
-    // Only include bonus if it is explicitly marked as "On Track"
     const bonusAmount = (payEstimate?.potentialBonus?.onTrack && payEstimate?.potentialBonus?.amount) 
         ? payEstimate.potentialBonus.amount 
         : 0;
@@ -29,21 +27,19 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
     const totalEarnings = baseEarned + overtime + ssoAllowance + bonusAmount;
 
     const dedAbsence = payEstimate?.deductions?.absences || 0;
+    const dedLateness = payEstimate?.deductions?.lateness || 0; 
     const dedSSO = payEstimate?.deductions?.socialSecurity || 0;
     const dedAdvance = payEstimate?.deductions?.salaryAdvances || 0;
     const dedLoan = payEstimate?.deductions?.loanRepayment || 0;
 
-    const totalDeductions = dedAbsence + dedSSO + dedAdvance + dedLoan;
+    const totalDeductions = dedAbsence + dedLateness + dedSSO + dedAdvance + dedLoan;
 
-    // The final calculated net pay
     const calculatedNetPay = totalEarnings - totalDeductions;
-
-    // Use the provided value if available/non-zero, otherwise fallback to our calculation
     const finalNetPay = payEstimate?.estimatedNetPay || calculatedNetPay;
-    // --------------------------------------------------
 
-    // Only show bonus row if eligible/exists
     const showBonusRow = payEstimate.potentialBonus?.amount > 0 || payEstimate.potentialBonus?.onTrack; 
+    const isSsoActive = payEstimate?.isSsoActive === true; // NOUVEAU
+    
     const contract = payEstimate.contractDetails || {};
     const isHourly = contract.payType === 'Hourly';
     
@@ -71,7 +67,6 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
 
                 <p className="text-gray-400 text-sm">Estimated Net Pay To Date</p>
                 <p className="text-4xl lg:text-5xl font-bold text-amber-400 mt-2">
-                    {/* UPDATED: Uses finalNetPay instead of just payEstimate.estimatedNetPay */}
                     {isVisible ? `฿${formatCurrency(finalNetPay)}` : `฿${censor}`}
                 </p>
             </div>
@@ -111,30 +106,46 @@ export const PayEstimateCard = ({ payEstimate, isLoading }) => {
                         </div>
                     )}
 
-                    <div className="flex justify-between">
-                        <span className="text-gray-300">Social Security Allowance</span>
-                        <span className="font-mono text-white">{isVisible ? `฿${formatCurrency(payEstimate?.ssoAllowance)}` : `฿${censor}`}</span>
-                    </div>
+                    {isSsoActive && (
+                        <div className="flex justify-between">
+                            <span className="text-gray-300">Social Security Allowance</span>
+                            <span className="font-mono text-white">{isVisible ? `฿${formatCurrency(payEstimate?.ssoAllowance)}` : `฿${censor}`}</span>
+                        </div>
+                    )}
                 </div>
 
                 <div className="space-y-4">
                     <h4 className="font-semibold text-white text-lg">Deductions</h4>
+                    
                     <div className="flex justify-between">
                         <span className="text-gray-300">Absences</span>
                         <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.absences)}` : `-฿${censor}`}</span>
                     </div>
-                    <div className="flex justify-between">
-                        <span className="text-gray-300">Social Security</span>
-                        <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.socialSecurity)}` : `-฿${censor}`}</span>
-                    </div>
+
+                    {/* CORRECTION : Légalité du wording */}
+                    {payEstimate?.deductions?.lateness > 0 && (
+                        <div className="flex justify-between">
+                            <span className="text-gray-300">Attendance Adjustment</span>
+                            <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.lateness)}` : `-฿${censor}`}</span>
+                        </div>
+                    )}
+
+                    {isSsoActive && (
+                        <div className="flex justify-between">
+                            <span className="text-gray-300">Social Security</span>
+                            <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.socialSecurity)}` : `-฿${censor}`}</span>
+                        </div>
+                    )}
                      <div className="flex justify-between">
                         <span className="text-gray-300">Salary Advances</span>
                         <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.salaryAdvances)}` : `-฿${censor}`}</span>
                     </div>
-                    <div className="flex justify-between">
-                        <span className="text-gray-300">Loan Repayment</span>
-                        <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.loanRepayment)}` : `-฿${censor}`}</span>
-                    </div>
+                    {payEstimate?.deductions?.loanRepayment > 0 && (
+                        <div className="flex justify-between">
+                            <span className="text-gray-300">Loan Repayment</span>
+                            <span className="font-mono text-red-400">{isVisible ? `-฿${formatCurrency(payEstimate?.deductions?.loanRepayment)}` : `-฿${censor}`}</span>
+                        </div>
+                    )}
                 </div>
             </div>
         </>
