@@ -4,7 +4,6 @@ import React from 'react';
 export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [], userRole }) => (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
 
-        {/* --- NEW: Branch Selector for Super Admins Editing Profiles --- */}
         {['admin', 'super_admin'].includes(userRole) && branches.length > 1 && (
             <div className="md:col-span-2 bg-indigo-900/20 p-4 rounded-lg border border-indigo-700/50 mb-2">
                 <label className="text-sm font-bold text-indigo-400">Branch Location</label>
@@ -20,7 +19,6 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                 <p className="text-xs text-gray-400 mt-1">Changing this will move the staff member to a new dashboard view.</p>
             </div>
         )}
-        {/* --- MODIFICATION : Rappel textuel si une seule branche (cas de Pupae) --- */}
         {['admin', 'super_admin'].includes(userRole) && branches.length === 1 && (
             <div className="md:col-span-2 px-4 py-2 bg-gray-800/50 rounded border border-gray-700 mb-2 flex justify-between items-center">
                 <span className="text-xs text-gray-400 font-bold uppercase tracking-widest">Current Branch:</span>
@@ -36,7 +34,6 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
         <div><label className="text-sm text-gray-400">Start Date</label><input id="startDate" type="date" value={formData.startDate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none" /></div>
         <div><label className="text-sm text-gray-400">Birthdate</label><input id="birthdate" type="date" value={formData.birthdate} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none" /></div>
 
-        {/* --- Salary Payment --- */}
         <div className="md:col-span-2 mt-2 bg-gray-800/30 p-4 rounded-lg border border-gray-700 space-y-4">
             <h4 className="text-sm font-bold text-gray-300 border-b border-gray-700 pb-2">Payment Method</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -80,7 +77,7 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                 </div>
             </div>
         </div>
-        {/* --- Identification Section --- */}
+
         <div className="md:col-span-2 mt-2 bg-gray-800/30 p-4 rounded-lg border border-gray-700 space-y-4">
             <h4 className="text-sm font-bold text-gray-300 border-b border-gray-700 pb-2">Identification Document</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -125,7 +122,6 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
             <input id="emergencyContactPhone" value={formData.emergencyContactPhone || ''} onChange={handleInputChange} className="w-full mt-1 px-3 py-2 bg-gray-700 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none" />
         </div>
 
-        {/* --- Grouped Compliance Section --- */}
         <div className="md:col-span-2 mt-4 bg-gray-800/50 p-4 rounded-lg border border-gray-700 space-y-4">
             <label className="flex items-center space-x-3 cursor-pointer">
                 <input
@@ -137,7 +133,6 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                 />
                 <span className="text-sm font-bold text-white">Enrolled in Social Security (SSO)</span>
             </label>
-            {/* --- NOUVELLE CHECKBOX SSO ALLOWANCE --- */}
             <label className={`flex items-center space-x-3 pl-8 ${formData.isSsoRegistered ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                 <input
                     id="receivesSsoAllowance"
@@ -153,7 +148,21 @@ export const ProfileDetailsEdit = ({ formData, handleInputChange, branches = [],
                 </div>
             </label>
 
-            <div className="border-t border-gray-700 pt-4">
+            {/* --- NOUVEAU: Champ SSO ID si Enrolled --- */}
+            {formData.isSsoRegistered && (
+                <div className="pl-8 pt-2">
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Social Security ID</label>
+                    <input
+                        id="ssoId"
+                        value={formData.ssoId || ''}
+                        onChange={handleInputChange}
+                        placeholder="Enter 13-digit SSO number..."
+                        className="w-full md:w-1/2 px-3 py-2 bg-gray-900 rounded-md text-white border border-gray-600 focus:border-indigo-500 outline-none"
+                    />
+                </div>
+            )}
+
+            <div className="border-t border-gray-700 pt-4 mt-4">
                 <label className="block text-sm font-bold text-indigo-400 mb-1">Public Holiday Policy</label>
                 <select
                     id="holidayPolicy"

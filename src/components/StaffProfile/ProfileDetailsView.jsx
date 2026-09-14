@@ -1,3 +1,4 @@
+/* src/components/StaffProfile/ProfileDetailsView.jsx */
 import React from 'react';
 import * as dateUtils from '../../utils/dateUtils';
 
@@ -8,31 +9,25 @@ const InfoRow = ({ label, value, className = '' }) => (
     </div>
 );
 
-// UPDATED HELPER to support new structure
+// CORRECTION : Cast sécurisé en Number()
 const formatRate = (job) => {
     if (!job) return 'N/A';
 
     if (job.payType === 'Hourly') {
-        const r = job.hourlyRate || job.rate;
-        return typeof r === 'number' ? `${r.toLocaleString()} THB / hr` : 'N/A';
+        const r = Number(job.hourlyRate || job.rate || 0);
+        return r > 0 ? `${r.toLocaleString('en-US')} THB / hr` : 'N/A';
     }
 
-    // Salary
-    const salary = job.baseSalary || job.rate;
-    const hours = job.standardDayHours || 8;
+    const salary = Number(job.baseSalary || job.rate || 0);
+    const hours = Number(job.standardDayHours || 8);
 
-    return typeof salary === 'number'
-        ? `${salary.toLocaleString()} THB / mo (${hours}h/day)`
-        : 'N/A';
+    return salary > 0 ? `${salary.toLocaleString('en-US')} THB / mo (${hours}h/day)` : 'N/A';
 };
 
 export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
     const displayName = staff.firstName ? `${staff.firstName} ${staff.lastName}` : staff.fullName;
-
-    // Find friendly branch name
     const branchName = branches.find(b => b.id === staff.branchId)?.name || staff.branchId || 'Unassigned';
 
-    // --- Bank details: prefer new split fields, fallback to legacy combined field ---
     const bankAccountDisplay = staff.bankName && staff.bankAccountNumber
         ? `${staff.bankName} - ${staff.bankAccountNumber}`
         : (staff.bankAccount || '-');
@@ -41,7 +36,6 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 flex-grow">
             {['inactive', 'archived'].includes(staff.status) && staff.endDate && <InfoRow label="Last Day of Employment" value={dateUtils.formatDisplayDate(staff.endDate)} className="md:col-span-2 bg-red-900/50 p-3 rounded-lg" />}
 
-            {/* --- NEW: Show Branch Assignment --- */}
             <div className="md:col-span-2 bg-indigo-900/20 p-3 rounded-lg border border-indigo-700/50">
                 <InfoRow label="Branch Location" value={branchName} className="text-indigo-300" />
             </div>
@@ -54,7 +48,6 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
             <InfoRow label="Seniority" value={dateUtils.formatSeniority(staff.startDate, staff.endDate)} />
             <InfoRow label="Birthdate" value={dateUtils.formatDisplayDate(staff.birthdate)} />
 
-            {/* --- NEW: Identification Display --- */}
             <hr className="md:col-span-2 border-gray-700 my-2" />
             <InfoRow label="Identification Type" value={(staff.idType && staff.idType !== 'None') ? staff.idType : '-'} />
             <InfoRow label="Document No." value={staff.idNumber || '-'} />
@@ -85,11 +78,15 @@ export const ProfileDetailsView = ({ staff, currentJob, branches = [] }) => {
                 className={staff.isSsoRegistered === false ? 'text-amber-500' : 'text-green-400'}
             />
             {staff.isSsoRegistered !== false && (
-                <InfoRow
-                    label="SSO Allowance"
-                    value={staff.receivesSsoAllowance === false ? 'Paid by Staff (No Allowance)' : 'Covered by Company'}
-                    className={staff.receivesSsoAllowance === false ? 'text-gray-400' : 'text-indigo-400'}
-                />
+                <>
+                    <InfoRow label="Social Security ID" value={staff.ssoId || '-'} className="text-gray-300" />
+                    
+                    <InfoRow
+                        label="SSO Allowance"
+                        value={staff.receivesSsoAllowance === false ? 'Paid by Staff (No Allowance)' : 'Covered by Company'}
+                        className={staff.receivesSsoAllowance === false ? 'text-gray-400' : 'text-indigo-400'}
+                    />
+                </>
             )}
         </div>
     );

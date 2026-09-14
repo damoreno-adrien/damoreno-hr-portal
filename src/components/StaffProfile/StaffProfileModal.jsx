@@ -19,7 +19,6 @@ import { generateDocument, translateNumber } from '../../utils/documentGenerator
 import usePermissions from '../../hooks/usePermissions';
 import { getAuth } from 'firebase/auth';
 
-// --- IMPORTS DES MODALES ---
 import FeedbackModal from '../common/FeedbackModal';
 import ConfirmModal from '../common/ConfirmModal';
 import PromptModal from '../common/PromptModal';
@@ -31,7 +30,6 @@ const deleteStaffFunc = httpsCallable(functionsAsia, 'deleteStaff');
 const setStaffAuthStatus = httpsCallable(functionsAsia, 'setStaffAuthStatus');
 const setStaffPassword = httpsCallable(functionsAsia, 'setStaffPassword');
 
-// --- Import our Email Sync Function ---
 const updateStaffEmailFunc = httpsCallable(functionsAsia, 'updateStaffEmail');
 
 const getInitialFormData = (staff) => {
@@ -46,6 +44,7 @@ const getInitialFormData = (staff) => {
         emergencyContactName: staff.emergencyContactName || '', emergencyContactPhone: staff.emergencyContactPhone || '',
         isSsoRegistered: staff.isSsoRegistered ?? true,
         receivesSsoAllowance: staff.receivesSsoAllowance ?? true,
+        ssoId: staff.ssoId || '', // <-- NOUVEAU
         idType: staff.idType || 'None',
         idNumber: staff.idNumber || '',
         branchId: staff.branchId || '',
@@ -55,9 +54,6 @@ const getInitialFormData = (staff) => {
     return { ...initialData, firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '', nickname: staff.nickname || '' };
 };
 
-// ============================================================================
-// HR Records Dashboard
-// ============================================================================
 const StaffHRRecords = ({ db, staffId, staffName }) => {
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -65,7 +61,6 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
     const [filterType, setFilterType] = useState('All');
     const [showRevoked, setShowRevoked] = useState(false);
 
-    // Modal pour cette section
     const [feedbackModal, setFeedbackModal] = useState(null);
 
     useEffect(() => {
@@ -212,8 +207,6 @@ const StaffHRRecords = ({ db, staffId, staffName }) => {
         </div>
     );
 };
-// ============================================================================
-
 
 export default function StaffProfileModal({ staff, db, companyConfig, onClose, departments, userRole, branches }) {
     const { permissions } = usePermissions(db, userRole, getAuth().currentUser?.uid);
@@ -229,19 +222,14 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     const [isGenerating, setIsGenerating] = useState(false);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
-    // --- ACCORDIONS ETATS (Settings & Stats tab) ---
     const [isBonusSectionOpen, setIsBonusSectionOpen] = useState(false);
     const [isCriticalActionsOpen, setIsCriticalActionsOpen] = useState(false);
 
-    // --- MODALES ETATS ---
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
     const [promptState, setPromptState] = useState({ isOpen: false, title: '', message: '', placeholder: '', onConfirm: null, onCancel: null, type: 'text' });
 
-    // Permet l'accès aux onglets basiques
     const isFullManager = ['manager', 'admin', 'super_admin'].includes(userRole);
-
-    // Contrôle d'accès strict pour les actions destructrices
     const canManageLifecycle = ['admin', 'super_admin'].includes(userRole);
 
     useEffect(() => {
@@ -252,7 +240,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
     }, [staff]);
 
     const currentJob = [...(staff.jobHistory || [])].sort((a, b) => {
-        // Correction de la logique de tri (b - a pour avoir le plus récent en [0])
         return new Date(b.startDate || 0) - new Date(a.startDate || 0);
     })[0] || {};
 
@@ -293,6 +280,7 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             emergencyContactPhone: formData.emergencyContactPhone || null,
             isSsoRegistered: formData.isSsoRegistered,
             receivesSsoAllowance: formData.receivesSsoAllowance,
+            ssoId: formData.ssoId || null, // <-- NOUVEAU
             idType: formData.idType || null,
             idNumber: formData.idNumber || null,
             branchId: formData.branchId || null,
@@ -425,27 +413,25 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
             isDestructive: true,
             confirmText: "Yes, Delete Everything",
             onConfirm: async () => {
-                setConfirmState({ isOpen: false }); // Ferme la modale de confirmation
-                setIsSaving(true); // Active le chargement (et le futur bouclier)
+                setConfirmState({ isOpen: false }); 
+                setIsSaving(true); 
 
                 try {
                     await deleteStaffFunc({ staffId: staff.id });
 
-                    // --- AJOUT DU MESSAGE DE SUCCÈS ---
                     setFeedbackModal({
                         type: 'success',
                         title: 'Deleted',
                         message: 'Staff member and all associated data have been permanently removed.'
                     });
 
-                    // On attend 2 secondes pour laisser le temps de lire le message
                     setTimeout(() => {
-                        onClose(); // Ferme le profil complet
+                        onClose(); 
                     }, 2000);
 
                 } catch (err) {
                     setFeedbackModal({ type: 'error', title: 'Deletion Failed', message: `Error: ${err.message}` });
-                    setIsSaving(false); // On libère l'interface seulement en cas d'erreur
+                    setIsSaving(false); 
                 }
             },
             onCancel: () => setConfirmState({ isOpen: false })
@@ -594,7 +580,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
         setIsGenerating(false);
     };
 
-    // --- LOGIQUE ASYNCHRONE DE FORMULAIRE SÉQUENTIEL ---
     const triggerDocumentForm = (docType) => {
         let extraData = {};
 
@@ -707,7 +692,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
     return (
         <div className="space-y-6 relative">
-            {/* BOUCLIER ANTI-CLIC : S'affiche si isSaving ou isGenerating est true */}
             {(isSaving || isGenerating) && (
                 <div className="absolute inset-0 z-[150] bg-gray-900/60 backdrop-blur-sm flex flex-col items-center justify-center rounded-xl cursor-wait">
                     <Loader2 className="w-12 h-12 animate-spin text-indigo-500 mb-4" />
@@ -716,7 +700,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                     </p>
                 </div>
             )}
-            {/* --- INJECTION GLOBALE DES MODALES --- */}
             <FeedbackModal isOpen={!!feedbackModal} type={feedbackModal?.type} title={feedbackModal?.title} message={feedbackModal?.message} onClose={() => setFeedbackModal(null)} />
             <ConfirmModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} confirmText={confirmState.confirmText || "Confirm"} cancelText={confirmState.cancelText || "Cancel"} isDestructive={confirmState.isDestructive} onConfirm={confirmState.onConfirm} onCancel={confirmState.onCancel} />
             <PromptModal isOpen={promptState.isOpen} title={promptState.title} message={promptState.message} placeholder={promptState.placeholder} type={promptState.type} onConfirm={promptState.onConfirm} onCancel={promptState.onCancel} />
@@ -744,7 +727,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                             setFeedbackModal({ type: 'error', title: 'Sync Error', message: `Error during offboarding sync: ${error.message}` });
                         }
 
-                        // Demande d'impression après offboarding
                         setTimeout(() => {
                             setConfirmState({
                                 isOpen: true, title: "Offboarding Complete", message: "Offboarding details saved! Would you like to print the Resignation/Termination Letter for them to sign?",
@@ -793,12 +775,10 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {error && <p className="text-red-400 text-sm bg-red-900/30 p-3 rounded-md">{error}</p>}
 
-            {/* --- HR Dashboard --- */}
             {activeTab === 'hr-records' && isFullManager && (
                 <StaffHRRecords db={db} staffId={staff.id} staffName={displayName} />
             )}
 
-            {/* --- HR Forms Tab --- */}
             {activeTab === 'forms' && isFullManager && (
                 <div className="space-y-8">
                     <div>
@@ -903,7 +883,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
 
             {activeTab === 'settings' && isFullManager && (
                 <div className="space-y-6">
-                    {/* Permissions Overrides Section (already collapsible internally) */}
                     {permissions.canManageUsers && (
                         <StaffPermissionsOverrides 
                             db={db} 
@@ -913,7 +892,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         />
                     )}
 
-                    {/* --- Bonus Management (Collapsible) --- */}
                     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                         <button
                             type="button"
@@ -951,8 +929,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                         </div>
                     </div>
 
-
-                    {/* --- CRITICAL STAFF ACTIONS (Collapsible) : Gérées par le hook usePermissions --- */}
                     {(permissions.canOffboardStaff || permissions.canResetPassword || userRole === 'super_admin') && (
                         <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
                             <button
@@ -965,7 +941,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                             </button>
                             <div className={`transition-all duration-300 overflow-hidden ${isCriticalActionsOpen ? 'max-h-[600px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
                                 <div className="space-y-4">
-                                    {/* OFFBOARDING / REACTIVATION */}
                                     {permissions.canOffboardStaff && (
                                         <div>
                                             {isCurrentlyWorking ? (
@@ -980,7 +955,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                                         </div>
                                     )}
 
-                                    {/* RESET PASSWORD */}
                                     {permissions.canResetPassword && (
                                         <div>
                                             <button onClick={() => handleResetPassword(staff.id)} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm text-white disabled:opacity-50" title="Reset password">
@@ -989,7 +963,6 @@ export default function StaffProfileModal({ staff, db, companyConfig, onClose, d
                                         </div>
                                     )}
 
-                                    {/* DELETE PERMANENTLY : Toujours bloqué en dur pour le Super Admin uniquement */}
                                     {!isCurrentlyWorking && userRole === 'super_admin' && (
                                         <div className="pt-4 border-t border-gray-700">
                                             <button onClick={handleDeleteStaff} disabled={isSaving || isEditing} className="w-full sm:w-auto flex items-center justify-center px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-sm text-white disabled:opacity-50" title="Delete staff permanently">

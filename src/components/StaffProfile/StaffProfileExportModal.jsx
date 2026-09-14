@@ -34,7 +34,8 @@ export default function StaffProfileExportModal({ isOpen, onClose, staff, compan
     };
 
     const checkboxConfig = [
-        { key: 'includePersonal', label: 'Personal Information', description: 'Contact details, address, bank account, SSO status & ID document.' },
+        // CORRECTION MINEURE : Ajout de "SSO ID" dans la description
+        { key: 'includePersonal', label: 'Personal Information', description: 'Contact details, address, bank account, SSO status, SSO ID & ID document.' },
         { key: 'includeJob', label: 'Job & Financials', description: 'Current department, position, start date and pay rate.' },
         { key: 'includeHR', label: 'HR Settings', description: 'Employment status, bonus streak and holiday policy.' },
         { key: 'includeDocuments', label: 'List Official Documents', description: 'Appendix listing all uploaded documents with clickable links.' },

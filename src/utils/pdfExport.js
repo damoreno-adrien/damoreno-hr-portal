@@ -340,20 +340,29 @@ export const exportIndividualStaffProfile = async ({ staff, companyConfig, optio
         docPDF.text('Personal Information', 14, currentY);
         currentY += 4;
 
+        // Préparation du tableau avec push conditionnel pour le SSO ID
+        const personalInfoBody = [
+            [{ content: 'Legal Name:', styles: { fontStyle: 'bold' } }, displayName],
+            [{ content: 'Nickname:', styles: { fontStyle: 'bold' } }, staff.nickname || 'N/A'],
+            [{ content: 'Email:', styles: { fontStyle: 'bold' } }, staff.email || 'N/A'],
+            [{ content: 'Phone Number:', styles: { fontStyle: 'bold' } }, staff.phoneNumber || 'N/A'],
+            [{ content: 'Birthdate:', styles: { fontStyle: 'bold' } }, staff.birthdate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(staff.birthdate)) : 'N/A'],
+            [{ content: 'Address:', styles: { fontStyle: 'bold' } }, staff.address || 'N/A'],
+            [{ content: 'Emergency Contact:', styles: { fontStyle: 'bold' } }, `${staff.emergencyContactName || 'N/A'} (${staff.emergencyContactPhone || 'N/A'})`],
+            [{ content: 'Bank Account:', styles: { fontStyle: 'bold' } }, bankDisplay],
+            [{ content: 'ID Document:', styles: { fontStyle: 'bold' } }, `${(staff.idType && staff.idType !== 'None') ? staff.idType : 'N/A'} - ${staff.idNumber || 'N/A'}`],
+            [{ content: 'SSO Status:', styles: { fontStyle: 'bold' } }, ssoStatus],
+        ];
+
+        // NOUVEAU: Ajout dynamique du SSO ID
+        if (staff.isSsoRegistered !== false) {
+             personalInfoBody.push([{ content: 'SSO ID:', styles: { fontStyle: 'bold' } }, staff.ssoId || 'N/A']);
+        }
+        
+        personalInfoBody.push([{ content: 'SSO Allowance:', styles: { fontStyle: 'bold' } }, ssoAllowanceStatus]);
+
         autoTable(docPDF, {
-            body: [
-                [{ content: 'Legal Name:', styles: { fontStyle: 'bold' } }, displayName],
-                [{ content: 'Nickname:', styles: { fontStyle: 'bold' } }, staff.nickname || 'N/A'],
-                [{ content: 'Email:', styles: { fontStyle: 'bold' } }, staff.email || 'N/A'],
-                [{ content: 'Phone Number:', styles: { fontStyle: 'bold' } }, staff.phoneNumber || 'N/A'],
-                [{ content: 'Birthdate:', styles: { fontStyle: 'bold' } }, staff.birthdate ? dateUtils.formatDisplayDate(dateUtils.fromFirestore(staff.birthdate)) : 'N/A'],
-                [{ content: 'Address:', styles: { fontStyle: 'bold' } }, staff.address || 'N/A'],
-                [{ content: 'Emergency Contact:', styles: { fontStyle: 'bold' } }, `${staff.emergencyContactName || 'N/A'} (${staff.emergencyContactPhone || 'N/A'})`],
-                [{ content: 'Bank Account:', styles: { fontStyle: 'bold' } }, bankDisplay],
-                [{ content: 'ID Document:', styles: { fontStyle: 'bold' } }, `${(staff.idType && staff.idType !== 'None') ? staff.idType : 'N/A'} - ${staff.idNumber || 'N/A'}`],
-                [{ content: 'SSO Status:', styles: { fontStyle: 'bold' } }, ssoStatus],
-                [{ content: 'SSO Allowance:', styles: { fontStyle: 'bold' } }, ssoAllowanceStatus],
-            ],
+            body: personalInfoBody,
             startY: currentY,
             theme: 'plain',
             styles: { font: 'Sarabun', fontSize: 10, cellPadding: 1.5, minCellHeight: 6 },

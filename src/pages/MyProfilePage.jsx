@@ -10,7 +10,33 @@ const InfoRow = ({ label, value }) => (
     </div>
 );
 
-import { getCurrentJob, formatRate, getDisplayName } from '../utils/staffUtils';
+// 1. Helper local robuste pour récupérer le job (évite les erreurs si jobHistory est vide)
+const getRobustCurrentJob = (staff) => {
+    if (!staff) return {};
+    if (staff.jobHistory && staff.jobHistory.length > 0) {
+        return [...staff.jobHistory].sort((a, b) => {
+            const dateA = dateUtils.fromFirestore(a.startDate) || new Date(0);
+            const dateB = dateUtils.fromFirestore(b.startDate) || new Date(0);
+            return dateB - dateA;
+        })[0];
+    }
+    return staff;
+};
+
+// 2. Helper local robuste qui convertit tout en Number (corrige le N/A des strings)
+const formatPayRate = (job) => {
+    if (!job) return 'N/A';
+    
+    if (job.payType === 'Hourly') {
+        const r = Number(job.hourlyRate || job.rate || 0);
+        return r > 0 ? `${r.toLocaleString('en-US')} THB / hr` : 'N/A';
+    }
+    
+    const salary = Number(job.baseSalary || job.rate || 0);
+    const hours = Number(job.standardDayHours || 8);
+    
+    return salary > 0 ? `${salary.toLocaleString('en-US')} THB / mo (${hours}h/day)` : 'N/A';
+};
 
 export default function MyProfilePage({ staffProfile }) {
     const [isSalaryVisible, setIsSalaryVisible] = useState(false);
@@ -19,20 +45,18 @@ export default function MyProfilePage({ staffProfile }) {
         return <p className="text-center text-gray-400">Loading profile information...</p>;
     }
 
-    const currentJob = getCurrentJob(staffProfile);
+    const currentJob = getRobustCurrentJob(staffProfile);
     const displayName = staffProfile.firstName ? `${staffProfile.firstName} ${staffProfile.lastName}` : staffProfile.fullName;
 
-    // --- Bank details: prefer new split fields, fallback to legacy combined field ---
     const bankAccountDisplay = staffProfile.bankName && staffProfile.bankAccountNumber
         ? `${staffProfile.bankName} - ${staffProfile.bankAccountNumber}`
         : (staffProfile.bankAccount || '-');
 
-    // --- NEW: Expiring Documents Logic ---
     const visibleDocs = (staffProfile.documents || []).filter(doc => doc.isVisibleToStaff !== false);
     const expiringDocs = visibleDocs.filter(doc => {
         if (!doc.expiryDate) return false;
         const daysLeft = Math.ceil((new Date(doc.expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
-        return daysLeft <= 30; // Triggers if expired or expiring in 30 days
+        return daysLeft <= 30; 
     });
 
     return (
@@ -41,7 +65,6 @@ export default function MyProfilePage({ staffProfile }) {
                 <h2 className="text-2xl md:text-3xl font-bold text-white">My Profile</h2>
             </div>
 
-            {/* --- NEW: The Flashing Red Alert Banner --- */}
             {expiringDocs.length > 0 && (
                 <div className="mb-8 p-4 bg-red-900/40 border border-red-500 rounded-lg flex items-start animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.3)]">
                     <AlertTriangle className="h-6 w-6 text-red-500 mr-3 flex-shrink-0 mt-0.5" />
@@ -60,7 +83,6 @@ export default function MyProfilePage({ staffProfile }) {
             )}
 
             <div className="space-y-8">
-                {/* Personal & Contact Information Card */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white mb-6 border-b border-gray-700 pb-4">Personal &amp; Contact Information</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
@@ -69,14 +91,27 @@ export default function MyProfilePage({ staffProfile }) {
                         <InfoRow label="Email Address" value={staffProfile.email} />
                         <InfoRow label="Phone Number" value={staffProfile.phoneNumber} />
                         <InfoRow label="Birthdate" value={dateUtils.formatDisplayDate(staffProfile.birthdate)} />
-                        <div className="md:col-span-2"><InfoRow label="Bank Account" value={bankAccountDisplay} /></div>
+                        
+                        <div className="md:col-span-2 border-t border-gray-700 pt-4 mt-2">
+                            <h4 className="text-sm font-bold text-indigo-400 mb-4">Social Security (SSO)</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                <InfoRow label="SSO Status" value={staffProfile.isSsoRegistered !== false ? 'Enrolled' : 'Not Enrolled'} />
+                                {staffProfile.isSsoRegistered !== false && (
+                                    <>
+                                        <InfoRow label="Social Security ID" value={staffProfile.ssoId || '-'} />
+                                        <InfoRow label="SSO Allowance" value={staffProfile.receivesSsoAllowance !== false ? 'Covered by Company' : 'Paid by Staff'} />
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="md:col-span-2 border-t border-gray-700 pt-4 mt-2"><InfoRow label="Bank Account" value={bankAccountDisplay} /></div>
                         <div className="md:col-span-2"><InfoRow label="Address" value={staffProfile.address} /></div>
                         <InfoRow label="Emergency Contact Name" value={staffProfile.emergencyContactName} />
                         <InfoRow label="Emergency Contact Phone" value={staffProfile.emergencyContactPhone} />
                     </div>
                 </div>
 
-                {/* Employment Information Card */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white mb-6 border-b border-gray-700 pb-4">Employment Information</h3>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
@@ -89,7 +124,7 @@ export default function MyProfilePage({ staffProfile }) {
                              <div>
                                 <p className="text-sm font-medium text-gray-400">Current Pay Rate</p>
                                 <div className="mt-1 flex items-center space-x-3">
-                                    <p className="text-lg text-white">{isSalaryVisible ? formatRate(currentJob) : `***** THB`}</p>
+                                    <p className="text-lg text-white">{isSalaryVisible ? formatPayRate(currentJob) : `***** THB`}</p>
                                     <button onClick={() => setIsSalaryVisible(!isSalaryVisible)} className="text-gray-400 hover:text-white transition-colors">
                                         {isSalaryVisible ? <EyeOffIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
                                     </button>
@@ -99,14 +134,12 @@ export default function MyProfilePage({ staffProfile }) {
                     </div>
                 </div>
 
-                {/* Official Documents Card */}
                 <div className="bg-gray-800 rounded-lg shadow-lg p-6">
                     <h3 className="text-xl font-semibold text-white mb-6 border-b border-gray-700 pb-4">Official Documents</h3>
                     
                     {visibleDocs.length > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {visibleDocs.map((doc, index) => {
-                                // Check expiry specifically for highlighting the bad ones
                                 let isExpiring = false;
                                 if (doc.expiryDate) {
                                     const daysLeft = Math.ceil((new Date(doc.expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
