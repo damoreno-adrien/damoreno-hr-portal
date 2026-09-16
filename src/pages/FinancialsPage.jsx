@@ -14,12 +14,14 @@ import * as dateUtils from '../utils/dateUtils';
 import FinancialSummaryCard from '../components/Financials/FinancialSummaryCard';
 import ApproveLoanDateModal from '../components/Financials/ApproveLoanDateModal';
 import TransactionRow from '../components/Financials/TransactionRow';
-import { exportFinancialsPDF } from '../utils/pdfExport';
 import ManualPaymentModal from '../components/Financials/ManualPaymentModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 import PromptModal from '../components/common/PromptModal';
 import StaffSearchAutocomplete from '../components/common/StaffSearchAutocomplete';
 import { generateDocument, translateNumber } from '../utils/documentGenerator';
+
+// NOUVEAU COMPOSANT
+import FinancialsExportOptionsModal from '../components/Financials/FinancialsExportOptionsModal';
 
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const years = [new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2];
@@ -30,7 +32,6 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
     const [slideOverStaffId, setSlideOverStaffId] = useState('');
     const [activeTab, setActiveTab] = useState('all');
 
-    // Configurations de tri distinctes
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
     const [pendingSortConfig, setPendingSortConfig] = useState({ key: 'date', direction: 'desc' });
 
@@ -44,6 +45,11 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
     const [loanToApprove, setLoanToApprove] = useState(null);
     const [adminBranchIds, setAdminBranchIds] = useState([]);
     const [companyConfig, setCompanyConfig] = useState(null);
+
+    // --- NOUVEAUX ETATS POUR L'EXPORT MODAL ---
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [exportTargetTab, setExportTargetTab] = useState('all');
+    const [exportData, setExportData] = useState([]);
 
     const [promptState, setPromptState] = useState({
         isOpen: false, title: '', message: '', placeholder: '', onConfirm: null, onCancel: null
@@ -78,7 +84,6 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
         return allowedStaffList.filter(s => s.status !== 'inactive');
     }, [allowedStaffList]);
 
-    // --- TRI DES TRANSACTIONS EN ATTENTE ---
     const displayedPendingTransactions = useMemo(() => {
         return [...pendingTransactions].sort((a, b) => {
             let aVal = a[pendingSortConfig.key], bVal = b[pendingSortConfig.key];
@@ -90,7 +95,6 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
         });
     }, [pendingTransactions, pendingSortConfig]);
 
-    // --- TRI DES TRANSACTIONS MENSUELLES (RECORDS) ---
     const displayedMonthlyTransactions = useMemo(() => {
         let filtered = monthlyTransactions;
         if (activeTab === 'advances') filtered = monthlyTransactions.filter(tx => tx.category === 'advance');
@@ -110,20 +114,11 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
     const handleSort = (key) => setSortConfig({ key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
     const handlePendingSort = (key) => setPendingSortConfig({ key, direction: pendingSortConfig.direction === 'asc' ? 'desc' : 'asc' });
 
-    const handleExportPDF = () => {
-        exportFinancialsPDF({ activeTab, displayedMonthlyTransactions, payPeriod, months, activeBranch, companyConfig });
-    };
-
-    // Nouvelle fonction d'exportation pour les Pending Requests
-    const handleExportPendingPDF = () => {
-        exportFinancialsPDF({
-            activeTab: 'pending',
-            displayedMonthlyTransactions: displayedPendingTransactions,
-            payPeriod,
-            months,
-            activeBranch,
-            companyConfig
-        });
+    // --- REMPLACEMENT PAR L'OUVERTURE DE LA MODALE ---
+    const openExportModal = (targetTab, data) => {
+        setExportTargetTab(targetTab);
+        setExportData(data);
+        setIsExportModalOpen(true);
     };
 
     const triggerEdit = (e, entity, type) => {
@@ -150,20 +145,14 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
 
     const handleApproveLoan = (e, id) => { e.stopPropagation(); setLoanToApprove(id); };
     const confirmLoanApproval = async (id, startDate) => {
-        // 1. Find the specific loan from pending transactions before approving
         const loan = pendingTransactions.find(tx => tx.id === id);
-
-        // 2. Update Firestore to set the loan to active
         updateRecord('loans', id, { status: 'active', startDate });
 
-        // 3. Generate the document if the loan and staff data exist
         if (loan && loan.raw) {
             const staffProfile = staffList.find(s => s.id === loan.raw.staffId);
-
             if (staffProfile) {
                 const totalAmount = Number(loan.raw.totalAmount) || 0;
                 const monthlyRepayment = Number(loan.raw.monthlyRepayment) || 0;
-
                 await generateDocument('loan_agreement', staffProfile, companyConfig, {
                     LOAN_REASON: loan.raw.loanName || "Personal Loan",
                     TOTAL_LOAN_AMOUNT: totalAmount.toLocaleString(),
@@ -174,8 +163,6 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
                 });
             }
         }
-
-        // 4. Close the modal
         setLoanToApprove(null);
     };
 
@@ -197,10 +184,7 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
         e.stopPropagation();
 
         const staffProfile = staffList.find(s => s.id === loanRaw.staffId);
-        if (!staffProfile) {
-            console.error("Staff profile not found for document generation.");
-            return;
-        }
+        if (!staffProfile) return;
 
         const totalAmount = Number(loanRaw.totalAmount) || 0;
         const monthlyRepayment = Number(loanRaw.monthlyRepayment) || 0;
@@ -218,6 +202,17 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
 
     return (
         <div className="pb-20">
+            {/* INJECTION DE LA MODALE D'EXPORT */}
+            <FinancialsExportOptionsModal
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                transactions={exportData}
+                exportTargetTab={exportTargetTab}
+                activeBranch={activeBranch}
+                companyConfig={companyConfig}
+                payPeriod={payPeriod}
+            />
+
             <PromptModal isOpen={promptState.isOpen} title={promptState.title} message={promptState.message} placeholder={promptState.placeholder} onConfirm={promptState.onConfirm} onCancel={promptState.onCancel} confirmText="Reject Request" />
             <ApproveLoanDateModal isOpen={!!loanToApprove} onClose={() => setLoanToApprove(null)} onApprove={confirmLoanApproval} loanId={loanToApprove} />
             <ManualPaymentModal isOpen={isManualPaymentOpen} onClose={() => setIsManualPaymentOpen(false)} loan={loanForPayment} db={db} />
@@ -240,7 +235,6 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
                     </div>
                 </div>
 
-                {/* BARRE DE FILTRAGE DES CONTEXTES ET AUTOCOMPLETE */}
                 <div className="flex flex-col sm:flex-row w-full md:w-auto gap-2 items-start sm:items-center">
                     <StaffSearchAutocomplete
                         staffList={staffForDropdown}
@@ -261,8 +255,8 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
                         <h3 className="text-lg font-bold text-amber-400 flex items-center">
                             <AlertCircle className="w-5 h-5 mr-2" /> Action Required (Pending Requests)
                         </h3>
-                        <button onClick={handleExportPendingPDF} className="flex items-center px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-sm shadow-lg transition-colors">
-                            <Download className="w-4 h-4 mr-2" /> Export PDF
+                        <button onClick={() => openExportModal('pending', displayedPendingTransactions)} className="flex items-center px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-sm shadow-lg transition-colors">
+                            <Download className="w-4 h-4 mr-2" /> Export
                         </button>
                     </div>
                     <div className="bg-gray-800 rounded-lg shadow-lg overflow-x-auto border border-amber-500/30">
@@ -294,8 +288,8 @@ export default function FinancialsPage({ staffList, db, activeBranch, userRole }
             <section className="mb-10 animate-in fade-in duration-300">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-xl font-semibold text-white mb-4">Records for {months[payPeriod.month - 1]} {payPeriod.year}</h3>
-                    <button onClick={handleExportPDF} disabled={displayedMonthlyTransactions.length === 0} className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white rounded-lg font-bold text-sm shadow-lg transition-colors">
-                        <Download className="w-4 h-4 mr-2" /> Export PDF
+                    <button onClick={() => openExportModal(activeTab, displayedMonthlyTransactions)} disabled={displayedMonthlyTransactions.length === 0} className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-600 text-white rounded-lg font-bold text-sm shadow-lg transition-colors">
+                        <Download className="w-4 h-4 mr-2" /> Advanced Export
                     </button>
                 </div>
                 {isLoading ? (
