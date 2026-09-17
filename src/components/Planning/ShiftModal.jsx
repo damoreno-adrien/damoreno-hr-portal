@@ -9,29 +9,29 @@ import ConfirmModal from '../common/ConfirmModal';
 
 export default function ShiftModal({ isOpen, onClose, db, data, companyConfig }) {
     const { staff, date, shift } = data || {};
-    const [startTime, setStartTime] = useState(shift?.startTime || "14:00");
+    
+    // NOUVEAU : Lecture du Standard Start Time depuis les Settings de la branche
+    const branchOverrides = companyConfig?.branchSettings?.[staff?.branchId] || {};
+    const defaultStart = branchOverrides.standardStartTime || companyConfig?.standardStartTime || "14:00";
+    
+    const [startTime, setStartTime] = useState(shift?.startTime || defaultStart);
     const [endTime, setEndTime] = useState(shift?.endTime || "23:00");
     
-    // --- NOUVEAU : Gestion numérique de la pause ---
     const [breakMinutes, setBreakMinutes] = useState(60); 
     const [loading, setLoading] = useState(false);
 
     const [feedbackModal, setFeedbackModal] = useState(null);
     const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, onCancel: null });
 
-    // Initialisation intelligente de la pause
     useEffect(() => {
         if (!isOpen || !data) return;
 
-        // 1. Si le shift existe déjà, on prend sa valeur
         if (shift?.breakMinutes !== undefined) {
             setBreakMinutes(shift.breakMinutes);
         } 
-        // 2. Rétrocompatibilité (anciens shifts avec juste true/false)
         else if (shift?.includesBreak === false) {
             setBreakMinutes(0);
         } 
-        // 3. Nouveau shift : on cherche la valeur par défaut de la branche
         else {
             const branchOverrides = companyConfig?.branchSettings?.[staff?.branchId] || {};
             const defaultBreak = branchOverrides.breakDurationMinutes !== undefined 
@@ -56,8 +56,8 @@ export default function ShiftModal({ isOpen, onClose, db, data, companyConfig })
                 date: date,
                 startTime,
                 endTime,
-                breakMinutes: finalBreakMins,                  // <-- Nouvelle donnée précise
-                includesBreak: finalBreakMins > 0,             // <-- Rétrocompatibilité maintenue
+                breakMinutes: finalBreakMins,                  
+                includesBreak: finalBreakMins > 0,             
                 type: "work",        
                 source: "manual",    
                 branchId: staff.branchId || null,
@@ -125,7 +125,6 @@ export default function ShiftModal({ isOpen, onClose, db, data, companyConfig })
                             </div>
                         </div>
 
-                        {/* NOUVELLE UI POUR LA PAUSE NUMÉRIQUE */}
                         <div className={`p-4 rounded-xl border transition-all ${breakMinutes > 0 ? 'bg-gray-900 border-gray-700' : 'bg-amber-500/5 border-amber-500/30'}`}>
                             <div className="flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3">

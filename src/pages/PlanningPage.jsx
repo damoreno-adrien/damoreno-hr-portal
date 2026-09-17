@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, writeBatch, doc, getDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; // <-- NEW
+import { getAuth } from 'firebase/auth'; 
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app } from "../../firebase.js"
 import useWeeklyPlannerData from '../hooks/useWeeklyPlannerData';
@@ -19,6 +19,9 @@ import * as dateUtils from '../utils/dateUtils';
 import Modal from '../components/common/Modal.jsx';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
 import ShiftCreator from '../components/Planning/ShiftCreator.jsx';
+
+// NOUVEAU COMPOSANT
+import PlanningExportModal from '../components/Planning/PlanningExportModal.jsx';
 
 const DEPT_STYLES = {
     'Service': { border: 'border-l-4 border-l-blue-500', text: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -50,6 +53,9 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
     const [selectedAttendance, setSelectedAttendance] = useState(null);
 
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+    
+    // NOUVEL ETAT
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
 
@@ -99,7 +105,6 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
         setShowBulkCreator(true);
     };
 
-    // --- THE SECURITY LAYER: Fetch user's assigned branches ---
     const [adminBranchIds, setAdminBranchIds] = useState([]);
 
     useEffect(() => {
@@ -115,7 +120,6 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
         if (!staffList || !weekDates || weekDates.length === 0) return {};
         let activeStaff = staffList.filter(s => dateUtils.isStaffActiveOnDate(s, weekDates[0].dateObject));
 
-        // --- THE FILTER LAYER: Enforce "All My Branches" Security ---
         if (activeBranch === 'global') {
             if (userRole === 'admin') activeStaff = activeStaff.filter(s => adminBranchIds.includes(s.branchId));
         } else if (activeBranch) {
@@ -138,7 +142,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
             });
         });
         return groups;
-    }, [staffList, sortOrder, weekDates, activeBranch, userRole, adminBranchIds]); // <-- FIXED DEPENDENCY ARRAY!
+    }, [staffList, sortOrder, weekDates, activeBranch, userRole, adminBranchIds]); 
 
     const currentUserDept = useMemo(() => {
         if (userRole !== 'dept_manager' || !staffProfile) return null;
@@ -201,6 +205,17 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
 
     return (
         <div className="space-y-6 animate-fadeIn h-[calc(100vh-100px)] flex flex-col">
+            
+            <PlanningExportModal 
+                isOpen={isExportModalOpen} 
+                onClose={() => setIsExportModalOpen(false)} 
+                db={db}
+                staffList={staffList}
+                activeBranch={activeBranch}
+                currentWeekDates={weekDates}
+                companyConfig={companyConfig}
+            />
+
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gray-800 p-5 rounded-2xl border border-gray-700 shadow-lg flex-shrink-0">
                 <div className="flex flex-col md:flex-row md:items-center gap-6">
                     <div className="space-y-1 min-w-[200px]">
@@ -264,9 +279,14 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
+                    <button onClick={() => setIsExportModalOpen(true)} className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-gray-700 text-gray-300 rounded-xl text-sm font-bold border border-gray-700 transition-all shadow-sm">
+                        <Download className="w-4 h-4 text-indigo-400" /> Export Matrix
+                    </button>
+                    
                     <button onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')} className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold border border-gray-700 transition-all">
                         <ArrowUpDown className="w-4 h-4 text-indigo-400" /> {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}
                     </button>
+                    
                     <button
                         onClick={() => {
                             setBulkCreatorProps({
@@ -283,11 +303,11 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
             </div>
 
             <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl relative flex-grow overflow-hidden flex flex-col">
-                <div className="overflow-auto flex-grow h-full">
+                <div className="overflow-auto flex-grow h-full custom-scrollbar">
                     <table className="w-full text-left border-collapse min-w-[1200px]">
-                        <thead className="sticky top-0 z-30">
+                        <thead className="sticky top-0 z-10">
                             <tr className="bg-gray-900 shadow-md">
-                                <th className="p-5 border-b border-gray-700 text-[10px] font-black text-gray-500 uppercase w-56 sticky left-0 top-0 z-40 bg-gray-900">
+                                <th className="p-5 border-b border-gray-700 text-[10px] font-black text-gray-500 uppercase w-56 sticky left-0 top-0 z-20 bg-gray-900">
                                     Team Member
                                 </th>
                                 {weekDates.map(date => {
@@ -308,7 +328,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                 return (
                                     <React.Fragment key={category}>
                                         <tr className="bg-gray-900/40">
-                                            <td colSpan={8} className={`px-5 py-2 text-[11px] font-black uppercase tracking-[0.2em] border-y border-gray-700/50 ${style.text} sticky left-0 z-10 bg-gray-900/90 backdrop-blur`}>
+                                            <td colSpan={8} className={`px-5 py-2 text-[11px] font-black uppercase tracking-[0.2em] border-y border-gray-700/50 ${style.text} sticky left-0 z-[5] bg-gray-900/90 backdrop-blur`}>
                                                 {category}
                                             </td>
                                         </tr>
@@ -319,7 +339,7 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
                                                 <tr key={staff.id} className="hover:bg-indigo-500/5 transition-colors group text-sm">
                                                     <td
                                                         onClick={() => handleStaffNameClick(staff)}
-                                                        className={`p-4 sticky left-0 z-20 bg-gray-800 group-hover:bg-[#1f2937] transition-colors shadow-[4px_0_10px_rgba(0,0,0,0.3)] ${style.border} cursor-pointer hover:brightness-110 active:scale-[0.98]`}
+                                                        className={`p-4 sticky left-0 z-[5] bg-gray-800 group-hover:bg-[#1f2937] transition-colors shadow-[4px_0_10px_rgba(0,0,0,0.3)] ${style.border} cursor-pointer hover:brightness-110 active:scale-[0.98]`}
                                                         title="Click to plan schedule for this week"
                                                     >
                                                         <div className="flex items-center gap-3">
@@ -436,21 +456,6 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
             {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} companyConfig={companyConfig} activeBranch={activeBranch} />}
             {selectedAttendance && <Modal isOpen={true} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} title="Attendance Correction"><EditAttendanceModal db={db} record={selectedAttendance} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} /></Modal>}
 
-            {showBulkCreator && (
-                <Modal isOpen={true} onClose={() => { setShowBulkCreator(false); setBulkCreatorProps({}); }} title="Bulk Generator">
-                    <ShiftCreator
-                        db={db}
-                        staffList={staffList}
-                        userRole={userRole}
-                        existingWeekData={bulkCreatorProps.initialStaffId ? weekData[bulkCreatorProps.initialStaffId] : null} // <-- Ajouté
-                        onSuccess={() => { setShowBulkCreator(false); setBulkCreatorProps({}); refetchWeekData(); }}
-                        {...bulkCreatorProps}
-                        activeBranch={activeBranch}
-                        branches={companyConfig?.branches || []}
-                        companyConfig={companyConfig}
-                    />
-                </Modal>
-            )}
         </div>
     );
 }

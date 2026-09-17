@@ -9,13 +9,30 @@ import FeedbackModal from '../common/FeedbackModal';
 export default function ShiftCreator({ db, staffList, userRole, existingWeekData, onSuccess, initialStaffId, initialStartDate, initialEndDate, activeBranch, branches = [], companyConfig }) {
     const isManager = ['admin', 'manager', 'super_admin'].includes(userRole);
 
-    // --- LECTURE DU DEFAULT BREAK SELON LA BRANCHE ---
-    const defaultBreak = useMemo(() => {
-        const branchOverrides = companyConfig?.branchSettings?.[activeBranch] || {};
-        if (branchOverrides.breakDurationMinutes !== undefined) return parseInt(branchOverrides.breakDurationMinutes);
-        if (companyConfig?.breakDurationMinutes !== undefined) return parseInt(companyConfig.breakDurationMinutes);
-        return 60; // Fallback absolu
-    }, [companyConfig, activeBranch]);
+    // 1. Filtrage et tri avancé du Staff
+    const activeStaff = useMemo(() => {
+        let filtered = staffList?.filter(s => s.status !== 'inactive' && s.status !== 'archived') || [];
+        if (activeBranch && activeBranch !== 'global') {
+            filtered = filtered.filter(s => s.branchId === activeBranch);
+        }
+        return filtered.sort((a, b) => {
+            const nameA = (a.nickname || a.firstName || '').toLowerCase();
+            const nameB = (b.nickname || b.firstName || '').toLowerCase();
+            return nameA.localeCompare(nameB);
+        });
+    }, [staffList, activeBranch]);
+
+    const [selectedStaffId, setSelectedStaffId] = useState(initialStaffId || "");
+    const selectedStaff = useMemo(() => activeStaff.find(s => s.id === selectedStaffId), [activeStaff, selectedStaffId]);
+
+    // 2. Déduction intelligente des Settings selon le Staff sélectionné
+    const branchOverrides = useMemo(() => {
+        const bId = selectedStaff?.branchId || (activeBranch !== 'global' ? activeBranch : null);
+        return companyConfig?.branchSettings?.[bId] || {};
+    }, [selectedStaff, activeBranch, companyConfig]);
+
+    const defaultBreak = branchOverrides.breakDurationMinutes !== undefined ? parseInt(branchOverrides.breakDurationMinutes) : (companyConfig?.breakDurationMinutes !== undefined ? parseInt(companyConfig.breakDurationMinutes) : 60);
+    const defaultStart = branchOverrides.standardStartTime || companyConfig?.standardStartTime || "14:00";
 
     const getNextWeekBounds = () => {
         const today = new Date();
@@ -28,29 +45,29 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
 
     const defaults = getNextWeekBounds();
 
-    const [selectedStaffId, setSelectedStaffId] = useState(initialStaffId || "");
     const [startDate, setStartDate] = useState(initialStartDate || defaults.start);
     const [endDate, setEndDate] = useState(initialEndDate || defaults.end);
     const [loading, setLoading] = useState(false);
 
-    const [globalStart, setGlobalStart] = useState("14:00");
+    // 3. Variables de l'Auto-Fill (synchronisées avec les defaults)
+    const [globalStart, setGlobalStart] = useState(defaultStart);
     const [globalEnd, setGlobalEnd] = useState("23:00");
+    const [globalBreak, setGlobalBreak] = useState(defaultBreak);
     const [isAllSelected, setIsAllSelected] = useState(false);
 
-    // Remplacement de "break: true" par "breakMinutes: defaultBreak"
-    const defaultDay = { selected: false, schedActive: false, attActive: false, start: "14:00", end: "23:00", breakMinutes: defaultBreak, attStart: "14:00", attEnd: "23:00" };
+    useEffect(() => {
+        setGlobalStart(defaultStart);
+        setGlobalBreak(defaultBreak);
+    }, [defaultStart, defaultBreak]);
+
+    const defaultDay = { selected: false, schedActive: false, attActive: false, start: defaultStart, end: "23:00", breakMinutes: defaultBreak, attStart: defaultStart, attEnd: "23:00" };
     const [weekPattern, setWeekPattern] = useState({ 0: { ...defaultDay }, 1: { ...defaultDay }, 2: { ...defaultDay }, 3: { ...defaultDay }, 4: { ...defaultDay }, 5: { ...defaultDay }, 6: { ...defaultDay } });
 
     const [feedbackModal, setFeedbackModal] = useState(null);
 
     const daysOrder = [
-        { name: "Monday", idx: 1 },
-        { name: "Tuesday", idx: 2 },
-        { name: "Wednesday", idx: 3 },
-        { name: "Thursday", idx: 4 },
-        { name: "Friday", idx: 5 },
-        { name: "Saturday", idx: 6 },
-        { name: "Sunday", idx: 0 }
+        { name: "Monday", idx: 1 }, { name: "Tuesday", idx: 2 }, { name: "Wednesday", idx: 3 },
+        { name: "Thursday", idx: 4 }, { name: "Friday", idx: 5 }, { name: "Saturday", idx: 6 }, { name: "Sunday", idx: 0 }
     ];
 
     useEffect(() => {
@@ -77,10 +94,9 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
 
                     newPattern[dayIdx].selected = true;
                     newPattern[dayIdx].schedActive = true;
-                    newPattern[dayIdx].start = data.startTime || "14:00";
+                    newPattern[dayIdx].start = data.startTime || defaultStart;
                     newPattern[dayIdx].end = data.endTime || "23:00";
                     
-                    // Rétrocompatibilité + Nouvelle logique
                     newPattern[dayIdx].breakMinutes = data.breakMinutes !== undefined ? data.breakMinutes : (data.includesBreak === false ? 0 : defaultBreak);
                 });
 
@@ -105,17 +121,11 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
         };
 
         fetchExistingData();
-    }, [selectedStaffId, startDate, endDate, db, defaultBreak]);
+    }, [selectedStaffId, startDate, endDate, db, defaultBreak, defaultStart]);
 
     useEffect(() => {
         setIsAllSelected(Object.values(weekPattern).every(d => d.selected));
     }, [weekPattern]);
-
-    const activeStaff = useMemo(() => {
-        let filtered = staffList?.filter(s => s.status !== 'inactive') || [];
-        if (activeBranch && activeBranch !== 'global') filtered = filtered.filter(s => s.branchId === activeBranch);
-        return filtered;
-    }, [staffList, activeBranch]);
 
     const handleStartDateChange = (e) => {
         const newStart = e.target.value;
@@ -140,7 +150,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
             let diff = (eh * 60 + em) - (sh * 60 + sm);
             if (diff < 0) diff += 1440;
             
-            // Auto-ajustement intelligent de la pause (7 heures = 420 mins)
             if (diff < 420) {
                 newPattern.breakMinutes = 0;
             } else if (newPattern.breakMinutes === 0 && diff >= 420) {
@@ -169,12 +178,7 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                     updated[idx].schedActive = true;
                     updated[idx].start = globalStart;
                     updated[idx].end = globalEnd;
-
-                    const [sh, sm] = globalStart.split(':').map(Number);
-                    const [eh, em] = globalEnd.split(':').map(Number);
-                    let diff = (eh * 60 + em) - (sh * 60 + sm);
-                    if (diff < 0) diff += 1440;
-                    updated[idx].breakMinutes = diff >= 420 ? defaultBreak : 0;
+                    updated[idx].breakMinutes = parseInt(globalBreak) || 0; // Utilisation du Auto-Fill Break
                 }
             });
             return updated;
@@ -230,7 +234,7 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                             staffId: selectedStaffId, staffName: staff.nickname || staff.firstName,
                             date: dateStr, startTime: pattern.start, endTime: pattern.end,
                             breakMinutes: breakMins,
-                            includesBreak: breakMins > 0, // Rétrocompatibilité
+                            includesBreak: breakMins > 0, 
                             type: 'work',               
                             source: 'bulk_generator',   
                             branchId: staff.branchId || null, updatedAt: new Date()
@@ -245,7 +249,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                             const checkIn = new Date(`${dateStr}T${pattern.attStart}:00`);
                             const checkOut = new Date(`${dateStr}T${pattern.attEnd}:00`);
                             
-                            // Logique simple pour l'attendance J+1 en bulk (si le out est plus petit que le in)
                             if (checkOut < checkIn) checkOut.setDate(checkOut.getDate() + 1);
 
                             batch.set(attRef, {
@@ -274,6 +277,16 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
         finally { setLoading(false); }
     };
 
+    const getStaffLabel = (s) => {
+        const fullName = `${s.firstName || ''} ${s.lastName || ''}`.trim() || s.fullName || '';
+        const namePart = s.nickname ? `${s.nickname} (${fullName})` : fullName;
+        if (activeBranch === 'global' && s.branchId) {
+            const bName = branches.find(b => b.id === s.branchId)?.name || s.branchId;
+            return `${namePart} - ${bName.replace('Da Moreno ', '')}`;
+        }
+        return namePart;
+    };
+
     return (
         <div className="space-y-6 relative">
             <FeedbackModal
@@ -289,7 +302,7 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                     <label className="text-[10px] font-bold text-gray-500 uppercase">Staff Member</label>
                     <select value={selectedStaffId} onChange={e => setSelectedStaffId(e.target.value)} className="bg-gray-800 text-white rounded p-2 border border-gray-700 outline-none focus:border-indigo-500 transition-colors">
                         <option value="">Select...</option>
-                        {activeStaff.map(s => <option key={s.id} value={s.id}>{s.nickname || s.firstName}</option>)}
+                        {activeStaff.map(s => <option key={s.id} value={s.id}>{getStaffLabel(s)}</option>)}
                     </select>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -315,6 +328,20 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                     <input type="time" value={globalStart} onChange={e => setGlobalStart(e.target.value)} className="bg-gray-900 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-indigo-500 outline-none [color-scheme:dark]" />
                     <span className="text-gray-500">-</span>
                     <input type="time" value={globalEnd} onChange={e => setGlobalEnd(e.target.value)} className="bg-gray-900 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-indigo-500 outline-none [color-scheme:dark]" />
+                    
+                    <div className="flex items-center bg-gray-900 rounded border border-gray-700 focus-within:border-indigo-500 overflow-hidden" title="Break duration in minutes">
+                        <div className={`p-1.5 flex items-center justify-center ${globalBreak > 0 ? 'bg-gray-800 text-gray-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                            {globalBreak > 0 ? <Coffee className="w-3.5 h-3.5" /> : <Flame className="w-3.5 h-3.5" />}
+                        </div>
+                        <input 
+                            type="number" 
+                            value={globalBreak} 
+                            onChange={e => setGlobalBreak(e.target.value)}
+                            className="w-12 bg-transparent text-white text-xs p-1.5 text-center outline-none [color-scheme:dark]"
+                            min="0"
+                            step="5"
+                        />
+                    </div>
 
                     <button onClick={applyGlobalSchedule} className="flex-1 md:flex-none text-xs font-bold bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-3 py-2 rounded-lg transition-colors flex items-center justify-center">
                         <Calendar className="w-3 h-3 mr-2" /> Fill Schedules
@@ -347,7 +374,6 @@ export default function ShiftCreator({ db, staffList, userRole, existingWeekData
                                     <span className="text-gray-600">-</span>
                                     <input type="time" value={weekPattern[idx].end} onChange={e => handlePatternChange(idx, 'end', e.target.value)} className="bg-gray-900 text-white text-xs p-1.5 rounded-lg border border-gray-700 focus:border-indigo-500 outline-none [color-scheme:dark]" />
                                     
-                                    {/* NOUVEL INPUT NUMERIQUE POUR LA PAUSE */}
                                     <div className="flex items-center ml-2 bg-gray-900 rounded-lg border border-gray-700 focus-within:border-indigo-500 overflow-hidden" title="Break duration in minutes">
                                         <div className={`p-1.5 flex items-center justify-center ${weekPattern[idx].breakMinutes > 0 ? 'bg-gray-800 text-gray-500' : 'bg-amber-500/10 text-amber-500'}`}>
                                             {weekPattern[idx].breakMinutes > 0 ? <Coffee className="w-3.5 h-3.5" /> : <Flame className="w-3.5 h-3.5" />}
