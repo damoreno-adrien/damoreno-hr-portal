@@ -3,6 +3,7 @@
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { DateTime } from 'luxon';
 import { calculateAttendanceStatus } from './statusUtils';
+import * as dateUtils from './dateUtils'; // <-- Ajout de dateUtils pour lire le endDate correctement
 
 const THAILAND_TIMEZONE = 'Asia/Bangkok';
 const DEFAULT_CHECKOUT_TIME = '23:00:00';
@@ -37,6 +38,15 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
             const dtStart = DateTime.fromJSDate(jsDate, { zone: THAILAND_TIMEZONE });
             if (dtStart.year === year && dtStart.month === month) isFirstMonth = true;
         } catch (e) { console.error("Error parsing staff start date", e); }
+    }
+
+    // NOUVEAU : Récupération propre de la date de fin de contrat
+    let staffEndDateStr = null;
+    if (staff.endDate) {
+        const jsEndDate = dateUtils.fromFirestore(staff.endDate);
+        if (jsEndDate) {
+            staffEndDateStr = dateUtils.formatISODate(jsEndDate);
+        }
     }
 
     const startOfYear = DateTime.fromObject({ year, month: 1, day: 1 }, { zone: THAILAND_TIMEZONE }).toISODate();
@@ -79,7 +89,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     let totalActualMillis = 0;
     let totalScheduledMillis = 0;
     let totalLateMinutes = 0;
-    let totalApprovedLateMinutes = 0; // <-- NOUVEAU: Trace isolée pour la paie
+    let totalApprovedLateMinutes = 0; 
     let totalOtMinutes = 0;
     let totalLatesCount = 0;
     let totalUnexcusedAbsenceCount = 0;
@@ -96,6 +106,10 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
     while (loopDay <= loopUntil) {
         const dateStr = loopDay.toISODate();
         const dateJS = loopDay.toJSDate();
+        
+        // NOUVEAU : Vérifier si ce jour est après la résiliation du contrat
+        const isAfterTermination = staffEndDateStr && dateStr > staffEndDateStr;
+
         const attendance = attendanceMap.get(dateStr);
         const schedule = schedulesMap.get(dateStr);
         const leave = leaveMap.get(dateStr);
@@ -146,16 +160,19 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         if (loopDay <= endOfLoop) {
             const actualLateForBonus = attendance?.manuallyEdited ? approvedLateMinutes : suggestedLateMinutes;
             
-            if (actualLateForBonus > 0) {
+            // CORRECTION : Ignorer les retards si le staff ne fait plus partie de la société
+            if (actualLateForBonus > 0 && !isAfterTermination) {
                 totalLateMinutes += actualLateForBonus;
                 totalLatesCount++;
             }
 
-            // CORRECTION: Seuls les retards validés par le manager sont accumulés pour la paie
-            if (approvedLateMinutes > 0) {
+            // CORRECTION : Ignorer les pénalités si le staff ne fait plus partie de la société
+            if (approvedLateMinutes > 0 && !isAfterTermination) {
                 totalApprovedLateMinutes += approvedLateMinutes;
             }
             
+            // Les heures supp' restent acquises même s'il est techniquement offboardé 
+            // (ex: dernier jour de travail validé plus tard)
             if (approvedOtMinutes > 0) {
                 totalOtMinutes += approvedOtMinutes; 
             }
@@ -169,7 +186,9 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
             else if (status === 'Absent') isAbsent = true;
 
             const isPastMonth = (year < now.year) || (year === now.year && month < now.month);
-            if (isAbsent) {
+            
+            // CORRECTION CRITIQUE : Ignorer l'absence si le jour évalué dépasse la date de fin de contrat
+            if (isAbsent && !isAfterTermination) {
                 if (isPastMonth || loopDay.toISODate() < today) {
                     totalUnexcusedAbsenceCount++;
                     unexcusedAbsenceDates.push(loopDay.toISODate());
@@ -227,7 +246,7 @@ export const calculateMonthlyStats = async (db, staff, payPeriod, companyConfig,
         unexcusedAbsenceDates,
         totalLatesCount,
         totalLateMinutes,
-        totalApprovedLateMinutes, // <-- NOUVEAU
+        totalApprovedLateMinutes,
         totalOtMinutes,
         daysToDeduct,
         isBonusActive, 
