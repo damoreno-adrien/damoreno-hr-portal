@@ -87,7 +87,7 @@ export default function PayrollPage({ db, staffList, companyConfig, activeBranch
 
             {/* MODALE D'HISTORIQUE INDIVIDUELLE */}
             {selectedHistoryDetails && historyPayPeriod && (
-                <Modal isOpen={true} onClose={() => setSelectedHistoryDetails(null)} title={`Payslip for ${selectedHistoryDetails.name || 'Unknown Staff'} (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}>
+                <Modal isOpen={true} onClose={() => setSelectedHistoryDetails(null)} title={`Payslip Details (${historyPayPeriod.monthName} ${historyPayPeriod.year})`}>
                     <PayslipDetailView
                         details={selectedHistoryDetails}
                         companyConfig={resolvedConfig}
