@@ -20,7 +20,6 @@ import Modal from '../components/common/Modal.jsx';
 import EditAttendanceModal from '../components/Attendance/EditAttendanceModal.jsx';
 import ShiftCreator from '../components/Planning/ShiftCreator.jsx';
 
-// NOUVEAU COMPOSANT
 import PlanningExportModal from '../components/Planning/PlanningExportModal.jsx';
 
 const DEPT_STYLES = {
@@ -53,8 +52,6 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
     const [selectedAttendance, setSelectedAttendance] = useState(null);
 
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-    
-    // NOUVEL ETAT
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -456,6 +453,22 @@ export default function PlanningPage({ db, staffList, companyConfig, userRole, s
             {selectedShift && <ShiftModal isOpen={true} onClose={() => { setSelectedShift(null); refetchWeekData(); }} db={db} data={selectedShift} companyConfig={companyConfig} activeBranch={activeBranch} />}
             {selectedAttendance && <Modal isOpen={true} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} title="Attendance Correction"><EditAttendanceModal db={db} record={selectedAttendance} onClose={() => { setSelectedAttendance(null); refetchWeekData(); }} /></Modal>}
 
+            {/* LE BLOC MANQUANT A ETE REMIS ICI */}
+            {showBulkCreator && (
+                <Modal isOpen={true} onClose={() => { setShowBulkCreator(false); setBulkCreatorProps({}); }} title="Bulk Generator">
+                    <ShiftCreator
+                        db={db}
+                        staffList={staffList}
+                        userRole={userRole}
+                        existingWeekData={bulkCreatorProps.initialStaffId ? weekData[bulkCreatorProps.initialStaffId] : null} 
+                        onSuccess={() => { setShowBulkCreator(false); setBulkCreatorProps({}); refetchWeekData(); }}
+                        {...bulkCreatorProps}
+                        activeBranch={activeBranch}
+                        branches={companyConfig?.branches || []}
+                        companyConfig={companyConfig}
+                    />
+                </Modal>
+            )}
         </div>
     );
 }
